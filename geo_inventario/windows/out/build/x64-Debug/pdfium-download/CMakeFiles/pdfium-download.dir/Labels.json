@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/CMakeFiles/pdfium-download"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/CMakeFiles/pdfium-download.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/CMakeFiles/pdfium-download-complete.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-build.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-configure.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-download.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-install.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-mkdir.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-patch.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-test.rule"
+		},
+		{
+			"file" : "C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/pdfium-download/pdfium-download-prefix/src/pdfium-download-stamp/pdfium-download-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"pdfium-download"
+		],
+		"name" : "pdfium-download"
+	}
+}

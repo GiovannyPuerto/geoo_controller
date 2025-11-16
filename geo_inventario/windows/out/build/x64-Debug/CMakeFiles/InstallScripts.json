@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/cmake_install.cmake",
+		"C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/flutter/cmake_install.cmake",
+		"C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/runner/cmake_install.cmake",
+		"C:/Geo_controller/geo_inventario/windows/out/build/x64-Debug/plugins/printing/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
