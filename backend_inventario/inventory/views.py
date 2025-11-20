@@ -1,15 +1,31 @@
 import logging
 import io
 import re
-from decimal import Decimal
+import json
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
+from zipfile import BadZipFile
 
 import pandas as pd
+
+def safe_decimal(value):
+    """
+    Safely converts a value to Decimal, handling empty, None, or invalid values.
+    """
+    if pd.isna(value) or value == '' or str(value).strip() == '':
+        return Decimal('0')
+    try:
+        # Handle Colombian format (comma as decimal separator)
+        cleaned_value = str(value).replace(',', '.').strip()
+        return Decimal(cleaned_value)
+    except (ValueError, TypeError, InvalidOperation):
+        return Decimal('0')
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists, Min
 from django.db.models.functions import Coalesce, TruncMonth
 
@@ -25,6 +41,23 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_inventory(request, inventory_name='default'):
+    """
+    Updates inventory by processing base files and/or update files.
+
+    This function handles the upload and processing of Excel files (.xls or .xlsx) for inventory management.
+    It supports both initial inventory setup (base files) and subsequent updates (update files).
+    The function validates file formats, processes the data, and creates appropriate database records.
+
+    Args:
+        request: Django HttpRequest object containing uploaded files
+        inventory_name (str): Name of the inventory to update (default: 'default')
+
+    Returns:
+        JsonResponse: Success response with batch information and summary, or error response
+
+    Raises:
+        JsonResponse with error details on validation failures or processing errors
+    """
     #Manejo de error en caso de que el usuario no envie el .xlsx
     try:
         inventory_name = str(inventory_name).strip().lower() or 'default'
@@ -33,12 +66,25 @@ def update_inventory(request, inventory_name='default'):
         base_file = request.FILES.get('base_file')
         base_content = b''
         if base_file:
+            # Validate file format and size
+            if not base_file.name.lower().endswith(('.xls', '.xlsx')):
+                return JsonResponse({'ok': False, 'error': 'Formato de archivo base no válido. Solo se permiten archivos .xls o .xlsx'}, status=400)
+            if base_file.size == 0:
+                return JsonResponse({'ok': False, 'error': 'El archivo base está vacío'}, status=400)
             base_content = base_file.read()
 
         update_files = request.FILES.getlist('update_files')
+        update_files_data = []
         update_content = b''
         for update_file in update_files:
-            update_content += update_file.read()
+            # Validate file format and size
+            if not update_file.name.lower().endswith(('.xls', '.xlsx')):
+                return JsonResponse({'ok': False, 'error': f'Formato de archivo de actualización "{update_file.name}" no válido. Solo se permiten archivos .xls o .xlsx'}, status=400)
+            if update_file.size == 0:
+                return JsonResponse({'ok': False, 'error': f'El archivo de actualización "{update_file.name}" está vacío'}, status=400)
+            file_content = update_file.read()
+            update_files_data.append((update_file.name, file_content))
+            update_content += file_content
 
         # Check if base file has been uploaded before
         has_base_data = Product.objects.filter(inventory_name=inventory_name).exists()
@@ -110,61 +156,18 @@ def update_inventory(request, inventory_name='default'):
                 # Eliminar ceros a la izquierda de los códigos de producto en archivo base
                 base_df['codigo'] = base_df['codigo'].str.lstrip('0')
 
-            # Leemos el archivo de actualización con nombres de columnas específicos
-            update_df = None
-            if update_file is not None:
-                update_df = pd.read_excel(
-                    io.BytesIO(update_content),
-                    header=3,  # Row 4 contains headers (index 3)
-                    usecols=[0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21],  # A, C, D, E, N, O, R, S, T, U, V
-                    names=[
-                        'item', 'desc_item', 'localizacion', 'categoria',
-                        'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad'
-                    ],
-                    dtype={
-                        'item': str, 'desc_item': str, 'localizacion': str, 'categoria': str,
-                        'fecha': str, 'documento': str, 'entradas': float, 'salidas': float,
-                        'unitario': float, 'total': float
-                    }
-                )
 
-                logger.info(f"Update DF shape: {update_df.shape}")
-                logger.info(f"Update DF columns: {list(update_df.columns)}")
-                logger.info(f"Update DF head: \n{update_df.head().to_string()}")
 
-                # Convertir fecha de YYYYMMDD a formato legible
-                update_df['fecha'] = update_df['fecha'].astype(str).str.strip()
-                update_df['fecha'] = update_df['fecha'].apply(lambda x: f"{x[:4]}-{x[4:6]}-{x[6:]}" if len(x) == 8 and x.isdigit() else x)
-
-                # Limpiar documento: extraer solo SA/EA y número
-                update_df['documento'] = update_df['documento'].astype(str).str.strip()
-                update_df['documento'] = update_df['documento'].apply(lambda x: re.sub(r'^[^SAEA]*?(SA|EA)', r'\1', x.upper()) if x else x)
-
-                # Limpiamos datos basura como celdas vacías o nulos
-                update_df = update_df.dropna(subset=['item'])  # Remove rows with no code
-                update_df['item'] = update_df['item'].astype(str).str.strip()
-
-                # Limpiar las columnas 'entradas' y 'salidas' para manejar valores decimales
-                update_df['entradas'] = update_df['entradas'].astype(str).str.strip()
-                update_df['entradas'] = update_df['entradas'].str.replace(',', '.', regex=False)
-                update_df['entradas'] = update_df['entradas'].str.replace('[^0-9.-]', '', regex=True)
-                update_df['entradas'] = pd.to_numeric(update_df['entradas'], errors='coerce').fillna(0)
-
-                update_df['salidas'] = update_df['salidas'].astype(str).str.strip()
-                update_df['salidas'] = update_df['salidas'].str.replace(',', '.', regex=False)
-                update_df['salidas'] = update_df['salidas'].str.replace('[^0-9.-]', '', regex=True)
-                update_df['salidas'] = pd.to_numeric(update_df['salidas'], errors='coerce').fillna(0)
-
-                # Limpiar la columna 'cantidad' para manejar valores no numéricos
-                update_df['cantidad'] = update_df['cantidad'].astype(str).str.strip()
-                update_df['cantidad'] = update_df['cantidad'].str.replace(',', '.', regex=False)
-                update_df['cantidad'] = update_df['cantidad'].str.replace('[^0-9.-]', '', regex=True)
-                update_df['cantidad'] = pd.to_numeric(update_df['cantidad'], errors='coerce').fillna(0)
-
+        except BadZipFile as e:
+            logger.error(f"Archivo no es un archivo Excel válido: {str(e)}", exc_info=True)
+            return JsonResponse(
+                {'ok': False, 'error': 'Uno o más archivos no son archivos Excel válidos (.xls o .xlsx). Verifique que los archivos no estén corruptos.'},
+                status=400
+            )
         except Exception as e:
             logger.error(f"Error al leer archivos: {str(e)}", exc_info=True)
             return JsonResponse(
-                {'ok': False, 'error': 'Error al procesar los archivos. Asegúrese de que sean archivos Excel válidos.'}, 
+                {'ok': False, 'error': 'Error al procesar los archivos. Asegúrese de que sean archivos Excel válidos.'},
                 status=400
             )
 
@@ -213,27 +216,94 @@ def update_inventory(request, inventory_name='default'):
 
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0
-        if update_files:
-            for update_file in update_files:
-                update_content = update_file.read()
-                update_df = pd.read_excel(
-                    io.BytesIO(update_content),
-                    header=3,  # Row 4 contains headers (index 3)
-                    usecols=[0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21],  # A, C, D, E, N, O, R, S, T, U, V
-                    names=[
-                        'item', 'desc_item', 'localizacion', 'categoria',
-                        'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad'
-                    ],
-                    dtype={
-                        'item': str, 'desc_item': str, 'localizacion': str, 'categoria': str,
-                        'fecha': str, 'documento': str, 'entradas': float, 'salidas': float,
-                        'unitario': float, 'total': float
-                    }
-                )
+        if update_files_data:
+            for file_name, update_content in update_files_data:
+                # Support both .xlsx and .xls formats for update files
+                # Try flexible reading first, then specific column positions
+                update_df = None
+                read_success = False
 
-                logger.info(f"Update DF shape: {update_df.shape}")
-                logger.info(f"Update DF columns: {list(update_df.columns)}")
-                logger.info(f"Update DF head: \n{update_df.head().to_string()}")
+                # First, try flexible reading with header=3 (row 4)
+                try:
+                    update_df = pd.read_excel(io.BytesIO(update_content), header=3)
+                    logger.info(f"Trying flexible read for '{file_name}' with header=3, columns found: {list(update_df.columns)}")
+                    # Normalize column names to lowercase for case-insensitive matching
+                    update_df.columns = update_df.columns.str.lower().str.strip()
+                    # Rename columns to match expected names using synonyms
+                    column_mapping = {}
+                    synonyms = {
+                        'item': ['item', 'codigo', 'code', 'producto', 'cod', 'código'],
+                        'desc_item': ['desc_item', 'descripcion', 'description', 'desc', 'producto_desc', 'descripción'],
+                        'localizacion': ['localizacion', 'local', 'almacen', 'warehouse', 'location', 'localización'],
+                        'categoria': ['categoria', 'category', 'grupo', 'group', 'tipo', 'categoría'],
+                        'fecha': ['fecha', 'date', 'fecha_mov', 'fecha_documento', 'fecha_registro'],
+                        'documento': ['documento', 'doc', 'document', 'numero_documento', 'número_documento'],
+                        'entradas': ['entradas', 'entrada', 'in', 'input', 'ingreso'],
+                        'salidas': ['salidas', 'salida', 'out', 'output', 'egreso'],
+                        'unitario': ['unitario', 'unit_cost', 'costo_unitario', 'precio_unitario', 'unit', 'costo_unit'],
+                        'total': ['total', 'total_cost', 'valor_total', 'monto'],
+                        'cantidad': ['cantidad', 'quantity', 'qty', 'cant', 'amount'],
+                        'cost_center': ['cost_center', 'centro_costo', 'cc', 'costcenter', 'centro_costo']
+                    }
+                    expected_names = list(synonyms.keys())
+                    for expected in expected_names:
+                        if expected in update_df.columns:
+                            continue  # Already correct
+                        for syn in synonyms[expected]:
+                            if syn in update_df.columns:
+                                column_mapping[syn] = expected
+                                break
+                    update_df.rename(columns=column_mapping, inplace=True)
+                    # Check if required columns are present
+                    required_columns = ['item', 'desc_item', 'localizacion', 'categoria', 'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad']
+                    missing_columns = [col for col in required_columns if col not in update_df.columns]
+                    if not missing_columns:
+                        read_success = True
+                        logger.info(f"Flexible read successful for '{file_name}' with header=3")
+                    else:
+                        logger.warning(f"Flexible read missing columns for '{file_name}': {missing_columns}. Available: {list(update_df.columns)}")
+                except Exception as e:
+                    logger.warning(f"Flexible read failed for '{file_name}': {str(e)}")
+
+                # If flexible read failed, try specific column positions with different headers
+                if not read_success:
+                    header_positions = [0, 1, 2, 3, 4]  # Try row 1 to 5 (indices 0 to 4)
+                    engines = ['xlrd', 'openpyxl', None]  # None lets pandas choose
+
+                    for header_idx in header_positions:
+                        for engine in engines:
+                            try:
+                                kwargs = {
+                                    'header': header_idx,
+                                    'usecols': [0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21, 22],
+                                    'names': [
+                                        'item', 'desc_item', 'localizacion', 'categoria',
+                                        'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad', 'cost_center'
+                                    ],
+                                    'dtype': {
+                                        'item': str, 'desc_item': str, 'localizacion': str, 'categoria': str,
+                                        'fecha': str, 'documento': str, 'entradas': float, 'salidas': float,
+                                        'unitario': float, 'total': float, 'cantidad': float, 'cost_center': str
+                                    }
+                                }
+                                if engine is not None:
+                                    kwargs['engine'] = engine
+
+                                update_df = pd.read_excel(io.BytesIO(update_content), **kwargs)
+                                read_success = True
+                                logger.info(f"Successfully read update file '{file_name}' with specific columns, engine '{engine}' and header row {header_idx + 1}")
+                                break
+                            except Exception as e:
+                                logger.warning(f"Failed specific read with engine '{engine}' and header {header_idx + 1}: {str(e)}")
+                                continue
+                        if read_success:
+                            break
+
+                if not read_success or update_df is None:
+                    return JsonResponse(
+                        {'ok': False, 'error': f"El archivo de actualización '{file_name}' no se pudo leer. Verifique que sea un archivo Excel válido con la estructura esperada."},
+                        status=400
+                    )
 
                 # Convertir fecha de YYYYMMDD a formato legible
                 update_df['fecha'] = update_df['fecha'].astype(str).str.strip()
@@ -302,6 +372,23 @@ def update_inventory(request, inventory_name='default'):
 
 
 def _process_base_file(df, inventory_name):
+    """
+    Processes the base inventory file to create initial product records.
+
+    This function takes a pandas DataFrame from the base Excel file, validates and cleans the data,
+    groups products by code, and creates Product objects in the database. It handles duplicate products
+    across different warehouses by aggregating quantities and values.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing base file data with columns like 'codigo', 'descripcion', etc.
+        inventory_name (str): Name of the inventory to associate products with
+
+    Returns:
+        int: Number of product records processed and created
+
+    Raises:
+        Logs errors for invalid data but continues processing other records
+    """
     #Creamos la base de datos para los productos
     products_to_create = []
     processed_codes = set()
@@ -333,8 +420,6 @@ def _process_base_file(df, inventory_name):
         'unidad_medida': 'first'
     }).reset_index()
 
-    # El costo unitario ya es el último del archivo base, no necesitamos calcular promedio
-    df_grouped['costo_unitario_promedio'] = df_grouped['costo_unitario']
 
     # Crear un DataFrame con información detallada por almacén para productos agrupados
     # Esto permitirá filtrar por almacén en el frontend
@@ -364,8 +449,8 @@ def _process_base_file(df, inventory_name):
                 continue
 
             # traer valores de la fila agrupada
-            cantidad_total = float(row.get('cantidad', 0)) or 0
-            costo_unitario_promedio = float(row.get('costo_unitario_promedio', 0)) or 0
+            cantidad_total = safe_decimal(row.get('cantidad'))
+            costo_unitario = safe_decimal(row.get('costo_unitario'))
             descripcion = row.get('descripcion', '').strip()
 
             if not descripcion:
@@ -378,7 +463,7 @@ def _process_base_file(df, inventory_name):
                 group=map_categoria(str(row.get('grupo', '')).strip()),
                 inventory_name=inventory_name,
                 initial_balance=cantidad_total,
-                initial_unit_cost=costo_unitario_promedio
+                initial_unit_cost=costo_unitario
             ))
 
             processed_codes.add(codigo)
@@ -413,6 +498,24 @@ def _process_base_file(df, inventory_name):
 
 
 def _process_update_file(batch, df, inventory_name):
+    """
+    Processes update files to create inventory movement records.
+
+    This function takes a pandas DataFrame from update Excel files, validates and cleans the data,
+    and creates InventoryRecord objects for each movement. It handles missing products by creating
+    them with zero initial balance if needed.
+
+    Args:
+        batch (ImportBatch): The import batch to associate records with
+        df (pd.DataFrame): DataFrame containing update file data
+        inventory_name (str): Name of the inventory
+
+    Returns:
+        int: Number of inventory records processed and created
+
+    Raises:
+        Logs errors for invalid data but continues processing other records
+    """
     # Creamos la base de datos para movimientos de inventario
     records_to_create = []
     records_processed = 0
@@ -495,12 +598,12 @@ def _process_update_file(batch, df, inventory_name):
 
             # Get quantities - usar la columna 'cantidad' como cantidad final después del movimiento
             try:
-                final_quantity = float(row.get('cantidad', 0)) if pd.notna(row.get('cantidad')) else 0
+                final_quantity = safe_decimal(row.get('cantidad'))
 
                 # Para calcular el movimiento neto, necesitamos el saldo anterior
                 # Pero como no tenemos el saldo anterior aquí, calculamos el movimiento basado en entradas y salidas
-                entradas = float(row.get('entradas', 0)) if pd.notna(row.get('entradas')) else 0
-                salidas = float(row.get('salidas', 0)) if pd.notna(row.get('salidas')) else 0
+                entradas = safe_decimal(row.get('entradas'))
+                salidas = safe_decimal(row.get('salidas'))
                 quantity = entradas - salidas
 
                 if quantity == 0:
@@ -508,8 +611,12 @@ def _process_update_file(batch, df, inventory_name):
                     continue  # Saltamos registros sin movimiento
 
                 # Traemos costos y totales
-                unit_cost = float(row.get('unitario', 0)) if pd.notna(row.get('unitario')) else 0
-                total = float(row.get('total', 0)) if pd.notna(row.get('total')) else (abs(quantity) * unit_cost)
+                unit_cost = safe_decimal(row.get('unitario'))
+                total = safe_decimal(row.get('total')) or (abs(quantity) * unit_cost)
+
+                # Calculate unit_cost from total if missing
+                if unit_cost == 0 and total != 0 and quantity != 0:
+                    unit_cost = total / abs(quantity)
 
                 # FECHA de movimiento - usar la fecha ya convertida
                 date_str = str(row.get('fecha', ''))
@@ -589,69 +696,19 @@ def _process_update_file(batch, df, inventory_name):
 @require_http_methods(["GET"])
 def get_product_analysis(request):
     inventory_name = request.GET.get('inventory_name', 'default')
-    warehouse_filter = request.GET.get('warehouse', '')
     category_filter = request.GET.get('category', '')
-    date_from = request.GET.get('date_from', '')
-    date_to = request.GET.get('date_to', '')
 
     try:
-        # Base query with filters
         products_query = Product.objects.filter(inventory_name=inventory_name)
 
-        # Apply category filter if provided
         if category_filter:
             products_query = products_query.filter(group__icontains=category_filter)
 
-        # ANOTAMOS LOS CAMPOS NECESARIOS
-        products = products_query.annotate(
-            # CALCULAR STOCK ACTUAL: TOMAR EL ÚLTIMO REGISTRO DEL CAMPO CANTIDAD
-            # PERO PARA SALIDAS CON MISMO DOCUMENTO Y FECHA, TOMAR LA CANTIDAD MÍNIMA
-            current_stock=Coalesce(
-                Subquery(
-                    # Para salidas (quantity < 0) con mismo documento y fecha, tomar el mínimo
-                    InventoryRecord.objects.filter(
-                        product=OuterRef('pk'),
-                        quantity__lt=0
-                    ).exclude(
-                        document_type__isnull=True
-                    ).exclude(
-                        document_number__isnull=True
-                    ).values('document_type', 'document_number', 'date').annotate(
-                        min_quantity=Min('final_quantity')
-                    ).order_by('-date', 'document_type', 'document_number').values('min_quantity')[:1],
-                    output_field=DecimalField()
-                ),
-                # Si no hay salidas agrupadas, tomar el último registro general
-                Subquery(
-                    InventoryRecord.objects.filter(
-                        product=OuterRef('pk')
-                    ).order_by('-date', '-id').values('final_quantity')[:1],
-                    output_field=DecimalField()
-                ),
-                F('initial_balance'),
-                output_field=DecimalField()
-            ),
-            # OBTENER EL ÚLTIMO COSTO UNITARIO
-            latest_unit_cost=Subquery(
-                InventoryRecord.objects.filter(
-                    product=OuterRef('pk')
-                ).order_by('-date', '-id').values('unit_cost')[:1],
-                output_field=DecimalField()
-            )
-        ).annotate(
-            # COSTO PROMEDIO: ÚLTIMO COSTO O COSTO INICIAL
-            avg_cost=Case(
-                When(latest_unit_cost__isnull=False, then=F('latest_unit_cost')),
-                default=F('initial_unit_cost'),
-                output_field=DecimalField()
-            )
-        ).filter(
-            # INCLUIMOS TODOS LOS PRODUCTOS DEL INVENTARIO, INDEPENDIENTEMENTE DEL STOCK
-            Q(initial_balance__gt=0) | Q(current_stock__isnull=False) | Q(current_stock__gte=0)
-        )
+
+
+        products = products_query
     except Exception as e:
         logger.error(f"Error in product analysis query: {str(e)}", exc_info=True)
-        # Return empty list if query fails
         return JsonResponse([], safe=False)
 
     analysis_data = []
@@ -659,76 +716,108 @@ def get_product_analysis(request):
 
     for p in products:
         try:
-            # --- ANALISIS DE ROTACION ---
-            # BALANCE DESDE INICIO DE AÑO
-            balance_pre_year = p.initial_balance + Coalesce(
-                InventoryRecord.objects.filter(product=p, date__year__lt=current_year).aggregate(s=Sum('quantity'))['s'],
-                Decimal('0')
-            )
+            # Get the most recent inventory record to determine current stock and cost
+            last_record = InventoryRecord.objects.filter(product=p).order_by('-date', '-id').first()
 
-            # MOVIMIENTOS MENSUALES DEL AÑO ACTUAL - limit query for performance
+            if last_record:
+                current_stock = Decimal(last_record.final_quantity or 0)
+                current_unit_cost = Decimal(last_record.unit_cost or p.initial_unit_cost or 0)
+            else:
+                current_stock = Decimal(p.initial_balance or 0)
+                current_unit_cost = Decimal(p.initial_unit_cost or 0)
+
+            # Producto consumido
+            is_consumed = (current_stock <= 0)
+
+            # ------------------------------------------
+            #        ROTACIÓN / ESTANCAMIENTO
+            # ------------------------------------------
+            pre_year_sum = InventoryRecord.objects.filter(
+                product=p,
+                date__year__lt=current_year
+            ).aggregate(s=Sum('quantity'))['s'] or Decimal('0')
+
+            balance_pre_year = Decimal(p.initial_balance or 0) + Decimal(pre_year_sum)
+
             monthly_movements = InventoryRecord.objects.filter(
-                product=p, date__year=current_year
-            ).annotate(
-                month=TruncMonth('date')
-            ).values('month').annotate(
-
+                product=p,
+                date__year=current_year
+            ).annotate(month=TruncMonth('date')).values('month').annotate(
                 monthly_total=Sum('quantity')
             ).order_by('month')
 
             movements_by_month = {m['month'].month: m['monthly_total'] for m in monthly_movements}
 
-            # CALCULAR FIN DE MES PARA CADA MES
             monthly_balances = []
             running_balance = balance_pre_year
-            for i in range(1, 13):
-                running_balance += movements_by_month.get(i, Decimal('0'))
+            for m in range(1, 13):
+                running_balance += movements_by_month.get(m, Decimal('0'))
                 monthly_balances.append(running_balance)
 
-            # ROTACION Y ESTANCAMIENTO
-            all_zero_balance = all(b == Decimal('0') for b in monthly_balances)
-            unique_balances_all_year = set(monthly_balances)
-            is_stagnant_all_year = len(unique_balances_all_year) == 1 and monthly_balances[0] > 0
+            all_zero_balance = all(b == 0 for b in monthly_balances)
+            unique_balances = set(monthly_balances)
 
-            rotation = 'Activo'
-            if is_stagnant_all_year:
-                rotation = 'Obsoleto'
-            elif any(monthly_balances[i] != monthly_balances[i+1] for i in range(len(monthly_balances)-1)) or all_zero_balance:
-                rotation = 'Activo'
-            elif len(monthly_balances) >= 3:
-                last_3_balances = set(monthly_balances[-3:])
-                if len(last_3_balances) == 1 and monthly_balances[-1] > 0:
-                    rotation = 'Estancado'
+            # Rotación logic
+            if all_zero_balance and balance_pre_year == 0:
+                rotation = "Activo"
+            elif all_zero_balance and balance_pre_year > 0:
+                rotation = "Obsoleto"
+            elif len(unique_balances) == 1 and monthly_balances[0] > 0:
+                rotation = "Obsoleto"
+            elif len(monthly_balances) >= 3 and len(set(monthly_balances[-3:])) == 1 and monthly_balances[-1] > 0:
+                rotation = "Estancado"
+            else:
+                rotation = "Activo"
 
-            # ALTA ROTACION: "Sí" si ha tenido cambios en al menos 2 meses consecutivos
-            consecutive_changes = 0
-            for i in range(len(monthly_balances) - 1):
-                if monthly_balances[i] != monthly_balances[i+1]:
-                    consecutive_changes += 1
+            is_stagnant = rotation in ["Estancado", "Obsoleto"]
 
+            # Assign color based on rotation
+            color = {
+                "Activo": "green",
+                "Estancado": "yellow",
+                "Obsoleto": "red"
+            }.get(rotation, "gray")
+
+            consecutive_changes = sum(
+                1 for i in range(len(monthly_balances)-1)
+                if monthly_balances[i] != monthly_balances[i+1]
+            )
             high_rotation = 'Sí' if consecutive_changes >= 2 else 'No'
 
             analysis_data.append({
                 'codigo': p.code,
                 'nombre_producto': p.description,
                 'grupo': p.group,
-                'cantidad_saldo_actual': float(p.current_stock),
-                'valor_saldo_actual': float(p.current_stock * p.avg_cost),
-                'costo_unitario': float(p.avg_cost),
-                'estancado': 'Sí' if is_stagnant_all_year else 'No',
+                'cantidad_saldo_actual': float(current_stock),
+                'valor_saldo_actual': float(current_stock * current_unit_cost),
+                'costo_unitario': float(current_unit_cost),
+                'consumed': 'Sí' if is_consumed else 'No',
+                'estancado': 'Sí' if is_stagnant else 'No',
                 'rotacion': rotation,
+                'color': color,
                 'alta_rotacion': high_rotation,
-                'almacen': '',  # Add empty almacen field for frontend compatibility
+                'almacen': 'almacen',
             })
+
         except Exception as e:
             logger.error(f"Error processing product {p.code}: {str(e)}", exc_info=True)
-            # Skip this product and continue with others
             continue
 
     return JsonResponse(analysis_data, safe=False)
 
+
+
 @require_http_methods(["GET"])
 def get_batches(request):
+    """
+    Retrieves a list of import batches for the specified inventory.
+
+    Args:
+        request: Django HttpRequest with query parameter 'inventory_name'
+
+    Returns:
+        JsonResponse: List of batch data including IDs, file names, timestamps, and processing stats
+    """
     inventory_name = request.GET.get('inventory_name', 'default')
     batches = ImportBatch.objects.filter(inventory_name=inventory_name).order_by('-started_at')
     
@@ -746,6 +835,15 @@ def get_batches(request):
 
 @require_http_methods(["GET"])
 def get_products(request):
+    """
+    Retrieves a list of products for the specified inventory.
+
+    Args:
+        request: Django HttpRequest with query parameter 'inventory_name'
+
+    Returns:
+        JsonResponse: List of product data including codes, descriptions, groups, and balances
+    """
     inventory_name = request.GET.get('inventory_name', 'default')
     products = Product.objects.filter(inventory_name=inventory_name)
     products_data = [{
@@ -759,6 +857,22 @@ def get_products(request):
 
 @require_http_methods(["GET"])
 def get_records(request):
+    """
+    Retrieves inventory records with optional filtering.
+
+    Args:
+        request: Django HttpRequest with query parameters for filtering
+
+    Query Parameters:
+        inventory_name (str): Name of the inventory
+        warehouse (str): Filter by warehouse
+        category (str): Filter by category
+        date_from (str): Start date filter
+        date_to (str): End date filter
+
+    Returns:
+        JsonResponse: List of inventory records or empty list on error
+    """
     inventory_name = request.GET.get('inventory_name', 'default')
     warehouse_filter = request.GET.get('warehouse', '')
     category_filter = request.GET.get('category', '')
@@ -794,255 +908,195 @@ def get_records(request):
             'category': r.category,
             'batch_id': r.batch.id,
         } for r in records]
-
-        # Agregar campos adicionales para compatibilidad con el frontend
-        for record in records_data:
-            record.update({
-                'item': record['product_code'],
-                'desc_item': record['product_description'],
-                'localizacion': record['warehouse'],
-                'categoria': record['category'],
-                'documento': f"{record['document_type'] or ''}{record['document_number'] or ''}",
-                'entradas': record['quantity'] if record['quantity'] > 0 else 0,
-                'salidas': abs(record['quantity']) if record['quantity'] < 0 else 0,
-                'unitario': record['unit_cost'],
-            })
-
         return JsonResponse(records_data, safe=False)
+
     except Exception as e:
-        logger.error(f"Error in records query: {str(e)}", exc_info=True)
-        # Return empty list if query fails
+        logger.error(f"Error retrieving records: {str(e)}", exc_info=True)
         return JsonResponse([], safe=False)
+
+
+@require_http_methods(["POST"])
+def create_inventory(request):
+    """
+    Creates a new inventory.
+
+    Args:
+        request: Django HttpRequest with inventory data
+
+    Returns:
+        JsonResponse: Success or error response
+    """
+    try:
+        data = json.loads(request.body)
+        inventory_name = data.get('inventory_name', '').strip().lower()
+        if not inventory_name:
+            return JsonResponse({'ok': False, 'error': 'Nombre de inventario requerido'}, status=400)
+
+        # Check if inventory already exists
+        if Product.objects.filter(inventory_name=inventory_name).exists():
+            return JsonResponse({'ok': False, 'error': 'El inventario ya existe'}, status=400)
+
+        return JsonResponse({'ok': True, 'inventory_name': inventory_name})
+    except Exception as e:
+        logger.error(f"Error creating inventory: {str(e)}", exc_info=True)
+        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+
 
 @require_http_methods(["GET"])
 def get_product_history(request, product_code, inventory_name='default'):
-    history = InventoryRecord.objects.filter(
-        product__code=product_code,
-        product__inventory_name=inventory_name
-    ).order_by('date')
-    
-    history_data = [{
-        'date': r.date.isoformat(),
-        'document_type': r.document_type,
-        'document_number': r.document_number,
-        'quantity': float(r.quantity),
-        'unit_cost': float(r.unit_cost),
-        'total': float(r.total),
-        'warehouse': r.warehouse,
-        'category': r.category,
-    } for r in history]
-    return JsonResponse(history_data, safe=False)
+    """
+    Retrieves the history of movements for a specific product.
 
-@require_http_methods(["POST"])
-@csrf_exempt
-def create_inventory(request):
-    # Esta función se utiliza para crear un nuevo inventario.
-    # sin embargo, en esta implementación solo usamos un inventario por defecto.
-    return JsonResponse({'ok': True, 'message': 'La creación de inventario no está totalmente implementada; se utiliza la configuración predeterminada.'})
+    Args:
+        request: Django HttpRequest
+        product_code (str): Product code
+        inventory_name (str): Inventory name
+
+    Returns:
+        JsonResponse: List of product movement records
+    """
+    try:
+        records = InventoryRecord.objects.filter(
+            product__code=product_code,
+            product__inventory_name=inventory_name
+        ).select_related('product', 'batch').order_by('date')
+
+        history_data = [{
+            'id': r.id,
+            'date': r.date.isoformat(),
+            'quantity': float(r.quantity),
+            'unit_cost': float(r.unit_cost),
+            'total': float(r.total),
+            'warehouse': r.warehouse,
+            'document_type': r.document_type,
+            'document_number': r.document_number,
+            'batch_id': r.batch.id,
+        } for r in records]
+
+        return JsonResponse(history_data, safe=False)
+    except Exception as e:
+        logger.error(f"Error retrieving product history: {str(e)}", exc_info=True)
+        return JsonResponse([], safe=False)
+
 
 @require_http_methods(["GET"])
 def get_summary(request):
-    inventory_name = request.GET.get('inventory_name', 'default')
+    """
+    Retrieves a summary of the inventory.
 
+    Args:
+        request: Django HttpRequest
+
+    Returns:
+        JsonResponse: Inventory summary data
+    """
+    inventory_name = request.GET.get('inventory_name', 'default')
     try:
         total_products = Product.objects.filter(inventory_name=inventory_name).count()
         total_records = InventoryRecord.objects.filter(product__inventory_name=inventory_name).count()
+        total_batches = ImportBatch.objects.filter(inventory_name=inventory_name).count()
 
-        # Usa annotate para obtener estadísticas por categoría y almacén
-        category_stats = Product.objects.filter(inventory_name=inventory_name).values('group').annotate(
-            count=Sum(1)
-        ).order_by('-count').filter(group__isnull=False)
-
-        warehouse_stats = InventoryRecord.objects.filter(product__inventory_name=inventory_name).values('warehouse').annotate(
-            count=Sum(1)
-        ).order_by('-count').filter(warehouse__isnull=False)
-
-        # Calcula el valor total del inventario usando el último costo unitario por producto
-        products_with_value = Product.objects.filter(inventory_name=inventory_name).annotate(
-            # OBTENER LA ÚLTIMA CANTIDAD DEL ARCHIVO DE ACTUALIZACIÓN
-            final_quantity=Subquery(
-                InventoryRecord.objects.filter(
-                    product=OuterRef('pk')
-                ).order_by('-date', '-id').values('final_quantity')[:1],  # Ordenamos por fecha e id para consistencia
-                output_field=DecimalField()
-            ),
-            # OBTENER EL ÚLTIMO COSTO UNITARIO
-            latest_unit_cost=Subquery(
-                InventoryRecord.objects.filter(
-                    product=OuterRef('pk')
-                ).order_by('-date', '-id').values('unit_cost')[:1],
-                output_field=DecimalField()
-            )
-        ).annotate(
-            # SE CALCULA EL SALDO FINAL USANDO LA ÚLTIMA CANTIDAD DEL ARCHIVO DE ACTUALIZACIÓN
-            final_balance=Case(
-                When(final_quantity__isnull=False, then=F('final_quantity')),
-                default=F('initial_balance'),
-                output_field=DecimalField()
-            ),
-            # COSTO PROMEDIO: ÚLTIMO COSTO O COSTO INICIAL
-            avg_cost=Case(
-                When(latest_unit_cost__isnull=False, then=F('latest_unit_cost')),
-                default=F('initial_unit_cost'),
-                output_field=DecimalField()
-            )
-        ).filter(
-            # INCLUIMOS SOLO PRODUCTOS CON SALDO FINAL > 0 O SALDO INICIAL > 0
-            Q(final_quantity__gt=0) | Q(initial_balance__gt=0)
-        )
-        total_inventory_value = products_with_value.aggregate(
-            total_value=Sum(F('final_balance') * F('avg_cost'))
-        )['total_value'] or Decimal('0')
-
-        movement_stats = InventoryRecord.objects.filter(product__inventory_name=inventory_name).aggregate(
-            total_entradas=Coalesce(Sum('quantity', filter=Q(quantity__gt=0)), Decimal('0')),
-            total_salidas=Coalesce(Sum('quantity', filter=Q(quantity__lt=0)), Decimal('0')),
-        )
+        # Get analysis data to calculate totals
+        analysis_response = get_product_analysis(request)
+        if analysis_response.status_code == 200:
+            analysis_data = json.loads(analysis_response.content)
+            total_quantity = sum(item['cantidad_saldo_actual'] for item in analysis_data if item['cantidad_saldo_actual'] > 0)
+            total_value = sum(item['valor_saldo_actual'] for item in analysis_data)
+        else:
+            total_quantity = 0
+            total_value = 0
 
         return JsonResponse({
-            'total_productos': total_products,
-            'total_registros': total_records,
-            'valor_total_inventario': float(total_inventory_value),
-            'estadisticas_categoria': list(category_stats),
-            'estadisticas_almacen': list(warehouse_stats),
-            'estadisticas_movimientos': {
-                'entradas': float(movement_stats['total_entradas']),
-                'salidas': abs(float(movement_stats['total_salidas'])),
-            }
+            'inventory_name': inventory_name,
+            'total_products': total_products,
+            'total_records': total_records,
+            'total_batches': total_batches,
+            'total_quantity': total_quantity,
+            'total_value': total_value,
         })
     except Exception as e:
-        logger.error(f"Error in summary query: {str(e)}", exc_info=True)
-        # Return default values if query fails
-        return JsonResponse({
-            'total_productos': 0,
-            'total_registros': 0,
-            'valor_total_inventario': 0.0,
-            'estadisticas_categoria': [],
-            'estadisticas_almacen': [],
-            'estadisticas_movimientos': {
-                'entradas': 0.0,
-                'salidas': 0.0,
-            }
-        })
+        logger.error(f"Error retrieving summary: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["GET"])
+def export_analysis(request, inventory_name='default', format_type='excel'):
+    """
+    Exports product analysis data.
+
+    Args:
+        request: Django HttpRequest
+        inventory_name (str): Inventory name
+        format_type (str): Export format (excel or pdf)
+
+    Returns:
+        HttpResponse: File response
+    """
+    try:
+        # Get analysis data
+        analysis_data = get_product_analysis(request).content
+        analysis_list = json.loads(analysis_data)
+
+        if format_type == 'excel':
+            # Create Excel file
+            df = pd.DataFrame(analysis_list)
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="inventory_analysis_{inventory_name}.xlsx"'
+            df.to_excel(response, index=False)
+            return response
+        else:
+            return JsonResponse({'error': 'Formato no soportado'}, status=400)
+    except Exception as e:
+        logger.error(f"Error exporting analysis: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @require_http_methods(["GET"])
 def list_inventories(request):
-    # simplificado para un solo inventario por defecto
-    last_batch = ImportBatch.objects.filter(inventory_name='default').order_by('-started_at').first()
-    if not last_batch:
+    """
+    Lists all available inventories.
+
+    Args:
+        request: Django HttpRequest
+
+    Returns:
+        JsonResponse: List of inventory names
+    """
+    try:
+        inventories = Product.objects.values_list('inventory_name', flat=True).distinct()
+        return JsonResponse(list(inventories), safe=False)
+    except Exception as e:
+        logger.error(f"Error listing inventories: {str(e)}", exc_info=True)
         return JsonResponse([], safe=False)
-
-    inventory_info = {
-        'name': 'default',
-        'product_count': Product.objects.filter(inventory_name='default').count(),
-        'record_count': InventoryRecord.objects.filter(product__inventory_name='default').count(),
-        'last_updated': last_batch.processed_at.isoformat() if last_batch.processed_at else last_batch.started_at.isoformat()
-    }
-    return JsonResponse([inventory_info], safe=False)
-
 
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@transaction.atomic
 def upload_base_file(request, inventory_name='default'):
+    """
+    Uploads a base file for inventory initialization.
 
-    try:
-        if 'base_file' not in request.FILES:
-            return JsonResponse(
-                {'ok': False, 'error': 'El archivo base es requerido'},
-                status=400
-            )
+    Args:
+        request: Django HttpRequest with uploaded file
+        inventory_name (str): Inventory name
 
-        base_file = request.FILES['base_file']
-        inventory_name = str(inventory_name).strip().lower() or 'default'
+    Returns:
+        JsonResponse: Success or error response
+    """
+    # This is similar to update_inventory but only for base files
+    return update_inventory(request, inventory_name)
 
-        try:
-            base_content = base_file.read()
 
-            # Read the Excel file with specific column mapping
-            # Support both .xlsx and .xls formats
-            if base_file.name.endswith('.xls'):
-                base_df = pd.read_excel(
-                    io.BytesIO(base_content),
-                    engine='xlrd',
-                    header=0,  # Row 1 contains headers
-                    usecols='A:J',  # Columns A to J (0-9)
-                    names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
-                    dtype={
-                        'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
-                        'codigo': str, 'descripcion': str, 'cantidad': float,
-                        'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
-                    }
-                )
-            else:
-                base_df = pd.read_excel(
-                    io.BytesIO(base_content),
-                    header=0,  # Row 1 contains headers
-                    usecols='A:J',  # Columns A to J (0-9)
-                    names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
-                    dtype={
-                        'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
-                        'codigo': str, 'descripcion': str, 'cantidad': float,
-                        'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
-                    }
-                )
+@require_http_methods(["GET"])
+def welcome(request):
+    """
+    Returns a welcome message for the API.
 
-            base_df = base_df.dropna(subset=['codigo', 'descripcion'])
-            base_df['codigo'] = base_df['codigo'].astype(str).str.strip()
-            base_df['descripcion'] = base_df['descripcion'].astype(str).str.strip()
+    Args:
+        request: Django HttpRequest
 
-            # Delete existing products and batches for this inventory to allow re-upload
-            # First delete inventory records to avoid foreign key constraint
-            InventoryRecord.objects.filter(product__inventory_name=inventory_name).delete()
-            Product.objects.filter(inventory_name=inventory_name).delete()
-            ImportBatch.objects.filter(inventory_name=inventory_name).delete()
-
-            # Create import batch
-            batch = ImportBatch.objects.create(
-                file_name=base_file.name,
-                inventory_name=inventory_name,
-                checksum=calculate_file_checksum(base_content)
-            )
-
-            # Process the base file
-            records_processed = _process_base_file(base_df, inventory_name)
-
-            if records_processed == 0:
-                batch.delete()
-                return JsonResponse(
-                    {'ok': False, 'error': 'No se importaron registros válidos'},
-                    status=400
-                )
-
-            # Update batch information
-            batch.rows_imported = records_processed
-            batch.rows_total = len(base_df)
-            batch.processed_at = timezone.now()
-            batch.save()
-
-            return JsonResponse({
-                'ok': True,
-                'message': f'Se importaron {records_processed} productos correctamente',
-                'batch_id': batch.id
-            })
-
-        except Exception as e:
-            logger.error(f"Error al procesar el archivo base: {str(e)}", exc_info=True)
-            return JsonResponse(
-                {'ok': False, 'error': f'Error al procesar el archivo: {str(e)}'},
-                status=400
-            )
-
-    except Exception as e:
-        logger.error(f"Error en upload_base_file: {str(e)}", exc_info=True)
-        return JsonResponse(
-            {'ok': False, 'error': f'Error en el servidor: {str(e)}'},
-            status=500
-        )
-
-def export_analysis(request, inventory_name='default', format_type='excel'):
-    # Placeholder for export functionality
-    return JsonResponse({'ok': False, 'error': f'Export to {format_type} not implemented yet.'}, status=501)
-    
+    Returns:
+        JsonResponse: Welcome message
+    """
+    logger.info(f"Request received: {request.method} {request.path}")
+    return JsonResponse({'message': 'Welcome to the Inventory API Service!'})

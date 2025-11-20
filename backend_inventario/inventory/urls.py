@@ -3,7 +3,7 @@ from .views import (
     update_inventory, get_batches, get_products, get_records,
     get_product_analysis, create_inventory, get_product_history,
     get_summary, export_analysis, list_inventories,
-    upload_base_file
+    upload_base_file, welcome
 )
 
 urlpatterns = [
@@ -26,4 +26,5 @@ urlpatterns = [
     path('inventories/', list_inventories, name='list_inventories'),
     path('upload-base/', upload_base_file, name='upload_base_file'),
     path('upload-base/<str:inventory_name>/', upload_base_file, name='upload_base_file_with_inventory'),
+    path('welcome/', welcome, name='welcome'),
 ]

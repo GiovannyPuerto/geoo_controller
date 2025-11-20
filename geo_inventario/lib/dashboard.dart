@@ -84,6 +84,8 @@ class _DashboardPageState extends State<DashboardPage>
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
+              LinearProgressIndicator(),
+              SizedBox(height: 16),
               Text('Cargando archivo base...'),
             ],
           ),
@@ -230,23 +232,25 @@ class _DashboardPageState extends State<DashboardPage>
     });
 
     try {
-      // Load summary data
-      final summaryResponse = await http.get(
-        Uri.parse('http://127.0.0.1:8000/api/inventory/summary/'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
+      // Load all data in parallel for better performance
+      final results = await Future.wait([
+        http.get(
+          Uri.parse('http://127.0.0.1:8000/api/inventory/summary/'),
+          headers: {'Content-Type': 'application/json'},
+        ).timeout(const Duration(seconds: 30)),
+        http.get(
+          Uri.parse('http://127.0.0.1:8000/api/inventory/analysis/'),
+          headers: {'Content-Type': 'application/json'},
+        ).timeout(const Duration(seconds: 30)),
+        http.get(
+          Uri.parse('http://127.0.0.1:8000/api/inventory/records/'),
+          headers: {'Content-Type': 'application/json'},
+        ).timeout(const Duration(seconds: 30)),
+      ]);
 
-      // Load analysis data
-      final analysisResponse = await http.get(
-        Uri.parse('http://127.0.0.1:8000/api/inventory/analysis/'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
-
-      // Load movements data
-      final movementsResponse = await http.get(
-        Uri.parse('http://127.0.0.1:8000/api/inventory/records/'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
+      final summaryResponse = results[0];
+      final analysisResponse = results[1];
+      final movementsResponse = results[2];
 
       print('Summary Response Status: ${summaryResponse.statusCode}');
       print('Analysis Response Status: ${analysisResponse.statusCode}');
@@ -380,7 +384,7 @@ class _DashboardPageState extends State<DashboardPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (summary == null || summary!['total_productos'] == 0)
+            if (summary == null || summary!['total_products'] == 0)
               _buildEmptyState()
             else ...[
               _buildSummaryCards(),
@@ -406,15 +410,10 @@ class _DashboardPageState extends State<DashboardPage>
                 'statics/images/logo_geoflora.png',
                 height: 50,
               ),
-              const SizedBox(width: 10),
-              SvgPicture.asset(
-                'statics/images/Logo_SBTale.svg',
-                height: 50,
-              ),
             ],
           ),
           const SizedBox(height: 20),
-          Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
+          Icon(Icons.inventory_outlined, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 20),
           const Text(
             'No hay datos de inventario disponibles',
@@ -451,8 +450,8 @@ class _DashboardPageState extends State<DashboardPage>
       return const SizedBox.shrink();
     }
 
-    final totalProducts = summary!['total_productos'] ?? 0;
-    final totalValue = summary!['valor_total_inventario'] ?? 0.0;
+    final totalProducts = summary!['total_products'] ?? 0;
+    final totalValue = (summary!['total_value'] ?? 0.0).toDouble();
 
     return Row(
       children: [
@@ -1310,30 +1309,25 @@ class _DashboardPageState extends State<DashboardPage>
               height: 40,
             ),
             const SizedBox(width: 10),
-            SvgPicture.asset(
-              'statics/images/Logo_SBTale.svg',
-              height: 40,
-            ),
-            const SizedBox(width: 10),
             const Text('Dashboard de Inventario'),
           ],
         ),
         backgroundColor: const Color(0xFF10B981),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_sharp),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.filter_list),
+            icon: const Icon(Icons.filter_list_alt),
             onPressed: _showFiltersDialog,
           ),
           IconButton(
-            icon: const Icon(Icons.download),
+            icon: const Icon(Icons.file_download),
             onPressed: _showExportDialog,
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.cloud_upload),
+            icon: const Icon(Icons.upload_file_rounded),
             onSelected: (value) {
               if (value == 'base') {
                 _pickAndUploadFile();
@@ -1382,7 +1376,7 @@ class _DashboardPageState extends State<DashboardPage>
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.analytics_outlined,
+                            Icons.analytics_sharp,
                             size: 80,
                             color: Colors.grey[400],
                           ),
@@ -1838,7 +1832,7 @@ class _DashboardPageState extends State<DashboardPage>
                       decoration: const InputDecoration(
                         labelText: 'Buscar por código o descripción',
                         hintText: 'Ingrese código o descripción del producto',
-                        prefixIcon: Icon(Icons.search),
+                        prefixIcon: Icon(Icons.search_rounded),
                       ),
                       onChanged: (value) {
                         setState(() => searchQuery = value);
@@ -2095,19 +2089,61 @@ class _DashboardPageState extends State<DashboardPage>
 
       final files = result.files;
 
-      // Show loading dialog
+      // Validate each file has correct extension and is not empty
+      List<PlatformFile> validFiles = [];
+      for (var file in files) {
+        if (file.size == 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'El archivo "${file.name}" está vacío. Verifique que el archivo contenga datos.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+          continue;
+        }
+
+        // Check file extension
+        if (!file.name.toLowerCase().endsWith('.xls') &&
+            !file.name.toLowerCase().endsWith('.xlsx')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'El archivo "${file.name}" no tiene una extensión válida. Solo se permiten archivos .xls o .xlsx.',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+          continue;
+        }
+
+        validFiles.add(file);
+        print('[_uploadUpdateFile] Validated file: ${file.name}');
+      }
+
+      if (validFiles.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Ningún archivo válido seleccionado. Verifique las extensiones y que los archivos no estén corruptos.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final validFileNames = validFiles.map((f) => f.name).join(', ');
+
+      // Show confirmation dialog first
       bool? confirmed = await showDialog<bool>(
         context: context,
-        barrierDismissible: false,
         builder: (BuildContext context) {
           return AlertDialog(
-            content: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Procesando archivo(s) de actualización...'),
-              ],
+            title: const Text('Confirmar carga'),
+            content: Text(
+              '¿Está seguro de cargar ${validFiles.length} archivo(s) de actualización?\n\nArchivos: $validFileNames',
             ),
             actions: [
               TextButton(
@@ -2128,6 +2164,25 @@ class _DashboardPageState extends State<DashboardPage>
       );
 
       if (confirmed == true) {
+        // Show processing dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return const AlertDialog(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  LinearProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Procesando archivo(s) de actualización...'),
+                ],
+              ),
+            );
+          },
+        );
         var request = http.MultipartRequest(
           'POST',
           Uri.parse('http://127.0.0.1:8000/api/inventory/update/'),
@@ -2155,6 +2210,7 @@ class _DashboardPageState extends State<DashboardPage>
 
             if (jsonResponse['ok']) {
               if (!mounted) return;
+              Navigator.of(context).pop(); // Close loading dialog
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
@@ -2166,6 +2222,7 @@ class _DashboardPageState extends State<DashboardPage>
               await _loadData(); // Reload data after successful upload
             } else {
               if (!mounted) return;
+              Navigator.of(context).pop(); // Close loading dialog
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
@@ -2208,6 +2265,7 @@ class _DashboardPageState extends State<DashboardPage>
       }
     } catch (e) {
       if (mounted) {
+        Navigator.of(context).pop(); // Dismiss loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error al procesar el archivo de actualización: $e'),
