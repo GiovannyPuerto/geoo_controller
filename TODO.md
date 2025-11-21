@@ -1,32 +1,7 @@
-# TODO: Mejoras de UI en Flutter App
+# TODO: Improve Dashboard Performance and Filters
 
-## Información Gathered
-- **Archivos principales**: `main.dart` (WelcomePage) y `dashboard.dart` (DashboardPage con tabs).
-- **Estructura actual**: Usa Material Design con colores verdes (#10B981). Incluye logos, botones elevados, cards, y navegación básica.
-- **Funcionalidades**: Subida de archivos, filtros, exportación, gráficos con Syncfusion.
-- **Estado actual**: UI básica, sin gradientes, sombras avanzadas, animaciones o efectos modernos.
-
-## Plan
-- **main.dart**:
-  - Actualizar theme con gradientes, sombras y colores modernos.
-  - Mejorar botones: agregar íconos, sombras, efectos hover/tap, animaciones.
-  - Rediseñar header: gradientes, mejor espaciado, íconos animados.
-  - Agregar animaciones a secciones (hero, fade-in).
-  - Mejorar navegación: transiciones suaves.
-
-- **dashboard.dart**:
-  - Rediseñar AppBar: gradientes, sombras, íconos modernos, animaciones.
-  - Mejorar botones: estilos elevados con gradientes, íconos, efectos.
-  - Agregar animaciones a tabs y contenido (slide, fade).
-  - Mejorar cards y gráficos: sombras, bordes redondeados, gradientes.
-  - Optimizar navegación: transiciones entre tabs.
-
-## Dependent Files to be edited
-- `geo_inventario/lib/main.dart`
-- `geo_inventario/lib/dashboard.dart`
-
-## Followup steps
-- Ejecutar la app para verificar renderizado.
-- Probar en diferentes tamaños de pantalla.
-- Verificar funcionalidad (subida, filtros, exportación).
-- Ajustar si hay problemas de rendimiento.
+## Tasks
+- [x] Add mounted checks to setState calls in async methods (_loadData, _uploadBaseFile, _loadFiltersFromPrefs, _uploadUpdateFile, _clearFilters)
+- [x] Implement local filtering for searchQueryAnalysis in analysis tab
+- [x] Change analysis table to DataTable2 for better performance
+- [x] Test the app to ensure filters work and rendering is smoother

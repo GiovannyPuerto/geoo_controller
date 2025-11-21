@@ -12,36 +12,10 @@ LOCALIZACION_MAP = {
 
 CATEGORIA_MAP = {
     '1': 'AGROQUIMICOS-FERTILIZANTES Y ABONOS',
-    '2': 'DOTACION Y SEGURIDAD',
+    '2': 'MATERIAL DE EMPAQUE',
     '3': 'MANTENIMIENTO',
-    '4': 'MATERIAL DE EMPAQUE',
-    '5': 'PAPELERIA Y ASEO'
-    
-}
-
-medidas_map = {
-    'BUL': 'BULTO',
-    'CAJ': 'CAJA',
-    'CC3' : 'CENTIMETRO CUBICO',
-    'CUA': 'CUARTO',
-    'FCO': 'FRASCO',
-    'GLN': 'GALON',
-    'GMS': 'GRAMO',
-    'JUE': 'JUEGO',
-    'KIL': 'KILOGRAMO',
-    'LIB': 'LIBRA',
-    'LIT': 'LITRO',
-    'LON': 'LONA',
-    'MET': 'METRO',
-    'PAC': 'PACA',
-    'PAQ': 'PAQUETE',
-    'PAR': 'PAR',
-    'RES': 'RESMA',
-    'ROL': 'ROLLO',
-    'SOB': 'SOBRE',
-    'TUB': 'TUBO',
-    'UND': 'UNIDAD',
-    'VJE': 'VIAJE'
+    '4': 'PAPELERIA Y ASEO',
+    '5': 'DOTACION Y SEGURIDAD'
 }
     
 def clean_number(s):

@@ -6,6 +6,12 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from zipfile import BadZipFile
 
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from io import BytesIO
+
 import pandas as pd
 
 def safe_decimal(value):
@@ -1043,6 +1049,52 @@ def export_analysis(request, inventory_name='default', format_type='excel'):
             response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="inventory_analysis_{inventory_name}.xlsx"'
             df.to_excel(response, index=False)
+            return response
+        elif format_type == 'pdf':
+            # Create PDF file
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            elements = []
+
+            # Use Times fonts which support Unicode/Latin characters
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Title'],
+                fontName='Times-Bold',
+                fontSize=18,
+            )
+            title = Paragraph(f"Análisis de Inventario - {inventory_name}", title_style)
+            elements.append(title)
+            elements.append(Spacer(1, 12))
+
+            # Prepare data for table
+            if analysis_list:
+                headers = list(analysis_list[0].keys())
+                data = [headers] + [list(item.values()) for item in analysis_list]
+
+                # Create table
+                table = Table(data)
+                style = TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 14),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ])
+                table.setStyle(style)
+                elements.append(table)
+
+            doc.build(elements)
+            buffer.seek(0)
+
+            response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="inventory_analysis_{inventory_name}.pdf"'
             return response
         else:
             return JsonResponse({'error': 'Formato no soportado'}, status=400)

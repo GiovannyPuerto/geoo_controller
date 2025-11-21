@@ -6,18 +6,124 @@ import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/svg.dart';
 import 'package:geo_inventario/platform_file_picker.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:universal_html/html.dart' as html;
+
+class MovementsDataSource extends DataTableSource {
+  final List<Map<String, dynamic>> movements;
+
+  MovementsDataSource(this.movements);
+
+  @override
+  DataRow getRow(int index) {
+    final item = movements[index];
+    return DataRow(
+      cells: [
+        DataCell(
+          Text(
+            DateFormat('dd/MM/yyyy').format(
+              DateTime.parse(item['date'] ?? ''),
+            ),
+          ),
+        ),
+        DataCell(
+          Text(item['product_description'] ?? ''),
+        ),
+        DataCell(Text(item['warehouse'] ?? '')),
+        DataCell(Text(item['document_type'] ?? '')),
+        DataCell(Text(item['document_number'] ?? '')),
+        DataCell(
+          Text(item['quantity']?.toString() ?? '0'),
+        ),
+        DataCell(
+          Text(
+            CurrencyFormatter.format(
+              item['unit_cost'] ?? 0,
+            ),
+          ),
+        ),
+        DataCell(
+          Text(
+            CurrencyFormatter.format(
+              item['total'] ?? 0,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  int get rowCount => movements.length;
+
+  @override
+  bool get isRowCountApproximate => false;
+
+  @override
+  int get selectedRowCount => 0;
+}
+
+class AnalysisDataSource extends DataTableSource {
+  final List<Map<String, dynamic>> analysis;
+
+  AnalysisDataSource(this.analysis);
+
+  @override
+  DataRow getRow(int index) {
+    final item = analysis[index];
+    return DataRow(
+      cells: [
+        DataCell(Text(item['codigo'] ?? '')),
+        DataCell(
+          Text(item['nombre_producto'] ?? ''),
+        ),
+        DataCell(Text(item['grupo'] ?? '')),
+        DataCell(
+          Text(
+            item['cantidad_saldo_actual']?.toString() ?? '0',
+          ),
+        ),
+        DataCell(
+          Text(
+            CurrencyFormatter.format(
+              item['valor_saldo_actual'] ?? 0,
+            ),
+          ),
+        ),
+        DataCell(
+          Text(
+            CurrencyFormatter.format(
+              item['costo_unitario'] ?? 0,
+            ),
+          ),
+        ),
+        DataCell(Text(item['estancado'] ?? 'No')),
+        DataCell(
+          Text(item['rotacion'] ?? 'Activo'),
+        ),
+        DataCell(
+          Text(item['alta_rotacion'] ?? 'No'),
+        ),
+      ],
+    );
+  }
+
+  @override
+  int get rowCount => analysis.length;
+
+  @override
+  bool get isRowCountApproximate => false;
+
+  @override
+  int get selectedRowCount => 0;
+}
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -38,21 +144,36 @@ class _DashboardPageState extends State<DashboardPage>
   bool isLoading = true;
   bool hasBaseData = false; // Track if base data has been uploaded
   final int _tabsCount = 3; // Number of tabs
+  Map<String, String> productToGroup = {};
+  Map<String, String> descriptionToGroup = {};
 
-  // Filtros
-  String? selectedWarehouse;
-  String? selectedGroup;
-  String? selectedRotation;
-  String? selectedStagnant;
-  String? selectedHighRotation;
-  DateTimeRange? selectedDateRange;
-  String? searchQuery; // Para búsqueda por código o descripción
+  // Separate loading states for each section
+  bool isSummaryLoading = true;
+  bool isAnalysisLoading = true;
+  bool isMovementsLoading = true;
+
+  // Filtros para Análisis de Productos
+  DateTimeRange? selectedDateRangeAnalysis;
+  String? searchQueryAnalysis; // Para búsqueda por código o descripción
+  String? selectedGroupAnalysis;
+  String? selectedRotationAnalysis;
+  String? selectedStagnantAnalysis;
+  String? selectedHighRotationAnalysis;
+  String? selectedWarehouseAnalysis;
+
+  // Filtros para Movimientos
+  DateTimeRange? selectedDateRangeMovements;
+  String? selectedWarehouseMovements;
+  String? selectedGroupMovements;
+
+  bool filtersApplied = false; // Flag to track if filters are applied
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabsCount, vsync: this);
     _tabController.addListener(_handleTabSelection);
+    _loadFiltersFromPrefs();
     _loadData();
   }
 
@@ -68,6 +189,75 @@ class _DashboardPageState extends State<DashboardPage>
     _tabController.removeListener(_handleTabSelection);
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadFiltersFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        searchQueryAnalysis = prefs.getString('searchQueryAnalysis');
+        selectedWarehouseAnalysis = prefs.getString('selectedWarehouseAnalysis');
+        selectedGroupAnalysis = prefs.getString('selectedGroupAnalysis');
+        selectedRotationAnalysis = prefs.getString('selectedRotationAnalysis');
+        selectedStagnantAnalysis = prefs.getString('selectedStagnantAnalysis');
+        selectedHighRotationAnalysis = prefs.getString('selectedHighRotationAnalysis');
+
+        final startAnalysis = prefs.getString('selectedDateRangeAnalysisStart');
+        final endAnalysis = prefs.getString('selectedDateRangeAnalysisEnd');
+        if (startAnalysis != null && endAnalysis != null) {
+          selectedDateRangeAnalysis = DateTimeRange(
+            start: DateTime.parse(startAnalysis),
+            end: DateTime.parse(endAnalysis),
+          );
+        }
+
+        selectedWarehouseMovements = prefs.getString('selectedWarehouseMovements');
+        selectedGroupMovements = prefs.getString('selectedGroupMovements');
+
+        final startMovements = prefs.getString('selectedDateRangeMovementsStart');
+        final endMovements = prefs.getString('selectedDateRangeMovementsEnd');
+        if (startMovements != null && endMovements != null) {
+          selectedDateRangeMovements = DateTimeRange(
+            start: DateTime.parse(startMovements),
+            end: DateTime.parse(endMovements),
+          );
+        }
+      });
+    }
+  }
+
+  Future<void> _saveFiltersToPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('searchQueryAnalysis', searchQueryAnalysis ?? '');
+    await prefs.setString(
+        'selectedWarehouseAnalysis', selectedWarehouseAnalysis ?? '');
+    await prefs.setString('selectedGroupAnalysis', selectedGroupAnalysis ?? '');
+    await prefs.setString('selectedRotationAnalysis', selectedRotationAnalysis ?? '');
+    await prefs.setString('selectedStagnantAnalysis', selectedStagnantAnalysis ?? '');
+    await prefs.setString('selectedHighRotationAnalysis', selectedHighRotationAnalysis ?? '');
+
+    if (selectedDateRangeAnalysis != null) {
+      await prefs.setString('selectedDateRangeAnalysisStart',
+          selectedDateRangeAnalysis!.start.toIso8601String());
+      await prefs.setString('selectedDateRangeAnalysisEnd',
+          selectedDateRangeAnalysis!.end.toIso8601String());
+    } else {
+      await prefs.remove('selectedDateRangeAnalysisStart');
+      await prefs.remove('selectedDateRangeAnalysisEnd');
+    }
+
+    await prefs.setString('selectedWarehouseMovements', selectedWarehouseMovements ?? '');
+    await prefs.setString('selectedGroupMovements', selectedGroupMovements ?? '');
+
+    if (selectedDateRangeMovements != null) {
+      await prefs.setString('selectedDateRangeMovementsStart',
+          selectedDateRangeMovements!.start.toIso8601String());
+      await prefs.setString('selectedDateRangeMovementsEnd',
+          selectedDateRangeMovements!.end.toIso8601String());
+    } else {
+      await prefs.remove('selectedDateRangeMovementsStart');
+      await prefs.remove('selectedDateRangeMovementsEnd');
+    }
   }
 
   Future<void> _uploadBaseFile(PlatformFile platformFile) async {
@@ -227,9 +417,11 @@ class _DashboardPageState extends State<DashboardPage>
   Future<void> _loadData() async {
     if (!mounted) return;
 
-    setState(() {
-      isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
 
     try {
       // Load all data in parallel for better performance
@@ -271,38 +463,46 @@ class _DashboardPageState extends State<DashboardPage>
         print('Analysis Data Count: ${analysisData.length}');
         print('Movements Data Count: ${movementsData.length}');
 
-        if (!mounted) return;
-        setState(() {
-          summary = summaryData;
-          analysis = List<Map<String, dynamic>>.from(analysisData);
-          filteredAnalysis = analysis;
-          movements = List<Map<String, dynamic>>.from(movementsData);
-          filteredMovements = movements;
+        if (mounted) {
+          setState(() {
+            summary = summaryData;
+            analysis = List<Map<String, dynamic>>.from(analysisData);
+            movements = List<Map<String, dynamic>>.from(movementsData);
+            filteredAnalysis = analysis;
+            filteredMovements = movements;
 
-          // Process and extract unique products
-          final productMap = <String, Map<String, dynamic>>{};
+            // Process and extract unique products
+            final productMap = <String, Map<String, dynamic>>{};
 
-          for (var item in analysis) {
-            final code = item['codigo']?.toString() ?? '';
-            if (!productMap.containsKey(code)) {
-              productMap[code] = {
-                'code': code,
-                'description':
-                    item['nombre_producto']?.toString() ?? 'Sin descripción',
-                'group': _getGroupName(item['grupo']?.toString() ?? ''),
-                'quantity': item['cantidad_saldo_actual'] ?? 0,
-                'unitValue': item['costo_unitario'] ?? 0,
-                'totalValue': item['valor_saldo_actual'] ?? 0,
-                'rotation': item['rotacion'] ?? 'Activo',
-                'stagnant': item['estancado'] ?? 'No',
-                'highRotation': item['alta_rotacion'] ?? 'No',
-              };
+            for (var item in analysis) {
+              final code = item['codigo']?.toString() ?? '';
+              if (!productMap.containsKey(code)) {
+                productMap[code] = {
+                  'code': code,
+                  'description':
+                      item['nombre_producto']?.toString() ?? 'Sin descripción',
+                  'group': _getGroupName(item['grupo']?.toString() ?? ''),
+                  'quantity': item['cantidad_saldo_actual'] ?? 0,
+                  'unitValue': item['costo_unitario'] ?? 0,
+                  'totalValue': item['valor_saldo_actual'] ?? 0,
+                  'rotation': item['rotacion'] ?? 'Activo',
+                  'stagnant': item['estancado'] ?? 'No',
+                  'highRotation': item['alta_rotacion'] ?? 'No',
+                };
+              }
             }
-          }
 
-          products = productMap.values.toList();
-          isLoading = false;
-        });
+            products = productMap.values.toList();
+
+            // Populate descriptionToGroup map
+            descriptionToGroup = {};
+            for (var product in products) {
+              descriptionToGroup[product['description']] = product['group'];
+            }
+
+            isLoading = false;
+          });
+        }
 
         print(
           'Data loaded successfully. Summary: ${summary != null}, Analysis: ${analysis.length}, Movements: ${movements.length}, Products: ${products.length}',
@@ -990,9 +1190,7 @@ class _DashboardPageState extends State<DashboardPage>
                           ),
                         ),
                         TextButton.icon(
-                          onPressed: () {
-                            // Implementar exportación
-                          },
+                          onPressed: _showExportDialog,
                           icon: const Icon(Icons.download),
                           label: const Text('Exportar'),
                         ),
@@ -1036,7 +1234,7 @@ class _DashboardPageState extends State<DashboardPage>
                           minHeight: 400,
                           maxHeight: 600,
                         ),
-                        child: DataTable2(
+                        child: PaginatedDataTable2(
                           columnSpacing: 12,
                           horizontalMargin: 12,
                           minWidth: 800,
@@ -1079,42 +1277,7 @@ class _DashboardPageState extends State<DashboardPage>
                               numeric: true,
                             ),
                           ],
-                          rows: filteredMovements.map((item) {
-                            return DataRow(
-                              cells: [
-                                DataCell(
-                                  Text(
-                                    DateFormat('dd/MM/yyyy').format(
-                                      DateTime.parse(item['date'] ?? ''),
-                                    ),
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(item['product_description'] ?? ''),
-                                ),
-                                DataCell(Text(item['warehouse'] ?? '')),
-                                DataCell(Text(item['document_type'] ?? '')),
-                                DataCell(Text(item['document_number'] ?? '')),
-                                DataCell(
-                                  Text(item['quantity']?.toString() ?? '0'),
-                                ),
-                                DataCell(
-                                  Text(
-                                    CurrencyFormatter.format(
-                                      item['unit_cost'] ?? 0,
-                                    ),
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    CurrencyFormatter.format(
-                                      item['total'] ?? 0,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }).toList(),
+                          source: MovementsDataSource(filteredMovements),
                         ),
                       ),
                   ],
@@ -1430,8 +1593,6 @@ class _DashboardPageState extends State<DashboardPage>
                                   columnSpacing: 12,
                                   horizontalMargin: 12,
                                   minWidth: 1000,
-                                  scrollController: ScrollController(),
-                                  isHorizontalScrollBarVisible: true,
                                   columns: const [
                                     DataColumn2(
                                       label: Text('Código'),
@@ -1471,46 +1632,41 @@ class _DashboardPageState extends State<DashboardPage>
                                       size: ColumnSize.S,
                                     ),
                                   ],
-                                  rows: filteredAnalysis.map((item) {
-                                    return DataRow(
-                                      cells: [
-                                        DataCell(Text(item['codigo'] ?? '')),
-                                        DataCell(
-                                          Text(item['nombre_producto'] ?? ''),
+                                  rows: filteredAnalysis.map((item) => DataRow(
+                                    cells: [
+                                      DataCell(Text(item['codigo'] ?? '')),
+                                      DataCell(
+                                        Text(item['nombre_producto'] ?? ''),
+                                      ),
+                                      DataCell(Text(item['grupo'] ?? '')),
+                                      DataCell(
+                                        Text(
+                                          item['cantidad_saldo_actual']?.toString() ?? '0',
                                         ),
-                                        DataCell(Text(item['grupo'] ?? '')),
-                                        DataCell(
-                                          Text(
-                                            item['cantidad_saldo_actual']
-                                                    ?.toString() ??
-                                                '0',
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          CurrencyFormatter.format(
+                                            item['valor_saldo_actual'] ?? 0,
                                           ),
                                         ),
-                                        DataCell(
-                                          Text(
-                                            CurrencyFormatter.format(
-                                              item['valor_saldo_actual'] ?? 0,
-                                            ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          CurrencyFormatter.format(
+                                            item['costo_unitario'] ?? 0,
                                           ),
                                         ),
-                                        DataCell(
-                                          Text(
-                                            CurrencyFormatter.format(
-                                              item['costo_unitario'] ?? 0,
-                                            ),
-                                          ),
-                                        ),
-                                        DataCell(
-                                            Text(item['estancado'] ?? 'No')),
-                                        DataCell(
-                                          Text(item['rotacion'] ?? 'Activo'),
-                                        ),
-                                        DataCell(
-                                          Text(item['alta_rotacion'] ?? 'No'),
-                                        ),
-                                      ],
-                                    );
-                                  }).toList(),
+                                      ),
+                                      DataCell(Text(item['estancado'] ?? 'No')),
+                                      DataCell(
+                                        Text(item['rotacion'] ?? 'Activo'),
+                                      ),
+                                      DataCell(
+                                        Text(item['alta_rotacion'] ?? 'No'),
+                                      ),
+                                    ],
+                                  )).toList(),
                                 ),
                               ),
                             ),
@@ -1555,71 +1711,6 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   void _applyFilters() {
-    setState(() {
-      filteredAnalysis = analysis.where((item) {
-        // Filtro por búsqueda (código o descripción)
-        if (searchQuery != null && searchQuery!.isNotEmpty) {
-          final code = item['codigo']?.toString().toLowerCase() ?? '';
-          final description =
-              item['nombre_producto']?.toString().toLowerCase() ?? '';
-          final query = searchQuery!.toLowerCase();
-          if (!code.contains(query) && !description.contains(query)) {
-            return false;
-          }
-        }
-
-        // Filtro por almacén
-        if (selectedWarehouse != null && selectedWarehouse!.isNotEmpty) {
-          if (item['almacen'] != selectedWarehouse) return false;
-        }
-
-        // Filtro por grupo
-        if (selectedGroup != null && selectedGroup!.isNotEmpty) {
-          if (item['grupo'] != selectedGroup) return false;
-        }
-
-        // Filtro por rotación
-        if (selectedRotation != null && selectedRotation!.isNotEmpty) {
-          if (item['rotacion'] != selectedRotation) return false;
-        }
-
-        // Filtro por estancado
-        if (selectedStagnant != null && selectedStagnant!.isNotEmpty) {
-          if (item['estancado'] != selectedStagnant) return false;
-        }
-
-        // Filtro por alta rotación
-        if (selectedHighRotation != null && selectedHighRotation!.isNotEmpty) {
-          if (item['alta_rotacion'] != selectedHighRotation) return false;
-        }
-
-        return true;
-      }).toList();
-
-      filteredMovements = movements.where((item) {
-        // Filtro por almacén
-        if (selectedWarehouse != null && selectedWarehouse!.isNotEmpty) {
-          if (item['warehouse'] != selectedWarehouse) return false;
-        }
-
-        // Filtro por grupo (usando category)
-        if (selectedGroup != null && selectedGroup!.isNotEmpty) {
-          if (item['category'] != selectedGroup) return false;
-        }
-
-        // Filtro por fecha
-        if (selectedDateRange != null) {
-          final date = DateTime.parse(item['date']);
-          if (date.isBefore(selectedDateRange!.start) ||
-              date.isAfter(selectedDateRange!.end)) {
-            return false;
-          }
-        }
-
-        return true;
-      }).toList();
-    });
-
     // Recargar datos con filtros aplicados desde el backend
     _loadDataWithFilters();
   }
@@ -1630,32 +1721,35 @@ class _DashboardPageState extends State<DashboardPage>
     try {
       // Construir parámetros de consulta para análisis
       final analysisParams = <String, String>{};
-      if (selectedWarehouse != null && selectedWarehouse!.isNotEmpty) {
-        analysisParams['warehouse'] = selectedWarehouse!;
+      if (selectedWarehouseAnalysis != null &&
+          selectedWarehouseAnalysis!.isNotEmpty) {
+        analysisParams['warehouse'] = selectedWarehouseAnalysis!;
       }
-      if (selectedGroup != null && selectedGroup!.isNotEmpty) {
-        analysisParams['category'] = selectedGroup!;
+      if (selectedGroupAnalysis != null && selectedGroupAnalysis!.isNotEmpty) {
+        analysisParams['category'] = selectedGroupAnalysis!;
       }
-      if (selectedDateRange != null) {
+      if (selectedDateRangeAnalysis != null) {
         analysisParams['date_from'] =
-            selectedDateRange!.start.toIso8601String().split('T')[0];
+            selectedDateRangeAnalysis!.start.toIso8601String().split('T')[0];
         analysisParams['date_to'] =
-            selectedDateRange!.end.toIso8601String().split('T')[0];
+            selectedDateRangeAnalysis!.end.toIso8601String().split('T')[0];
       }
 
       // Construir parámetros de consulta para movimientos
       final movementsParams = <String, String>{};
-      if (selectedWarehouse != null && selectedWarehouse!.isNotEmpty) {
-        movementsParams['warehouse'] = selectedWarehouse!;
+      if (selectedWarehouseMovements != null &&
+          selectedWarehouseMovements!.isNotEmpty) {
+        movementsParams['warehouse'] = selectedWarehouseMovements!;
       }
-      if (selectedGroup != null && selectedGroup!.isNotEmpty) {
-        movementsParams['category'] = selectedGroup!;
+      if (selectedGroupMovements != null &&
+          selectedGroupMovements!.isNotEmpty) {
+        movementsParams['category'] = selectedGroupMovements!;
       }
-      if (selectedDateRange != null) {
+      if (selectedDateRangeMovements != null) {
         movementsParams['date_from'] =
-            selectedDateRange!.start.toIso8601String().split('T')[0];
+            selectedDateRangeMovements!.start.toIso8601String().split('T')[0];
         movementsParams['date_to'] =
-            selectedDateRange!.end.toIso8601String().split('T')[0];
+            selectedDateRangeMovements!.end.toIso8601String().split('T')[0];
       }
 
       final analysisUri = Uri.parse(
@@ -1699,7 +1793,7 @@ class _DashboardPageState extends State<DashboardPage>
                 'group': _getGroupName(item['grupo']?.toString() ?? ''),
                 'quantity': item['cantidad'] ?? 0,
                 'unitValue': item['costo_unitario'] ?? 0,
-                'totalValue': item['valor_total'] ?? 0,
+                'totalValue': item['valor_saldo_actual'] ?? 0,
                 'rotation': item['rotacion'] ?? 'Activo',
                 'stagnant': item['estancado'] ?? 'No',
                 'highRotation': item['alta_rotacion'] ?? 'No',
@@ -1709,6 +1803,16 @@ class _DashboardPageState extends State<DashboardPage>
 
           products = productMap.values.toList();
         });
+
+        // Apply local search filtering
+        if (searchQueryAnalysis != null && searchQueryAnalysis!.isNotEmpty) {
+          filteredAnalysis = filteredAnalysis.where((item) {
+            final code = item['codigo']?.toString().toLowerCase() ?? '';
+            final desc = item['nombre_producto']?.toString().toLowerCase() ?? '';
+            return code.contains(searchQueryAnalysis!.toLowerCase()) ||
+                   desc.contains(searchQueryAnalysis!.toLowerCase());
+          }).toList();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -1723,121 +1827,169 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   void _clearFilters() {
+    final isAnalysisTab = _tabController.index == 1;
+    final isMovementsTab = _tabController.index == 2;
+
     setState(() {
-      selectedWarehouse = null;
-      selectedGroup = null;
-      selectedRotation = null;
-      selectedStagnant = null;
-      selectedHighRotation = null;
-      selectedDateRange = null;
-      searchQuery = null;
-      filteredAnalysis = analysis;
-      filteredMovements = movements;
+      if (isAnalysisTab) {
+        selectedGroupAnalysis = null;
+        selectedRotationAnalysis = null;
+        selectedStagnantAnalysis = null;
+        selectedHighRotationAnalysis = null;
+        selectedDateRangeAnalysis = null;
+        searchQueryAnalysis = null;
+      } else if (isMovementsTab) {
+        selectedWarehouseMovements = null;
+        selectedGroupMovements = null;
+        selectedDateRangeMovements = null;
+      }
     });
+    _loadDataWithFilters();
   }
 
   void _showFiltersDialog() {
+    final currentTab = _tabController.index;
+    final isAnalysisTab = currentTab == 1;
+    final isMovementsTab = currentTab == 2;
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            final DateTimeRange? selectedDateRange = isAnalysisTab
+                ? selectedDateRangeAnalysis
+                : isMovementsTab
+                    ? selectedDateRangeMovements
+                    : null;
+
+            String dateRangeText = 'Seleccionar rango de fechas (opcional)';
+            if (selectedDateRange != null) {
+              final dateFormat = DateFormat('dd/MM/yyyy');
+              final startDate = dateFormat.format(selectedDateRange.start);
+              final endDate = dateFormat.format(selectedDateRange.end);
+              dateRangeText = '$startDate - $endDate';
+            }
+
             return AlertDialog(
-              title: const Text('Filtros'),
+              title: Text(
+                  'Filtros - ${isAnalysisTab ? 'Análisis de Productos' : isMovementsTab ? 'Movimientos' : 'General'}'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Filtro por almacén
-                    DropdownButtonFormField<String>(
-                      value: selectedWarehouse,
-                      decoration: const InputDecoration(labelText: 'Almacén'),
-                      items: _getUniqueValues('almacen').map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedWarehouse = value);
-                      },
-                    ),
-
-                    // Filtro por grupo
-                    DropdownButtonFormField<String>(
-                      value: selectedGroup,
-                      decoration: const InputDecoration(labelText: 'Grupo'),
-                      items: _getUniqueValues('grupo').map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedGroup = value);
-                      },
-                    ),
-
-                    // Filtro por rotación
-                    DropdownButtonFormField<String>(
-                      value: selectedRotation,
-                      decoration: const InputDecoration(labelText: 'Rotación'),
-                      items: ['Activo', 'Estancado', 'Obsoleto'].map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedRotation = value);
-                      },
-                    ),
-
-                    // Filtro por estancado
-                    DropdownButtonFormField<String>(
-                      value: selectedStagnant,
-                      decoration: const InputDecoration(labelText: 'Estancado'),
-                      items: ['Sí', 'No'].map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedStagnant = value);
-                      },
-                    ),
-
-                    // Filtro por alta rotación
-                    DropdownButtonFormField<String>(
-                      value: selectedHighRotation,
-                      decoration: const InputDecoration(
-                        labelText: 'Alta Rotación',
+                    // Filtro por almacén (solo para movimientos)
+                    if (isMovementsTab)
+                      DropdownButtonFormField<String>(
+                        value: selectedWarehouseMovements,
+                        decoration: const InputDecoration(labelText: 'Almacén'),
+                        items: _getUniqueValues('almacen').map((value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedWarehouseMovements = value);
+                        },
                       ),
-                      items: ['Sí', 'No'].map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedHighRotation = value);
-                      },
-                    ),
 
-                    // Campo de búsqueda por código o descripción
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      initialValue: searchQuery,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar por código o descripción',
-                        hintText: 'Ingrese código o descripción del producto',
-                        prefixIcon: Icon(Icons.search_rounded),
+                    // Filtro por grupo (solo para análisis)
+                    if (isAnalysisTab) ...[
+                      DropdownButtonFormField<String>(
+                        value: selectedGroupAnalysis,
+                        decoration: const InputDecoration(labelText: 'Grupo'),
+                        items: _getUniqueValues('grupo').map((value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedGroupAnalysis = value);
+                        },
                       ),
-                      onChanged: (value) {
-                        setState(() => searchQuery = value);
-                      },
-                    ),
+
+                      // Filtro por rotación
+                      DropdownButtonFormField<String>(
+                        value: selectedRotationAnalysis,
+                        decoration:
+                            const InputDecoration(labelText: 'Rotación'),
+                        items: ['Activo', 'Estancado', 'Obsoleto'].map((value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedRotationAnalysis = value);
+                        },
+                      ),
+
+                      // Filtro por estancado
+                      DropdownButtonFormField<String>(
+                        value: selectedStagnantAnalysis,
+                        decoration:
+                            const InputDecoration(labelText: 'Estancado'),
+                        items: ['Sí', 'No'].map((value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedStagnantAnalysis = value);
+                        },
+                      ),
+
+                      // Filtro por alta rotación
+                      DropdownButtonFormField<String>(
+                        value: selectedHighRotationAnalysis,
+                        decoration: const InputDecoration(
+                          labelText: 'Alta Rotación',
+                        ),
+                        items: ['Sí', 'No'].map((value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedHighRotationAnalysis = value);
+                        },
+                      ),
+
+                      // Campo de búsqueda por código o descripción
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue: searchQueryAnalysis,
+                        decoration: const InputDecoration(
+                          labelText: 'Buscar por código o descripción',
+                          hintText: 'Ingrese código o descripción del producto',
+                          prefixIcon: Icon(Icons.search_rounded),
+                        ),
+                        onChanged: (value) {
+                          setState(() => searchQueryAnalysis = value);
+                        },
+                      ),
+                    ],
+
+                    // Filtro por grupo para movimientos
+                    if (isMovementsTab) ...[
+                      DropdownButtonFormField<String>(
+                        value: selectedGroupMovements,
+                        decoration: const InputDecoration(labelText: 'Grupo'),
+                        items: _getUniqueValues('grupo').map((value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedGroupMovements = value);
+                        },
+                      ),
+                    ],
 
                     // Filtro por rango de fechas
                     const SizedBox(height: 16),
@@ -1855,14 +2007,16 @@ class _DashboardPageState extends State<DashboardPage>
                           initialDateRange: selectedDateRange,
                         );
                         if (picked != null) {
-                          setState(() => selectedDateRange = picked);
+                          setState(() {
+                            if (isAnalysisTab) {
+                              selectedDateRangeAnalysis = picked;
+                            } else if (isMovementsTab) {
+                              selectedDateRangeMovements = picked;
+                            }
+                          });
                         }
                       },
-                      child: Text(
-                        selectedDateRange == null
-                            ? 'Seleccionar rango de fechas'
-                            : '${DateFormat('dd/MM/yyyy').format(selectedDateRange!.start)} - ${DateFormat('dd/MM/yyyy').format(selectedDateRange!.end)}',
-                      ),
+                      child: Text(dateRangeText),
                     ),
                   ],
                 ),
@@ -1900,24 +2054,39 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   void _showExportDialog() {
+    final isAnalysisTab = _tabController.index == 1;
+    final isMovementsTab = _tabController.index == 2;
+
+    // Don't show dialog if not on a relevant tab
+    if (!isAnalysisTab && !isMovementsTab) return;
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Exportar Datos'),
+          title: Text(
+              'Exportar Datos de ${isAnalysisTab ? 'Análisis' : 'Movimientos'}'),
           content: const Text('¿Qué formato desea usar para exportar?'),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                _exportToExcel();
+                if (isAnalysisTab) {
+                  _exportAnalysisToExcel();
+                } else if (isMovementsTab) {
+                  _exportMovementsToExcel();
+                }
               },
               child: const Text('Excel'),
             ),
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                _exportToPdf();
+                if (isAnalysisTab) {
+                  _exportAnalysisToPdf();
+                } else if (isMovementsTab) {
+                  _exportMovementsToPdf();
+                }
               },
               child: const Text('PDF'),
             ),
@@ -1927,7 +2096,7 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
-  Future<void> _exportToExcel() async {
+  Future<void> _exportAnalysisToExcel() async {
     try {
       final excel = Excel.createExcel()
         ..rename('Sheet1', 'Análisis de Productos');
@@ -1977,18 +2146,26 @@ class _DashboardPageState extends State<DashboardPage>
           ..click();
         html.Url.revokeObjectUrl(url);
       } else {
-        // Mobile/Desktop implementation using path_provider and share_plus
-        final directory = await getApplicationDocumentsDirectory();
-        final file = io.File('${directory.path}/analisis_productos.xlsx');
-        await file.writeAsBytes(bytes!);
-        await Share.shareXFiles([
-          XFile(file.path),
-        ], text: 'Análisis de Productos');
-      }
+        // Mobile/Desktop implementation using FilePicker to save directly
+        String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar Excel',
+          fileName: 'analisis_productos.xlsx',
+          type: FileType.custom,
+          allowedExtensions: ['xlsx'],
+        );
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Archivo Excel descargado')));
+        if (outputFile != null) {
+          final file = io.File(outputFile);
+          await file.writeAsBytes(bytes!);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Excel guardado correctamente')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado cancelado')),
+          );
+        }
+      }
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -1996,7 +2173,69 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
-  Future<void> _exportToPdf() async {
+  Future<void> _exportMovementsToExcel() async {
+    try {
+      final excel = Excel.createExcel()..rename('Sheet1', 'Movimientos');
+      final sheet = excel['Movimientos'];
+
+      // Headers
+      List<String> headers = [
+        'Fecha',
+        'Producto',
+        'Almacén',
+        'Tipo Doc.',
+        'Documento',
+        'Cantidad',
+        'Costo Unit.',
+        'Total',
+      ];
+      sheet.appendRow(headers.map((h) => TextCellValue(h)).toList());
+
+      // Data
+      for (var item in filteredMovements) {
+        List<CellValue?> rowData = [
+          TextCellValue(DateFormat('dd/MM/yyyy')
+              .format(DateTime.parse(item['date'] ?? ''))),
+          TextCellValue(item['product_description'] ?? ''),
+          TextCellValue(item['warehouse'] ?? ''),
+          TextCellValue(item['document_type'] ?? ''),
+          TextCellValue(item['document_number'] ?? ''),
+          TextCellValue(item['quantity']?.toString() ?? '0'),
+          TextCellValue(
+              (item['unit_cost'] as num?)?.toStringAsFixed(2) ?? '0.00'),
+          TextCellValue((item['total'] as num?)?.toStringAsFixed(2) ?? '0.00'),
+        ];
+        sheet.appendRow(rowData);
+      }
+
+      final bytes = excel.encode();
+      if (kIsWeb) {
+        final blob = html.Blob([bytes]);
+        final url = html.Url.createObjectUrlFromBlob(blob);
+        html.AnchorElement(href: url)
+          ..setAttribute('download', 'movimientos.xlsx')
+          ..click();
+        html.Url.revokeObjectUrl(url);
+      } else {
+        String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar Excel',
+          fileName: 'movimientos.xlsx',
+        );
+        if (outputFile != null) {
+          final file = io.File(outputFile);
+          await file.writeAsBytes(bytes!);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Excel guardado correctamente')),
+          );
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error al exportar: $e')));
+    }
+  }
+
+  Future<void> _exportAnalysisToPdf() async {
     try {
       final pdf = pw.Document();
 
@@ -2053,17 +2292,119 @@ class _DashboardPageState extends State<DashboardPage>
         ),
       );
 
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
-      );
+      final bytes = await pdf.save();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PDF generado correctamente')),
-      );
+      if (kIsWeb) {
+        // Web implementation using dart:html
+        final blob = html.Blob([bytes]);
+        final url = html.Url.createObjectUrlFromBlob(blob);
+        html.AnchorElement(href: url)
+          ..setAttribute('download', 'analisis_productos.pdf')
+          ..click();
+        html.Url.revokeObjectUrl(url);
+      } else {
+        // Mobile/Desktop implementation using FilePicker
+        String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar PDF',
+          fileName: 'analisis_productos.pdf',
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+
+        if (outputFile != null) {
+          final file = io.File(outputFile);
+          await file.writeAsBytes(bytes);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('PDF guardado correctamente')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Guardado cancelado')),
+          );
+        }
+      }
     } catch (e) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error al generar PDF: $e')));
+    }
+  }
+
+  Future<void> _exportMovementsToPdf() async {
+    try {
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4.landscape,
+          build: (context) => [
+            pw.Header(
+              level: 0,
+              child: pw.Text(
+                'Historial de Movimientos',
+                style: pw.TextStyle(
+                  fontSize: 24,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 20),
+            pw.TableHelper.fromTextArray(
+              headers: [
+                'Fecha',
+                'Producto',
+                'Almacén',
+                'Tipo Doc.',
+                'Documento',
+                'Cantidad',
+                'Costo Unit.',
+                'Total',
+              ],
+              data: filteredMovements
+                  .map(
+                    (item) => [
+                      DateFormat('dd/MM/yyyy')
+                          .format(DateTime.parse(item['date'] ?? '')),
+                      item['product_description'] ?? '',
+                      item['warehouse'] ?? '',
+                      item['document_type'] ?? '',
+                      item['document_number'] ?? '',
+                      item['quantity']?.toString() ?? '0',
+                      CurrencyFormatter.format(item['unit_cost'] ?? 0),
+                      CurrencyFormatter.format(item['total'] ?? 0),
+                    ],
+                  )
+                  .toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+            ),
+          ],
+        ),
+      );
+
+      final bytes = await pdf.save();
+      if (kIsWeb) {
+        final blob = html.Blob([bytes]);
+        final url = html.Url.createObjectUrlFromBlob(blob);
+        html.AnchorElement(href: url)
+          ..setAttribute('download', 'movimientos.pdf')
+          ..click();
+        html.Url.revokeObjectUrl(url);
+      } else {
+        String? outputFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar PDF',
+          fileName: 'movimientos.pdf',
+        );
+        if (outputFile != null) {
+          final file = io.File(outputFile);
+          await file.writeAsBytes(bytes);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('PDF guardado correctamente')),
+          );
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error al generar PDF: $e')));
     }
   }
 
