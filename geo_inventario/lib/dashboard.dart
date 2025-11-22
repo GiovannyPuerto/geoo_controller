@@ -75,6 +75,27 @@ class AnalysisDataSource extends DataTableSource {
 
   AnalysisDataSource(this.analysis);
 
+  Color _getRotationColor(String rotation) {
+    switch (rotation) {
+      case 'Activo':
+        return Colors.green;
+      case 'Estancado':
+        return Colors.orange;
+      case 'Obsoleto':
+        return Colors.red;
+      default:
+        return Colors.black;
+    }
+  }
+
+  Color _getStagnantColor(String stagnant) {
+    return stagnant == 'Sí' ? Colors.red : Colors.green;
+  }
+
+  Color _getHighRotationColor(String highRotation) {
+    return highRotation == 'Sí' ? Colors.green : Colors.grey;
+  }
+
   @override
   DataRow getRow(int index) {
     final item = analysis[index];
@@ -104,12 +125,32 @@ class AnalysisDataSource extends DataTableSource {
             ),
           ),
         ),
-        DataCell(Text(item['estancado'] ?? 'No')),
         DataCell(
-          Text(item['rotacion'] ?? 'Activo'),
+          Text(
+            item['estancado'] ?? 'No',
+            style: TextStyle(
+              color: _getStagnantColor(item['estancado'] ?? 'No'),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         DataCell(
-          Text(item['alta_rotacion'] ?? 'No'),
+          Text(
+            item['rotacion'] ?? 'Activo',
+            style: TextStyle(
+              color: _getRotationColor(item['rotacion'] ?? 'Activo'),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        DataCell(
+          Text(
+            item['alta_rotacion'] ?? 'No',
+            style: TextStyle(
+              color: _getHighRotationColor(item['alta_rotacion'] ?? 'No'),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
       ],
     );
@@ -125,7 +166,7 @@ class AnalysisDataSource extends DataTableSource {
   int get selectedRowCount => 0;
 }
 
-class DashboardPage extends StatefulWidget {
+class DashboardPage extends StatefulWidget {  
   const DashboardPage({super.key});
 
   @override
@@ -167,6 +208,19 @@ class _DashboardPageState extends State<DashboardPage>
   String? selectedGroupMovements;
 
   bool filtersApplied = false; // Flag to track if filters are applied
+
+  Color _getRotationColor(String rotation) {
+    switch (rotation) {
+      case 'Activo':
+        return Colors.green.shade400;
+      case 'Estancado':
+        return Colors.orange.shade400;
+      case 'Obsoleto':
+        return Colors.red.shade400;
+      default:
+        return Colors.grey.shade400;
+    }
+  }
 
   @override
   void initState() {
@@ -424,6 +478,39 @@ class _DashboardPageState extends State<DashboardPage>
     }
 
     try {
+      // Construir parámetros de consulta para análisis
+      final analysisParams = <String, String>{};
+      if (selectedWarehouseAnalysis != null &&
+          selectedWarehouseAnalysis!.isNotEmpty) {
+        analysisParams['warehouse'] = selectedWarehouseAnalysis!;
+      }
+      if (selectedGroupAnalysis != null && selectedGroupAnalysis!.isNotEmpty) {
+        analysisParams['category'] = selectedGroupAnalysis!;
+      }
+      if (selectedDateRangeAnalysis != null) {
+        analysisParams['date_from'] =
+            selectedDateRangeAnalysis!.start.toIso8601String().split('T')[0];
+        analysisParams['date_to'] =
+            selectedDateRangeAnalysis!.end.toIso8601String().split('T')[0];
+      }
+
+      // Construir parámetros de consulta para movimientos
+      final movementsParams = <String, String>{};
+      if (selectedWarehouseMovements != null &&
+          selectedWarehouseMovements!.isNotEmpty) {
+        movementsParams['warehouse'] = selectedWarehouseMovements!;
+      }
+      if (selectedGroupMovements != null &&
+          selectedGroupMovements!.isNotEmpty) {
+        movementsParams['category'] = selectedGroupMovements!;
+      }
+      if (selectedDateRangeMovements != null) {
+        movementsParams['date_from'] =
+            selectedDateRangeMovements!.start.toIso8601String().split('T')[0];
+        movementsParams['date_to'] =
+            selectedDateRangeMovements!.end.toIso8601String().split('T')[0];
+      }
+
       // Load all data in parallel for better performance
       final results = await Future.wait([
         http.get(
@@ -431,11 +518,11 @@ class _DashboardPageState extends State<DashboardPage>
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
         http.get(
-          Uri.parse('http://127.0.0.1:8000/api/inventory/analysis/'),
+          Uri.parse('http://127.0.0.1:8000/api/inventory/analysis/').replace(queryParameters: analysisParams),
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
         http.get(
-          Uri.parse('http://127.0.0.1:8000/api/inventory/records/'),
+          Uri.parse('http://127.0.0.1:8000/api/inventory/records/').replace(queryParameters: movementsParams),
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
       ]);
@@ -501,6 +588,18 @@ class _DashboardPageState extends State<DashboardPage>
             }
 
             isLoading = false;
+          });
+        }
+
+        // Apply local search filtering
+        if (searchQueryAnalysis != null && searchQueryAnalysis!.isNotEmpty) {
+          setState(() {
+            filteredAnalysis = filteredAnalysis.where((item) {
+              final code = item['codigo']?.toString().toLowerCase() ?? '';
+              final desc = item['nombre_producto']?.toString().toLowerCase() ?? '';
+              return code.contains(searchQueryAnalysis!.toLowerCase()) ||
+                     desc.contains(searchQueryAnalysis!.toLowerCase());
+            }).toList();
           });
         }
 
@@ -805,11 +904,15 @@ class _DashboardPageState extends State<DashboardPage>
     // Preparar datos para gráficos
     final groupData = <String, double>{};
     final rotationData = <String, int>{};
+    double totalValue = 0;
+    int totalProducts = filteredAnalysis.length;
 
     for (var item in filteredAnalysis) {
       final group = item['grupo']?.toString() ?? 'SIN CATEGORÍA';
       final quantity = (item['cantidad_saldo_actual'] as num?)?.toDouble() ?? 0;
+      final value = (item['valor_saldo_actual'] as num?)?.toDouble() ?? 0;
       groupData[group] = (groupData[group] ?? 0) + quantity;
+      totalValue += value;
 
       final rotation = item['rotacion']?.toString() ?? 'Activo';
       rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
@@ -835,8 +938,10 @@ class _DashboardPageState extends State<DashboardPage>
           b.value.compareTo(a.value)); // Ordenar por valor descendente
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Card(
@@ -861,44 +966,45 @@ class _DashboardPageState extends State<DashboardPage>
                           ),
                         ],
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Total productos: ${totalProducts.toString()} | Valor total: ${CurrencyFormatter.format(totalValue)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       SizedBox(
-                        height: 350,
+                        height: 400,
                         child: SfCircularChart(
                           legend: const Legend(
                             isVisible: true,
                             position: LegendPosition.bottom,
                             textStyle: TextStyle(
                               color: Colors.black87,
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: FontWeight.w500,
                             ),
                             overflowMode: LegendItemOverflowMode.wrap,
                             iconHeight: 12,
                             iconWidth: 12,
                           ),
-                          series: <CircularSeries>[
+                          series: <CircularSeries>[ 
                             PieSeries<MapEntry<String, double>, String>(
                               dataSource: sortedGroupData,
-                              xValueMapper:
-                                  (MapEntry<String, double> data, _) =>
-                                      data.key,
-                              yValueMapper:
-                                  (MapEntry<String, double> data, _) =>
-                                      data.value,
-                              pointColorMapper:
-                                  (MapEntry<String, double> data, int index) =>
-                                      groupColors[index % groupColors.length],
-                              dataLabelMapper:
-                                  (MapEntry<String, double> data, _) {
-                                final total =
-                                    groupData.values.reduce((a, b) => a + b);
-                                final percentage = (data.value / total * 100)
-                                    .toStringAsFixed(1);
+                              xValueMapper: (MapEntry<String, double> data, _) => data.key,
+                              yValueMapper: (MapEntry<String, double> data, _) => data.value,
+                              pointColorMapper: (MapEntry<String, double> data, int index) =>
+                                  groupColors[index % groupColors.length],
+                              dataLabelMapper: (MapEntry<String, double> data, _) {
+                                final total = groupData.values.reduce((a, b) => a + b);
+                                final percentage = (data.value / total * 100).toStringAsFixed(1);
+                                final valueFormatted = data.value.toStringAsFixed(0);
 
-                                // Use shorter names for chart labels
                                 final shortName = _getShortGroupName(data.key);
-                                return '$shortName\n$percentage%';
+                                return '$shortName\n$valueFormatted (${percentage}%)';
                               },
                               dataLabelSettings: DataLabelSettings(
                                 isVisible: true,
@@ -916,10 +1022,11 @@ class _DashboardPageState extends State<DashboardPage>
                                 ),
                                 useSeriesColor: false,
                                 color: Colors.white,
-                                borderRadius: 4,
+                                borderRadius: 6,
                                 borderWidth: 1,
                                 borderColor: Colors.grey.shade300,
-                                margin: const EdgeInsets.all(2),
+                                margin: const EdgeInsets.all(3),
+                                labelIntersectAction: LabelIntersectAction.shift,
                               ),
                               explode: true,
                               explodeOffset: '3%',
@@ -931,7 +1038,7 @@ class _DashboardPageState extends State<DashboardPage>
                             ),
                           ],
                         ),
-                      ),
+                      )
                     ],
                   ),
                 ),
@@ -961,16 +1068,25 @@ class _DashboardPageState extends State<DashboardPage>
                           ),
                         ],
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Total productos: ${totalProducts.toString()}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       SizedBox(
-                        height: 250,
+                        height: 400,
                         child: SfCircularChart(
                           legend: const Legend(
                             isVisible: true,
                             position: LegendPosition.bottom,
                             textStyle: TextStyle(
                               color: Colors.black87,
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: FontWeight.w500,
                             ),
                             overflowMode: LegendItemOverflowMode.wrap,
@@ -985,42 +1101,28 @@ class _DashboardPageState extends State<DashboardPage>
                               yValueMapper: (MapEntry<String, int> data, _) =>
                                   data.value,
                               pointColorMapper:
-                                  (MapEntry<String, int> data, int index) {
-                                // Custom colors for rotation status
-                                switch (data.key) {
-                                  case 'Activo':
-                                    return Colors.green.shade400;
-                                  case 'Estancado':
-                                    return Colors.orange.shade400;
-                                  case 'Obsoleto':
-                                    return Colors.red.shade400;
-                                  default:
-                                    return Colors.grey.shade400;
-                                }
+                                  (MapEntry<String, int> data, int index) =>
+                                      _getRotationColor(data.key),
+                              dataLabelMapper: (MapEntry<String, int> data, _) {
+                                final total = rotationData.values.reduce((a, b) => a + b);
+                                final percentage = (data.value / total * 100).toStringAsFixed(1);
+                                return '${data.key}\n${data.value} (${percentage}%)';
                               },
-                              dataLabelMapper:
-                                  (MapEntry<String, int> data, _) =>
-                                      '${data.key}\n${data.value}',
                               dataLabelSettings: DataLabelSettings(
                                 isVisible: true,
-                                textStyle: const TextStyle(
+                                textStyle: TextStyle(
                                   color: Colors.black87,
-                                  fontSize: 9,
+                                  fontSize: 10,
                                   fontWeight: FontWeight.w600,
                                 ),
                                 labelPosition: ChartDataLabelPosition.outside,
-                                connectorLineSettings: ConnectorLineSettings(
-                                  type: ConnectorType.curve,
-                                  length: '20%',
-                                  color: Colors.grey.shade600,
-                                  width: 1.5,
-                                ),
                                 useSeriesColor: false,
                                 color: Colors.white,
-                                borderRadius: 4,
+                                borderRadius: 6,
                                 borderWidth: 1,
                                 borderColor: Colors.grey.shade300,
-                                margin: const EdgeInsets.all(2),
+                                margin: const EdgeInsets.all(3),
+                                labelIntersectAction: LabelIntersectAction.shift,
                               ),
                               explode: true,
                               explodeOffset: '3%',
@@ -1589,10 +1691,12 @@ class _DashboardPageState extends State<DashboardPage>
                                 maxHeight: 800,
                               ),
                               child: Card(
-                                child: DataTable2(
+                                child: PaginatedDataTable2(
                                   columnSpacing: 12,
                                   horizontalMargin: 12,
                                   minWidth: 1000,
+                                  scrollController: ScrollController(),
+                                  isHorizontalScrollBarVisible: true,
                                   columns: const [
                                     DataColumn2(
                                       label: Text('Código'),
@@ -1632,41 +1736,7 @@ class _DashboardPageState extends State<DashboardPage>
                                       size: ColumnSize.S,
                                     ),
                                   ],
-                                  rows: filteredAnalysis.map((item) => DataRow(
-                                    cells: [
-                                      DataCell(Text(item['codigo'] ?? '')),
-                                      DataCell(
-                                        Text(item['nombre_producto'] ?? ''),
-                                      ),
-                                      DataCell(Text(item['grupo'] ?? '')),
-                                      DataCell(
-                                        Text(
-                                          item['cantidad_saldo_actual']?.toString() ?? '0',
-                                        ),
-                                      ),
-                                      DataCell(
-                                        Text(
-                                          CurrencyFormatter.format(
-                                            item['valor_saldo_actual'] ?? 0,
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(
-                                        Text(
-                                          CurrencyFormatter.format(
-                                            item['costo_unitario'] ?? 0,
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(Text(item['estancado'] ?? 'No')),
-                                      DataCell(
-                                        Text(item['rotacion'] ?? 'Activo'),
-                                      ),
-                                      DataCell(
-                                        Text(item['alta_rotacion'] ?? 'No'),
-                                      ),
-                                    ],
-                                  )).toList(),
+                                  source: AnalysisDataSource(filteredAnalysis),
                                 ),
                               ),
                             ),
