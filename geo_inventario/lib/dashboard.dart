@@ -2173,6 +2173,7 @@ class _DashboardPageState extends State<DashboardPage>
               onPressed: () {
                 Navigator.of(context).pop();
                 if (isAnalysisTab) {
+                  // Use new client PDF generator
                   _exportAnalysisToPdf();
                 } else if (isMovementsTab) {
                   _exportMovementsToPdf();
@@ -2326,74 +2327,117 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _exportAnalysisToPdf() async {
-    try {
-      final pdf = pw.Document();
+    // New implementation: Generate PDF client-side matching Excel format
+    final pdf = pw.Document();
 
+    // Define table headers for analysis
+    final headers = [
+      'Código',
+      'Nombre Producto',
+      'Grupo',
+      'Saldo Actual',
+      'Valor Saldo',
+      'Costo Unitario',
+      'Estancado',
+      'Rotación',
+      'Alta Rotación',
+    ];
+
+    // Convert filteredAnalysis to List<List<String>> for table rows
+    List<List<String>> dataRows = filteredAnalysis.map((item) {
+      return [
+        item['codigo']?.toString() ?? '',
+        item['nombre_producto']?.toString() ?? '',
+        item['grupo']?.toString() ?? '',
+        item['cantidad_saldo_actual']?.toString() ?? '0',
+        (item['valor_saldo_actual'] is num)
+            ? (item['valor_saldo_actual'] as num).toStringAsFixed(2)
+            : '0.00',
+        (item['costo_unitario'] is num)
+            ? (item['costo_unitario'] as num).toStringAsFixed(2)
+            : '0.00',
+        item['estancado']?.toString() ?? 'No',
+        item['rotacion']?.toString() ?? 'Activo',
+        item['alta_rotacion']?.toString() ?? 'No',
+      ];
+    }).toList();
+
+    // Split dataRows into chunks of a fixed size (e.g., 50 rows per page)
+    const int rowsPerPage = 50;
+    List<List<List<String>>> chunks = [];
+    for (var i = 0; i < dataRows.length; i += rowsPerPage) {
+      int end = (i + rowsPerPage < dataRows.length) ? i + rowsPerPage : dataRows.length;
+      chunks.add(dataRows.sublist(i, end));
+    }
+
+    // Add a MultiPage for each chunk
+    for (int i = 0; i < chunks.length; i++) {
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
+          pageFormat: PdfPageFormat.a4.landscape,
+          margin: pw.EdgeInsets.all(16),
           build: (context) => [
             pw.Header(
               level: 0,
-              child: pw.Text(
-                'Análisis de Productos',
-                style: pw.TextStyle(
-                  fontSize: 24,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
+              child: pw.Text('Informe de Análisis de Productos - Parte ${i + 1} de ${chunks.length}',
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                  )),
             ),
-            pw.SizedBox(height: 20),
-            pw.TableHelper.fromTextArray(
-              headers: [
-                'Código',
-                'Nombre Producto',
-                'Grupo',
-                'Saldo Actual',
-                'Valor Saldo',
-                'Costo Unit.',
-                'Estancado',
-                'Rotación',
-                'Alta Rotación',
-              ],
-              data: filteredAnalysis
-                  .map(
-                    (item) => [
-                      item['codigo'] ?? '',
-                      item['nombre_producto'] ?? '',
-                      item['grupo'] ?? '',
-                      item['cantidad_saldo_actual']?.toString() ?? '0',
-                      (item['valor_saldo_actual'] as double?)?.toStringAsFixed(
-                            2,
-                          ) ??
-                          '0.00',
-                      (item['costo_unitario'] as double?)?.toStringAsFixed(2) ??
-                          '0.00',
-                      item['estancado'] ?? 'No',
-                      item['rotacion'] ?? 'Activo',
-                      item['alta_rotacion'] ?? 'No',
-                    ],
-                  )
-                  .toList(),
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            pw.Paragraph(
+              text:
+                  'Informe generado el ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}.',
+            ),
+            pw.Table.fromTextArray(
+              headers: headers,
+              data: chunks[i],
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
+              ),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.green600),
               cellAlignment: pw.Alignment.centerLeft,
+              cellStyle: const pw.TextStyle(fontSize: 10),
+              columnWidths: {
+                0: pw.FixedColumnWidth(60),
+                1: pw.FlexColumnWidth(),
+                2: pw.FixedColumnWidth(80),
+                3: pw.FixedColumnWidth(60),
+                4: pw.FixedColumnWidth(80),
+                5: pw.FixedColumnWidth(80),
+                6: pw.FixedColumnWidth(60),
+                7: pw.FixedColumnWidth(60),
+                8: pw.FixedColumnWidth(60),
+              },
+              cellAlignments: {
+                3: pw.Alignment.centerRight,
+                4: pw.Alignment.centerRight,
+                5: pw.Alignment.centerRight,
+              },
+            ),
+            pw.Padding(padding: const pw.EdgeInsets.only(top: 20)),
+            pw.Paragraph(
+              text:
+                  'Generado el ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}.',
+              style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
             ),
           ],
         ),
       );
+    }
 
+    try {
       final bytes = await pdf.save();
 
       if (kIsWeb) {
-        // Web implementation using dart:html
-        final blob = html.Blob([bytes]);
+        final blob = html.Blob([bytes], 'application/pdf');
         final url = html.Url.createObjectUrlFromBlob(blob);
-        html.AnchorElement(href: url)
+        final anchor = html.AnchorElement(href: url)
           ..setAttribute('download', 'analisis_productos.pdf')
           ..click();
         html.Url.revokeObjectUrl(url);
       } else {
-        // Mobile/Desktop implementation using FilePicker
         String? outputFile = await FilePicker.platform.saveFile(
           dialogTitle: 'Guardar PDF',
           fileName: 'analisis_productos.pdf',
@@ -2404,97 +2448,105 @@ class _DashboardPageState extends State<DashboardPage>
         if (outputFile != null) {
           final file = io.File(outputFile);
           await file.writeAsBytes(bytes);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('PDF guardado correctamente')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('PDF guardado correctamente')),
+            );
+          }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Guardado cancelado')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Guardado cancelado')),
+            );
+          }
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error al generar PDF: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generando PDF: $e')),
+        );
+      }
     }
   }
 
   Future<void> _exportMovementsToPdf() async {
     try {
-      final pdf = pw.Document();
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.landscape,
-          build: (context) => [
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                'Historial de Movimientos',
-                style: pw.TextStyle(
-                  fontSize: 24,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 20),
-            pw.TableHelper.fromTextArray(
-              headers: [
-                'Fecha',
-                'Producto',
-                'Almacén',
-                'Tipo Doc.',
-                'Documento',
-                'Cantidad',
-                'Costo Unit.',
-                'Total',
-              ],
-              data: filteredMovements
-                  .map(
-                    (item) => [
-                      DateFormat('dd/MM/yyyy')
-                          .format(DateTime.parse(item['date'] ?? '')),
-                      item['product_description'] ?? '',
-                      item['warehouse'] ?? '',
-                      item['document_type'] ?? '',
-                      item['document_number'] ?? '',
-                      item['quantity']?.toString() ?? '0',
-                      CurrencyFormatter.format(item['unit_cost'] ?? 0),
-                      CurrencyFormatter.format(item['total'] ?? 0),
-                    ],
-                  )
-                  .toList(),
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-              cellAlignment: pw.Alignment.centerLeft,
-            ),
-          ],
-        ),
-      );
+      // Build query parameters for filters if applicable
+      final queryParameters = <String, String>{};
 
-      final bytes = await pdf.save();
-      if (kIsWeb) {
-        final blob = html.Blob([bytes]);
-        final url = html.Url.createObjectUrlFromBlob(blob);
-        html.AnchorElement(href: url)
-          ..setAttribute('download', 'movimientos.pdf')
-          ..click();
-        html.Url.revokeObjectUrl(url);
+      if (selectedWarehouseMovements != null &&
+          selectedWarehouseMovements!.isNotEmpty) {
+        queryParameters['warehouse'] = selectedWarehouseMovements!;
+      }
+      if (selectedGroupMovements != null &&
+          selectedGroupMovements!.isNotEmpty) {
+        queryParameters['category'] = selectedGroupMovements!;
+      }
+      if (selectedDateRangeMovements != null) {
+        queryParameters['date_from'] =
+            selectedDateRangeMovements!.start.toIso8601String().split('T')[0];
+        queryParameters['date_to'] =
+            selectedDateRangeMovements!.end.toIso8601String().split('T')[0];
+      }
+
+      // Build URI for backend PDF export endpoint for movements
+      final uri =
+          Uri.parse('http://127.0.0.1:8000/api/inventory/export_movements/')
+              .replace(
+                  queryParameters: {...queryParameters, 'format_type': 'pdf'});
+
+      final response = await http.get(uri);
+
+      if (response.statusCode == 200) {
+        final bytes = response.bodyBytes;
+
+        if (kIsWeb) {
+          final blob = html.Blob([bytes], 'application/pdf');
+          final url = html.Url.createObjectUrlFromBlob(blob);
+          final anchor = html.AnchorElement(href: url)
+            ..setAttribute('download', 'movimientos.pdf')
+            ..click();
+          html.Url.revokeObjectUrl(url);
+        } else {
+          String? outputFile = await FilePicker.platform.saveFile(
+            dialogTitle: 'Guardar PDF',
+            fileName: 'movimientos.pdf',
+            type: FileType.custom,
+            allowedExtensions: ['pdf'],
+          );
+
+          if (outputFile != null) {
+            final file = io.File(outputFile);
+            await file.writeAsBytes(bytes);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('PDF guardado correctamente')),
+              );
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Guardado cancelado')),
+              );
+            }
+          }
+        }
       } else {
-        String? outputFile = await FilePicker.platform.saveFile(
-          dialogTitle: 'Guardar PDF',
-          fileName: 'movimientos.pdf',
-        );
-        if (outputFile != null) {
-          final file = io.File(outputFile);
-          await file.writeAsBytes(bytes);
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('PDF guardado correctamente')),
+            SnackBar(
+                content: Text(
+                    'Error al descargar PDF: HTTP ${response.statusCode}')),
           );
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error al generar PDF: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error descargando PDF: $e')),
+        );
+      }
     }
   }
 
