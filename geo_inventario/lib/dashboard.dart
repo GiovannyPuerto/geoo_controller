@@ -166,7 +166,7 @@ class AnalysisDataSource extends DataTableSource {
   int get selectedRowCount => 0;
 }
 
-class DashboardPage extends StatefulWidget {  
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
   @override
@@ -250,11 +250,13 @@ class _DashboardPageState extends State<DashboardPage>
     if (mounted) {
       setState(() {
         searchQueryAnalysis = prefs.getString('searchQueryAnalysis');
-        selectedWarehouseAnalysis = prefs.getString('selectedWarehouseAnalysis');
+        selectedWarehouseAnalysis =
+            prefs.getString('selectedWarehouseAnalysis');
         selectedGroupAnalysis = prefs.getString('selectedGroupAnalysis');
         selectedRotationAnalysis = prefs.getString('selectedRotationAnalysis');
         selectedStagnantAnalysis = prefs.getString('selectedStagnantAnalysis');
-        selectedHighRotationAnalysis = prefs.getString('selectedHighRotationAnalysis');
+        selectedHighRotationAnalysis =
+            prefs.getString('selectedHighRotationAnalysis');
 
         final startAnalysis = prefs.getString('selectedDateRangeAnalysisStart');
         final endAnalysis = prefs.getString('selectedDateRangeAnalysisEnd');
@@ -265,10 +267,12 @@ class _DashboardPageState extends State<DashboardPage>
           );
         }
 
-        selectedWarehouseMovements = prefs.getString('selectedWarehouseMovements');
+        selectedWarehouseMovements =
+            prefs.getString('selectedWarehouseMovements');
         selectedGroupMovements = prefs.getString('selectedGroupMovements');
 
-        final startMovements = prefs.getString('selectedDateRangeMovementsStart');
+        final startMovements =
+            prefs.getString('selectedDateRangeMovementsStart');
         final endMovements = prefs.getString('selectedDateRangeMovementsEnd');
         if (startMovements != null && endMovements != null) {
           selectedDateRangeMovements = DateTimeRange(
@@ -283,11 +287,15 @@ class _DashboardPageState extends State<DashboardPage>
   Future<void> _saveFiltersToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('searchQueryAnalysis', searchQueryAnalysis ?? '');
-    await prefs.setString('selectedWarehouseAnalysis', selectedWarehouseAnalysis ?? '');
+    await prefs.setString(
+        'selectedWarehouseAnalysis', selectedWarehouseAnalysis ?? '');
     await prefs.setString('selectedGroupAnalysis', selectedGroupAnalysis ?? '');
-    await prefs.setString('selectedRotationAnalysis', selectedRotationAnalysis ?? '');
-    await prefs.setString('selectedStagnantAnalysis', selectedStagnantAnalysis ?? '');
-    await prefs.setString('selectedHighRotationAnalysis', selectedHighRotationAnalysis ?? '');
+    await prefs.setString(
+        'selectedRotationAnalysis', selectedRotationAnalysis ?? '');
+    await prefs.setString(
+        'selectedStagnantAnalysis', selectedStagnantAnalysis ?? '');
+    await prefs.setString(
+        'selectedHighRotationAnalysis', selectedHighRotationAnalysis ?? '');
 
     if (selectedDateRangeAnalysis != null) {
       await prefs.setString('selectedDateRangeAnalysisStart',
@@ -299,8 +307,10 @@ class _DashboardPageState extends State<DashboardPage>
       await prefs.remove('selectedDateRangeAnalysisEnd');
     }
 
-    await prefs.setString('selectedWarehouseMovements', selectedWarehouseMovements ?? '');
-    await prefs.setString('selectedGroupMovements', selectedGroupMovements ?? '');
+    await prefs.setString(
+        'selectedWarehouseMovements', selectedWarehouseMovements ?? '');
+    await prefs.setString(
+        'selectedGroupMovements', selectedGroupMovements ?? '');
 
     if (selectedDateRangeMovements != null) {
       await prefs.setString('selectedDateRangeMovementsStart',
@@ -441,11 +451,9 @@ class _DashboardPageState extends State<DashboardPage>
   Future<void> _loadData() async {
     if (!mounted) return;
 
-    if (mounted) {
-      setState(() {
-        isLoading = true;
-      });
-    }
+    setState(() {
+      isLoading = true;
+    });
 
     try {
       // Construir parámetros de consulta para análisis
@@ -456,6 +464,18 @@ class _DashboardPageState extends State<DashboardPage>
       }
       if (selectedGroupAnalysis != null && selectedGroupAnalysis!.isNotEmpty) {
         analysisParams['category'] = selectedGroupAnalysis!;
+      }
+      if (selectedRotationAnalysis != null &&
+          selectedRotationAnalysis!.isNotEmpty) {
+        analysisParams['rotation'] = selectedRotationAnalysis!;
+      }
+      if (selectedStagnantAnalysis != null &&
+          selectedStagnantAnalysis!.isNotEmpty) {
+        analysisParams['stagnant'] = selectedStagnantAnalysis!;
+      }
+      if (selectedHighRotationAnalysis != null &&
+          selectedHighRotationAnalysis!.isNotEmpty) {
+        analysisParams['high_rotation'] = selectedHighRotationAnalysis!;
       }
       if (selectedDateRangeAnalysis != null) {
         analysisParams['date_from'] =
@@ -488,11 +508,13 @@ class _DashboardPageState extends State<DashboardPage>
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
         http.get(
-          Uri.parse('http://127.0.0.1:8000/api/inventory/analysis/').replace(queryParameters: analysisParams),
+          Uri.parse('http://127.0.0.1:8000/api/inventory/analysis/')
+              .replace(queryParameters: analysisParams),
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
         http.get(
-          Uri.parse('http://127.0.0.1:8000/api/inventory/records/').replace(queryParameters: movementsParams),
+          Uri.parse('http://127.0.0.1:8000/api/inventory/records/')
+              .replace(queryParameters: movementsParams),
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
       ]);
@@ -500,12 +522,6 @@ class _DashboardPageState extends State<DashboardPage>
       final summaryResponse = results[0];
       final analysisResponse = results[1];
       final movementsResponse = results[2];
-
-      print('Summary Response Status: ${summaryResponse.statusCode}');
-      print('Analysis Response Status: ${analysisResponse.statusCode}');
-      print('Analysis Response Body Length: ${analysisResponse.body.length}');
-      print('Movements Response Status: ${movementsResponse.statusCode}');
-      print('Movements Response Body Length: ${movementsResponse.body.length}');
 
       if (summaryResponse.statusCode == 200 &&
           analysisResponse.statusCode == 200 &&
@@ -516,87 +532,52 @@ class _DashboardPageState extends State<DashboardPage>
         final List<dynamic> analysisData = json.decode(analysisResponse.body);
         final List<dynamic> movementsData = json.decode(movementsResponse.body);
 
-        print('Summary Data: $summaryData');
-        print('Analysis Data Count: ${analysisData.length}');
-        print('Movements Data Count: ${movementsData.length}');
+        if (!mounted) return;
+        setState(() {
+          summary = summaryData;
+          analysis = List<Map<String, dynamic>>.from(analysisData);
+          filteredAnalysis = analysis;
+          movements = List<Map<String, dynamic>>.from(movementsData);
+          filteredMovements = movements;
 
-        if (mounted) {
-          setState(() {
-            summary = summaryData;
-            analysis = List<Map<String, dynamic>>.from(analysisData);
-            movements = List<Map<String, dynamic>>.from(movementsData);
-            filteredAnalysis = analysis;
-            filteredMovements = movements;
-
-            // Process and extract unique products
-            final productMap = <String, Map<String, dynamic>>{};
-
-            for (var item in analysis) {
-              final code = item['codigo']?.toString() ?? '';
-              if (!productMap.containsKey(code)) {
-                productMap[code] = {
-                  'code': code,
-                  'description':
-                      item['nombre_producto']?.toString() ?? 'Sin descripción',
-                  'group': _getGroupName(item['grupo']?.toString() ?? ''),
-                  'quantity': item['cantidad_saldo_actual'] ?? 0,
-                  'unitValue': item['costo_unitario'] ?? 0,
-                  'totalValue': item['valor_saldo_actual'] ?? 0,
-                  'rotation': item['rotacion'] ?? 'Activo',
-                  'stagnant': item['estancado'] ?? 'No',
-                  'highRotation': item['alta_rotacion'] ?? 'No',
-                };
-              }
+          // Process and extract unique products
+          final productMap = <String, Map<String, dynamic>>{};
+          for (var item in analysis) {
+            final code = item['codigo']?.toString() ?? '';
+            if (!productMap.containsKey(code)) {
+              productMap[code] = {
+                'code': code,
+                'description':
+                    item['nombre_producto']?.toString() ?? 'Sin descripción',
+                'group': _getGroupName(item['grupo']?.toString() ?? ''),
+                'quantity': item['cantidad_saldo_actual'] ?? 0,
+                'unitValue': item['costo_unitario'] ?? 0,
+                'totalValue': item['valor_saldo_actual'] ?? 0,
+                'rotation': item['rotacion'] ?? 'Activo',
+                'stagnant': item['estancado'] ?? 'No',
+                'highRotation': item['alta_rotacion'] ?? 'No',
+              };
             }
+          }
+          products = productMap.values.toList();
 
-            products = productMap.values.toList();
-
-            // Populate descriptionToGroup map
-            descriptionToGroup = {};
-            for (var product in products) {
-              descriptionToGroup[product['description']] = product['group'];
-            }
-
-            isLoading = false;
-          });
-        }
-
-        // Apply local search filtering
-        if (searchQueryAnalysis != null && searchQueryAnalysis!.isNotEmpty) {
-          setState(() {
-            filteredAnalysis = filteredAnalysis.where((item) {
-              final code = item['codigo']?.toString().toLowerCase() ?? '';
-              final desc = item['nombre_producto']?.toString().toLowerCase() ?? '';
-              return code.contains(searchQueryAnalysis!.toLowerCase()) ||
-                     desc.contains(searchQueryAnalysis!.toLowerCase());
-            }).toList();
-          });
-        }
-
-        print(
-          'Data loaded successfully. Summary: ${summary != null}, Analysis: ${analysis.length}, Movements: ${movements.length}, Products: ${products.length}',
-        );
+          // Populate descriptionToGroup map
+          descriptionToGroup = {};
+          for (var product in products) {
+            descriptionToGroup[product['description']] = product['group'];
+          }
+          isLoading = false;
+        });
       } else {
-        print(
-          'Error responses: Summary ${summaryResponse.statusCode}: ${summaryResponse.body}',
-        );
-        print(
-          'Analysis ${analysisResponse.statusCode}: ${analysisResponse.body}',
-        );
-        print(
-          'Movements ${movementsResponse.statusCode}: ${movementsResponse.body}',
-        );
         throw Exception(
           'Error al cargar los datos: ${summaryResponse.statusCode} / ${analysisResponse.statusCode} / ${movementsResponse.statusCode}',
         );
       }
     } catch (e) {
-      print('Error loading data: $e');
       if (!mounted) return;
       setState(() {
         isLoading = false;
       });
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -608,9 +589,21 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
-  String _getGroupName(String groupCode) {
-    // Add debug print for unknown group codes
-    switch (groupCode) {
+  String _getGroupName(String groupCodeOrName) {
+    // If input is already one of the known group names, return it directly
+    const knownGroups = <String>{
+      'AGROQUIMICOS-FERTILIZANTES Y ABONOS',
+      'DOTACION Y SEGURIDAD',
+      'MANTENIMIENTO',
+      'MATERIAL DE EMPAQUE',
+      'PAPELERIA Y ASEO'
+    };
+    if (knownGroups.contains(groupCodeOrName)) {
+      return groupCodeOrName;
+    }
+
+    // Otherwise, attempt to interpret numeric group codes and map them to names
+    switch (groupCodeOrName) {
       case '1':
         return 'AGROQUIMICOS-FERTILIZANTES Y ABONOS';
       case '2':
@@ -622,11 +615,10 @@ class _DashboardPageState extends State<DashboardPage>
       case '5':
         return 'PAPELERIA Y ASEO';
       default:
-        // Log unknown group codes
-        // Also, as fallback, return the raw groupCode if not empty, else 'SIN CATEGORÍA'
-        print('[DEBUG] Unknown group code: "$groupCode", defaulting to raw or SIN CATEGORÍA');
-        if (groupCode.isNotEmpty) {
-          return groupCode;
+        // No debug print to avoid unwanted logs on valid group names
+        // Return the raw input or fallback to SIN CATEGORÍA if empty
+        if (groupCodeOrName.isNotEmpty) {
+          return groupCodeOrName;
         }
         return 'SIN CATEGORÍA';
     }
@@ -849,54 +841,54 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
-    // Build analysis charts
-    Widget _buildAnalysisCharts() {
-      if (filteredAnalysis.isEmpty) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.analytics_outlined, size: 80, color: Colors.grey[400]),
-              const SizedBox(height: 20),
-              const Text(
-                'No hay datos de análisis de productos disponibles',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.grey,
-                ),
-                textAlign: TextAlign.center,
+  // Build analysis charts
+  Widget _buildAnalysisCharts() {
+    if (filteredAnalysis.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.analytics_outlined, size: 80, color: Colors.grey[400]),
+            const SizedBox(height: 20),
+            const Text(
+              'No hay datos de análisis de productos disponibles',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
               ),
-              const SizedBox(height: 10),
-              const Text(
-                'Carga archivos de inventario para ver el análisis',
-                style: TextStyle(fontSize: 14, color: Colors.grey),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        );
-      }
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Carga archivos de inventario para ver el análisis',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
 
-      // Preparar datos para gráficos
-      final groupData = <String, double>{};
-      final rotationData = <String, int>{};
-      double totalValue = 0;
-      int totalProducts = filteredAnalysis.length;
+    // Preparar datos para gráficos
+    final groupData = <String, double>{};
+    final rotationData = <String, int>{};
+    double totalValue = 0;
+    int totalProducts = filteredAnalysis.length;
 
-      for (var item in filteredAnalysis) {
-        final rawGroup = item['grupo'];
-        final group = (rawGroup != null && rawGroup.toString().isNotEmpty)
-            ? _getGroupName(rawGroup.toString())
-            : 'SIN CATEGORÍA';
-        final rawValue = item['valor_saldo_actual'];
-        final value = (rawValue is num) ? rawValue.toDouble() : 0;
-        groupData[group] = (groupData[group] ?? 0) + value;
-        totalValue += value;
+    for (var item in filteredAnalysis) {
+      final rawGroup = item['grupo'];
+      final group = (rawGroup != null && rawGroup.toString().isNotEmpty)
+          ? _getGroupName(rawGroup.toString())
+          : 'SIN CATEGORÍA';
+      final rawValue = item['valor_saldo_actual'];
+      final value = (rawValue is num) ? rawValue.toDouble() : 0;
+      groupData[group] = (groupData[group] ?? 0) + value;
+      totalValue += value;
 
-        final rotation = item['rotacion']?.toString() ?? 'Activo';
-        rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
-      }
+      final rotation = item['rotacion']?.toString() ?? 'Activo';
+      rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
+    }
 
     // Colores para los grupos
     final List<Color> groupColors = [
@@ -971,17 +963,26 @@ class _DashboardPageState extends State<DashboardPage>
                             iconHeight: 12,
                             iconWidth: 12,
                           ),
-                          series: <CircularSeries>[ 
+                          series: <CircularSeries>[
                             PieSeries<MapEntry<String, double>, String>(
                               dataSource: sortedGroupData,
-                              xValueMapper: (MapEntry<String, double> data, _) => data.key,
-                              yValueMapper: (MapEntry<String, double> data, _) => data.value,
-                              pointColorMapper: (MapEntry<String, double> data, int index) =>
-                                  groupColors[index % groupColors.length],
-                              dataLabelMapper: (MapEntry<String, double> data, _) {
-                                final total = groupData.values.reduce((a, b) => a + b);
-                                final percentage = (data.value / total * 100).toStringAsFixed(1);
-                                final valueFormatted = data.value.toStringAsFixed(0);
+                              xValueMapper:
+                                  (MapEntry<String, double> data, _) =>
+                                      data.key,
+                              yValueMapper:
+                                  (MapEntry<String, double> data, _) =>
+                                      data.value,
+                              pointColorMapper:
+                                  (MapEntry<String, double> data, int index) =>
+                                      groupColors[index % groupColors.length],
+                              dataLabelMapper:
+                                  (MapEntry<String, double> data, _) {
+                                final total =
+                                    groupData.values.reduce((a, b) => a + b);
+                                final percentage = (data.value / total * 100)
+                                    .toStringAsFixed(1);
+                                final valueFormatted =
+                                    data.value.toStringAsFixed(0);
 
                                 final shortName = _getShortGroupName(data.key);
                                 return '$shortName\n$valueFormatted (${percentage}%)';
@@ -1006,7 +1007,8 @@ class _DashboardPageState extends State<DashboardPage>
                                 borderWidth: 1,
                                 borderColor: Colors.grey.shade300,
                                 margin: const EdgeInsets.all(3),
-                                labelIntersectAction: LabelIntersectAction.shift,
+                                labelIntersectAction:
+                                    LabelIntersectAction.shift,
                               ),
                               explode: true,
                               explodeOffset: '3%',
@@ -1084,8 +1086,10 @@ class _DashboardPageState extends State<DashboardPage>
                                   (MapEntry<String, int> data, int index) =>
                                       _getRotationColor(data.key),
                               dataLabelMapper: (MapEntry<String, int> data, _) {
-                                final total = rotationData.values.reduce((a, b) => a + b);
-                                final percentage = (data.value / total * 100).toStringAsFixed(1);
+                                final total =
+                                    rotationData.values.reduce((a, b) => a + b);
+                                final percentage = (data.value / total * 100)
+                                    .toStringAsFixed(1);
                                 return '${data.key}\n${data.value} (${percentage}%)';
                               },
                               dataLabelSettings: DataLabelSettings(
@@ -1102,7 +1106,8 @@ class _DashboardPageState extends State<DashboardPage>
                                 borderWidth: 1,
                                 borderColor: Colors.grey.shade300,
                                 margin: const EdgeInsets.all(3),
-                                labelIntersectAction: LabelIntersectAction.shift,
+                                labelIntersectAction:
+                                    LabelIntersectAction.shift,
                               ),
                               explode: true,
                               explodeOffset: '3%',
@@ -1769,7 +1774,6 @@ class _DashboardPageState extends State<DashboardPage>
     if (!mounted) return;
 
     try {
-      // Construir parámetros de consulta para análisis
       final analysisParams = <String, String>{};
       if (selectedWarehouseAnalysis != null &&
           selectedWarehouseAnalysis!.isNotEmpty) {
@@ -1778,14 +1782,9 @@ class _DashboardPageState extends State<DashboardPage>
       if (selectedGroupAnalysis != null && selectedGroupAnalysis!.isNotEmpty) {
         analysisParams['category'] = selectedGroupAnalysis!;
       }
-      if (selectedDateRangeAnalysis != null) {
-        analysisParams['date_from'] =
-            selectedDateRangeAnalysis!.start.toIso8601String().split('T')[0];
-        analysisParams['date_to'] =
-            selectedDateRangeAnalysis!.end.toIso8601String().split('T')[0];
-      }
 
-      // Construir parámetros de consulta para movimientos
+      // Only category and warehouse are sent to backend, other filters applied locally
+
       final movementsParams = <String, String>{};
       if (selectedWarehouseMovements != null &&
           selectedWarehouseMovements!.isNotEmpty) {
@@ -1824,16 +1823,64 @@ class _DashboardPageState extends State<DashboardPage>
         final List<dynamic> movementsData = json.decode(movementsResponse.body);
 
         if (!mounted) return;
+
+        // Convert to Map List for processing
+        List<Map<String, dynamic>> analysisList =
+            List<Map<String, dynamic>>.from(analysisData);
+
+        // Apply local filters
+        List<Map<String, dynamic>> filteredList = analysisList;
+
+        // Filter by rotation
+        if (selectedRotationAnalysis != null &&
+            selectedRotationAnalysis!.isNotEmpty) {
+          filteredList = filteredList
+              .where((item) =>
+                  (item['rotacion'] ?? '').toString() ==
+                  selectedRotationAnalysis!)
+              .toList();
+        }
+
+        // Filter by stagnant
+        if (selectedStagnantAnalysis != null &&
+            selectedStagnantAnalysis!.isNotEmpty) {
+          filteredList = filteredList
+              .where((item) =>
+                  (item['estancado'] ?? '').toString() ==
+                  selectedStagnantAnalysis!)
+              .toList();
+        }
+
+        // Filter by high rotation
+        if (selectedHighRotationAnalysis != null &&
+            selectedHighRotationAnalysis!.isNotEmpty) {
+          filteredList = filteredList
+              .where((item) =>
+                  (item['alta_rotacion'] ?? '').toString() ==
+                  selectedHighRotationAnalysis!)
+              .toList();
+        }
+
+        // Filter by search query (code or description)
+        if (searchQueryAnalysis != null && searchQueryAnalysis!.isNotEmpty) {
+          final query = searchQueryAnalysis!.toLowerCase();
+          filteredList = filteredList.where((item) {
+            final code = (item['codigo'] ?? '').toString().toLowerCase();
+            final description =
+                (item['nombre_producto'] ?? '').toString().toLowerCase();
+            return code.contains(query) || description.contains(query);
+          }).toList();
+        }
+
         setState(() {
-          analysis = List<Map<String, dynamic>>.from(analysisData);
-          filteredAnalysis = analysis;
+          analysis = analysisList;
+          filteredAnalysis = filteredList;
           movements = List<Map<String, dynamic>>.from(movementsData);
           filteredMovements = movements;
 
           // Process and extract unique products
           final productMap = <String, Map<String, dynamic>>{};
-
-          for (var item in analysis) {
+          for (var item in analysisList) {
             final code = item['codigo']?.toString() ?? '';
             if (!productMap.containsKey(code)) {
               productMap[code] = {
@@ -1850,19 +1897,8 @@ class _DashboardPageState extends State<DashboardPage>
               };
             }
           }
-
           products = productMap.values.toList();
         });
-
-        // Apply local search filtering
-        if (searchQueryAnalysis != null && searchQueryAnalysis!.isNotEmpty) {
-          filteredAnalysis = filteredAnalysis.where((item) {
-            final code = item['codigo']?.toString().toLowerCase() ?? '';
-            final desc = item['nombre_producto']?.toString().toLowerCase() ?? '';
-            return code.contains(searchQueryAnalysis!.toLowerCase()) ||
-                   desc.contains(searchQueryAnalysis!.toLowerCase());
-          }).toList();
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -1962,50 +1998,54 @@ class _DashboardPageState extends State<DashboardPage>
 
                       // Filtro por rotación
                       DropdownButtonFormField<String>(
-                        value: selectedRotationAnalysis,
+                        value: selectedRotationAnalysis ?? 'Todos',
                         decoration:
                             const InputDecoration(labelText: 'Rotación'),
-                        items: ['Activo', 'Estancado', 'Obsoleto'].map((value) {
+                        items: ['Todos', 'Activo', 'Estancado', 'Obsoleto']
+                            .map((value) {
                           return DropdownMenuItem<String>(
                             value: value,
                             child: Text(value),
                           );
                         }).toList(),
                         onChanged: (value) {
-                          setState(() => selectedRotationAnalysis = value);
+                          setState(() => selectedRotationAnalysis =
+                              value == 'Todos' ? null : value);
                         },
                       ),
 
                       // Filtro por estancado
                       DropdownButtonFormField<String>(
-                        value: selectedStagnantAnalysis,
+                        value: selectedStagnantAnalysis ?? 'Todos',
                         decoration:
                             const InputDecoration(labelText: 'Estancado'),
-                        items: ['Sí', 'No'].map((value) {
+                        items: ['Todos', 'Sí', 'No'].map((value) {
                           return DropdownMenuItem<String>(
                             value: value,
                             child: Text(value),
                           );
                         }).toList(),
                         onChanged: (value) {
-                          setState(() => selectedStagnantAnalysis = value);
+                          setState(() => selectedStagnantAnalysis =
+                              value == 'Todos' ? null : value);
                         },
                       ),
 
                       // Filtro por alta rotación
                       DropdownButtonFormField<String>(
-                        value: selectedHighRotationAnalysis,
+                        value: selectedHighRotationAnalysis ?? 'Todos',
                         decoration: const InputDecoration(
                           labelText: 'Alta Rotación',
                         ),
-                        items: ['Sí', 'No'].map((value) {
+                        items: ['Todos', 'Sí', 'No'].map((value) {
                           return DropdownMenuItem<String>(
                             value: value,
                             child: Text(value),
                           );
                         }).toList(),
                         onChanged: (value) {
-                          setState(() => selectedHighRotationAnalysis = value);
+                          setState(() => selectedHighRotationAnalysis =
+                              value == 'Todos' ? null : value);
                         },
                       ),
 
