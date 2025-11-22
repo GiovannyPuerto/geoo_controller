@@ -283,8 +283,7 @@ class _DashboardPageState extends State<DashboardPage>
   Future<void> _saveFiltersToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('searchQueryAnalysis', searchQueryAnalysis ?? '');
-    await prefs.setString(
-        'selectedWarehouseAnalysis', selectedWarehouseAnalysis ?? '');
+    await prefs.setString('selectedWarehouseAnalysis', selectedWarehouseAnalysis ?? '');
     await prefs.setString('selectedGroupAnalysis', selectedGroupAnalysis ?? '');
     await prefs.setString('selectedRotationAnalysis', selectedRotationAnalysis ?? '');
     await prefs.setString('selectedStagnantAnalysis', selectedStagnantAnalysis ?? '');
@@ -317,7 +316,6 @@ class _DashboardPageState extends State<DashboardPage>
   Future<void> _uploadBaseFile(PlatformFile platformFile) async {
     if (!mounted) return;
 
-    // Show loading spinner
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -342,7 +340,6 @@ class _DashboardPageState extends State<DashboardPage>
     });
 
     try {
-      print('[_uploadBaseFile] Preparing to upload base file.');
       var request = http.MultipartRequest(
         'POST',
         Uri.parse('http://127.0.0.1:8000/api/inventory/upload-base/'),
@@ -350,66 +347,41 @@ class _DashboardPageState extends State<DashboardPage>
 
       request.files.add(await createMultipartFile('base_file', platformFile));
 
-      print('[_uploadBaseFile] Sending request...');
       var response = await request.send();
       var responseData = await response.stream.bytesToString();
 
-      print('[_uploadBaseFile] Raw response: $responseData');
-
       if (response.statusCode == 200) {
-        try {
-          var jsonResponse = json.decode(responseData);
-          print(
-            '[_uploadBaseFile] Response status: ${response.statusCode}, body: $jsonResponse',
-          );
+        var jsonResponse = json.decode(responseData);
 
-          if (jsonResponse['ok']) {
-            if (!mounted) return;
-            // Close loading dialog
-            Navigator.of(context).pop();
-            setState(() {
-              hasBaseData = true; // Mark that base data has been uploaded
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  jsonResponse['message'] ?? 'Archivo cargado exitosamente',
-                ),
-                backgroundColor: Colors.green,
-              ),
-            );
-            await _loadData();
-          } else {
-            if (!mounted) return;
-            // Close loading dialog
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  jsonResponse['error'] ?? 'Error al cargar el archivo',
-                ),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        } catch (jsonError) {
-          print('[_uploadBaseFile] JSON decode error: $jsonError');
+        if (jsonResponse['ok']) {
           if (!mounted) return;
-          // Close loading dialog
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(); // Close loading dialog
+          setState(() {
+            hasBaseData = true; // Mark that base data has been uploaded
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Error al procesar respuesta del servidor: $jsonError',
+                jsonResponse['message'] ?? 'Archivo cargado exitosamente',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+          await _loadData();
+        } else {
+          if (!mounted) return;
+          Navigator.of(context).pop(); // Close loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                jsonResponse['error'] ?? 'Error al cargar el archivo',
               ),
               backgroundColor: Colors.red,
             ),
           );
         }
       } else {
-        print('[_uploadBaseFile] HTTP error: ${response.statusCode}');
         if (!mounted) return;
-        // Close loading dialog
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -419,9 +391,7 @@ class _DashboardPageState extends State<DashboardPage>
         );
       }
     } catch (e) {
-      print('[_uploadBaseFile] Error during upload: $e');
       if (!mounted) return;
-      // Close loading dialog
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -639,6 +609,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   String _getGroupName(String groupCode) {
+    // Add debug print for unknown group codes
     switch (groupCode) {
       case '1':
         return 'AGROQUIMICOS-FERTILIZANTES Y ABONOS';
@@ -651,6 +622,12 @@ class _DashboardPageState extends State<DashboardPage>
       case '5':
         return 'PAPELERIA Y ASEO';
       default:
+        // Log unknown group codes
+        // Also, as fallback, return the raw groupCode if not empty, else 'SIN CATEGORÍA'
+        print('[DEBUG] Unknown group code: "$groupCode", defaulting to raw or SIN CATEGORÍA');
+        if (groupCode.isNotEmpty) {
+          return groupCode;
+        }
         return 'SIN CATEGORÍA';
     }
   }
@@ -872,51 +849,54 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
-  // Build analysis charts
-  Widget _buildAnalysisCharts() {
-    if (filteredAnalysis.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.analytics_outlined, size: 80, color: Colors.grey[400]),
-            const SizedBox(height: 20),
-            const Text(
-              'No hay datos de análisis de productos disponibles',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey,
+    // Build analysis charts
+    Widget _buildAnalysisCharts() {
+      if (filteredAnalysis.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.analytics_outlined, size: 80, color: Colors.grey[400]),
+              const SizedBox(height: 20),
+              const Text(
+                'No hay datos de análisis de productos disponibles',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Carga archivos de inventario para ver el análisis',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      );
-    }
+              const SizedBox(height: 10),
+              const Text(
+                'Carga archivos de inventario para ver el análisis',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        );
+      }
 
-    // Preparar datos para gráficos
-    final groupData = <String, double>{};
-    final rotationData = <String, int>{};
-    double totalValue = 0;
-    int totalProducts = filteredAnalysis.length;
+      // Preparar datos para gráficos
+      final groupData = <String, double>{};
+      final rotationData = <String, int>{};
+      double totalValue = 0;
+      int totalProducts = filteredAnalysis.length;
 
-    for (var item in filteredAnalysis) {
-      final group = item['grupo']?.toString() ?? 'SIN CATEGORÍA';
-      final quantity = (item['cantidad_saldo_actual'] as num?)?.toDouble() ?? 0;
-      final value = (item['valor_saldo_actual'] as num?)?.toDouble() ?? 0;
-      groupData[group] = (groupData[group] ?? 0) + quantity;
-      totalValue += value;
+      for (var item in filteredAnalysis) {
+        final rawGroup = item['grupo'];
+        final group = (rawGroup != null && rawGroup.toString().isNotEmpty)
+            ? _getGroupName(rawGroup.toString())
+            : 'SIN CATEGORÍA';
+        final rawValue = item['valor_saldo_actual'];
+        final value = (rawValue is num) ? rawValue.toDouble() : 0;
+        groupData[group] = (groupData[group] ?? 0) + value;
+        totalValue += value;
 
-      final rotation = item['rotacion']?.toString() ?? 'Activo';
-      rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
-    }
+        final rotation = item['rotacion']?.toString() ?? 'Activo';
+        rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
+      }
 
     // Colores para los grupos
     final List<Color> groupColors = [

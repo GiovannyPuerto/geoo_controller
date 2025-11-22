@@ -11,7 +11,6 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from io import BytesIO
-
 import pandas as pd
 
 def safe_decimal(value):
@@ -777,13 +776,6 @@ def get_product_analysis(request):
 
             is_stagnant = rotation in ["Estancado", "Obsoleto"]
 
-            # Assign color based on rotation
-            color = {
-                "Activo": "green",
-                "Estancado": "yellow",
-                "Obsoleto": "red"
-            }.get(rotation, "gray")
-
             consecutive_changes = sum(
                 1 for i in range(len(monthly_balances)-1)
                 if monthly_balances[i] != monthly_balances[i+1]
@@ -800,7 +792,6 @@ def get_product_analysis(request):
                 'consumed': 'Sí' if is_consumed else 'No',
                 'estancado': 'Sí' if is_stagnant else 'No',
                 'rotacion': rotation,
-                'color': color,
                 'alta_rotacion': high_rotation,
                 'almacen': 'almacen',
             })
