@@ -1507,9 +1507,7 @@ class _DashboardPageState extends State<DashboardPage>
               child: DataTable(
                 columns: const [
                   DataColumn(label: Text('Mes')),
-                  DataColumn(label: Text('Entradas (Cant.)')),
                   DataColumn(label: Text('Entradas (\$)')),
-                  DataColumn(label: Text('Salidas (Cant.)')),
                   DataColumn(label: Text('Salidas (\$)')),
                 ],
                 rows: sortedMonths.map((month) {
@@ -1524,14 +1522,10 @@ class _DashboardPageState extends State<DashboardPage>
                         ),
                       ),
                       DataCell(
-                        Text((data['entradas'] ?? 0).toStringAsFixed(0)),
-                      ),
-                      DataCell(
                         Text(
                           CurrencyFormatter.format(data['entradas_valor'] ?? 0),
                         ),
                       ),
-                      DataCell(Text((data['salidas'] ?? 0).toStringAsFixed(0))),
                       DataCell(
                         Text(
                           CurrencyFormatter.format(data['salidas_valor'] ?? 0),

@@ -790,21 +790,114 @@ class _WelcomePageState extends State<WelcomePage>
                     padding: const EdgeInsets.symmetric(
                         vertical: 40, horizontal: 40),
                     color: const Color(0xFF111827),
-                    child: const Column(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          'Sistema de Inventario © 2025',
+                        // SECCIÓN PRINCIPAL DEL FOOTER (3 columnas)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // --------- Columna 1: Contáctenos ----------
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Contáctenos",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  "info@geoflora.co",
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 14),
+                                ),
+                                const SizedBox(height: 5),
+                                const Text(
+                                  "Km 4 Vía el Corzo Bojacá",
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 14),
+                                ),
+                                const SizedBox(height: 5),
+                                const Text(
+                                  "Cundinamarca, Colombia",
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 14),
+                                ),
+                              ],
+                            ),
+
+                            // --------- Columna 2: Nuestro grupo empresarial ----------
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  "Nuestro grupo empresarial",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Image.asset(
+                                  "statics/images/logo_geoflora.png",
+                                  width: 180,
+                                ),
+                              ],
+                            ),
+
+                            // --------- Columna 3: Comprometidos con el medio ambiente ----------
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  "Comprometidos con el medio ambiente",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Image.asset(
+                                      "statics/images/rainforest.png",
+                                      width: 80,
+                                    ),
+                                    const SizedBox(width: 15),
+                                    Image.asset(
+                                      "statics/images/florverde.png",
+                                      width: 120,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 40),
+
+                        // Línea divisoria
+                        Container(
+                          height: 1,
+                          color: Colors.white12,
+                          margin: const EdgeInsets.symmetric(vertical: 20),
+                        ),
+
+                        // --------- COPYRIGHT FINAL ----------
+                        const Text(
+                          'Diseñado por Geoflora | Copyright © 2025 Geoflora SAS',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 14,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Desarrollado para facilitar la gestión de inventarios empresariales',
-                          style: TextStyle(
-                            color: Color(0xFF9CA3AF),
-                            fontSize: 12,
                           ),
                           textAlign: TextAlign.center,
                         ),

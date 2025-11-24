@@ -84,6 +84,9 @@ flutter:
   # To add assets to your application, add an asset section, like this:
   assets:
     - statics/images/logo_geoflora.png
+    - statics/images/rainforest.png
+    - statics/images/florverde.png
+
 
 
   # An image asset can refer to one or more resolution-specific "variants", see
