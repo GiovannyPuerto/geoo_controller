@@ -231,7 +231,7 @@ class _WelcomePageState extends State<WelcomePage>
                 ),
                 child: IconButton(
                   icon: const Icon(
-                    Icons.inventory,
+                    Icons.inventory_rounded,
                     color: Colors.white,
                     size: 28,
                   ),

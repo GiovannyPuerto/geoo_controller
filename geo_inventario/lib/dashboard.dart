@@ -16,6 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:universal_html/html.dart' as html;
 
+
+
 class MovementsDataSource extends DataTableSource {
   final List<Map<String, dynamic>> movements;
 
@@ -645,6 +647,9 @@ class _DashboardPageState extends State<DashboardPage>
 
   // Build the summary tab
   Widget _buildSummaryTab() {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return RefreshIndicator(
       onRefresh: _loadData,
       child: SingleChildScrollView(
@@ -681,7 +686,7 @@ class _DashboardPageState extends State<DashboardPage>
             ],
           ),
           const SizedBox(height: 20),
-          Icon(Icons.inventory_outlined, size: 80, color: Colors.grey[400]),
+          Icon(Icons.inventory_rounded, size: 80, color: const Color.fromARGB(255, 255, 255, 255)),
           const SizedBox(height: 20),
           const Text(
             'No hay datos de inventario disponibles',
@@ -701,7 +706,7 @@ class _DashboardPageState extends State<DashboardPage>
           const SizedBox(height: 20),
           ElevatedButton.icon(
             onPressed: _pickAndUploadFile,
-            icon: const Icon(Icons.cloud_upload),
+            icon: const Icon(Icons.cloud_upload_outlined, size: 20,color: Color.fromARGB(255, 255, 255, 255) ),
             label: const Text('Cargar archivo base'),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -1278,7 +1283,7 @@ class _DashboardPageState extends State<DashboardPage>
                         ),
                         TextButton.icon(
                           onPressed: _showExportDialog,
-                          icon: const Icon(Icons.download),
+                          icon: const Icon(Icons.download_outlined),
                           label: const Text('Exportar'),
                         ),
                       ],
@@ -1291,7 +1296,7 @@ class _DashboardPageState extends State<DashboardPage>
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.history, size: 64, color: Colors.grey),
+                              Icon(Icons.history_rounded, size: 64, color: Colors.grey),
                               SizedBox(height: 16),
                               Text(
                                 'No hay movimientos para mostrar',
@@ -1563,15 +1568,15 @@ class _DashboardPageState extends State<DashboardPage>
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.filter_list_alt),
+            icon: const Icon(Icons.filter_list_rounded, color: Colors.white),
             onPressed: _showFiltersDialog,
           ),
           IconButton(
-            icon: const Icon(Icons.file_download),
+            icon: const Icon(Icons.file_download_outlined, color: Colors.white),
             onPressed: _showExportDialog,
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.upload_file_rounded),
+            icon: const Icon(Icons.cloud_upload_outlined, color: Colors.white),
             onSelected: (value) {
               if (value == 'base') {
                 _pickAndUploadFile();
