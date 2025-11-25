@@ -33,6 +33,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists, Min
 from django.db.models.functions import Coalesce, TruncMonth
+from django.utils.timezone import now
+from dateutil.relativedelta import relativedelta
 
 from .models import ImportBatch, Product, InventoryRecord
 from .utils import (
@@ -696,6 +698,84 @@ def _process_update_file(batch, df, inventory_name):
 
     logger.info(f"Procesados {records_processed} registros de movimientos ({errors} errores)")
     return records_processed
+
+
+@require_http_methods(["GET"])
+def get_monthly_movements(request):
+    """
+    Retornamos las entradas y salidas por mes y el saldo final de cada mes en inventario 
+    """
+    inventory_name = request.GET.get('inventory_name', 'default')
+    
+    try:
+        # Determine the 12-month period
+        today = now().date()
+        twelve_months_ago = today - relativedelta(months=11)
+        start_of_period = twelve_months_ago.replace(day=1)
+
+        # 1. Get the total initial value of all products
+        initial_stock_value = Product.objects.filter(
+            inventory_name=inventory_name
+        ).aggregate(
+            total_initial_value=Sum(F('initial_balance') * F('initial_unit_cost'))
+        )['total_initial_value'] or Decimal('0')
+
+        # 2. Get the total value of movements before the 12-month period
+        past_movements_value = InventoryRecord.objects.filter(
+            product__inventory_name=inventory_name,
+            date__lt=start_of_period
+        ).aggregate(
+            total_value=Sum('total')
+        )['total_value'] or Decimal('0')
+
+        # 3. Calculate starting balance for the period
+        starting_balance = initial_stock_value + past_movements_value
+
+        # 4. Get monthly aggregated movements for the last 12 months
+        monthly_movements = InventoryRecord.objects.filter(
+            product__inventory_name=inventory_name,
+            date__gte=start_of_period
+        ).annotate(
+            month=TruncMonth('date')
+        ).values('month').annotate(
+            total_entries=Sum('total', filter=Q(quantity__gt=0)),
+            total_exits=Sum('total', filter=Q(quantity__lt=0))
+        ).order_by('month')
+
+        # 5. Process data and calculate closing balance for each month
+        result_data = []
+        monthly_data = {
+            item['month'].strftime('%Y-%m'): {
+                'entries': item['total_entries'] or Decimal('0'),
+                'exits': abs(item['total_exits'] or Decimal('0'))
+            }
+            for item in monthly_movements
+        }
+
+        current_balance = starting_balance
+        for i in range(12):
+            current_month_date = (twelve_months_ago + relativedelta(months=i))
+            month_key = current_month_date.strftime('%Y-%m')
+            
+            month_data = monthly_data.get(month_key, {'entries': Decimal('0'), 'exits': Decimal('0')})
+            
+            entries = month_data['entries']
+            exits = month_data['exits']
+            
+            current_balance += entries - exits
+            
+            result_data.append({
+                'month': month_key,
+                'total_entries': float(entries),
+                'total_exits': float(exits),
+                'closing_balance': float(current_balance)
+            })
+
+        return JsonResponse(result_data, safe=False)
+
+    except Exception as e:
+        logger.error(f"Error in get_monthly_movements: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @require_http_methods(["GET"])

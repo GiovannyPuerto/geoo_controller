@@ -17,6 +17,30 @@ import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:universal_html/html.dart' as html;
 
 
+class MonthlyMovement {
+  final String month;
+  final double totalEntries;
+  final double totalExits;
+  final double closingBalance;
+
+  MonthlyMovement({
+    required this.month,
+    required this.totalEntries,
+    required this.totalExits,
+    required this.closingBalance,
+  });
+
+  factory MonthlyMovement.fromJson(Map<String, dynamic> json) {
+    return MonthlyMovement(
+      month: json['month'],
+      totalEntries: (json['total_entries'] as num).toDouble(),
+      totalExits: (json['total_exits'] as num).toDouble(),
+      closingBalance: (json['closing_balance'] as num).toDouble(),
+    );
+  }
+}
+
+
 
 class MovementsDataSource extends DataTableSource {
   final List<Map<String, dynamic>> movements;
@@ -183,6 +207,7 @@ class _DashboardPageState extends State<DashboardPage>
   List<Map<String, dynamic>> filteredAnalysis = [];
   List<Map<String, dynamic>> movements = [];
   List<Map<String, dynamic>> filteredMovements = [];
+  List<MonthlyMovement> monthlyMovements = [];
   Map<String, dynamic>? summary;
   bool isLoading = true;
   bool hasBaseData = false; // Track if base data has been uploaded
@@ -450,6 +475,32 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
+  Future<List<MonthlyMovement>> _fetchMonthlyMovements() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/inventory/monthly-movements/'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((item) => MonthlyMovement.fromJson(item)).toList();
+      } else {
+        throw Exception('Failed to load monthly movements');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading monthly movements: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return [];
+    }
+  }
+
   Future<void> _loadData() async {
     if (!mounted) return;
 
@@ -519,11 +570,13 @@ class _DashboardPageState extends State<DashboardPage>
               .replace(queryParameters: movementsParams),
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
+        _fetchMonthlyMovements(),
       ]);
 
-      final summaryResponse = results[0];
-      final analysisResponse = results[1];
-      final movementsResponse = results[2];
+      final summaryResponse = results[0] as http.Response;
+      final analysisResponse = results[1] as http.Response;
+      final movementsResponse = results[2] as http.Response;
+      final newMonthlyMovements = results[3] as List<MonthlyMovement>;
 
       if (summaryResponse.statusCode == 200 &&
           analysisResponse.statusCode == 200 &&
@@ -541,6 +594,7 @@ class _DashboardPageState extends State<DashboardPage>
           filteredAnalysis = analysis;
           movements = List<Map<String, dynamic>>.from(movementsData);
           filteredMovements = movements;
+          monthlyMovements = newMonthlyMovements;
 
           // Process and extract unique products
           final productMap = <String, Map<String, dynamic>>{};
@@ -1384,41 +1438,9 @@ class _DashboardPageState extends State<DashboardPage>
 
   // Build movements chart
   Widget _buildMovementsChart() {
-    if (filteredMovements.isEmpty) {
+    if (monthlyMovements.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    // Group by month
-    final monthlyData = <String, Map<String, double>>{};
-    for (var item in filteredMovements) {
-      final date = DateTime.parse(item['date']);
-      final monthKey = DateFormat('yyyy-MM').format(date);
-      final quantity = (item['quantity'] as num?)?.toDouble() ?? 0;
-      final total = (item['total'] as num?)?.toDouble() ?? 0;
-
-      if (!monthlyData.containsKey(monthKey)) {
-        monthlyData[monthKey] = {
-          'entradas': 0,
-          'salidas': 0,
-          'entradas_valor': 0,
-          'salidas_valor': 0,
-        };
-      }
-
-      if (quantity > 0) {
-        monthlyData[monthKey]!['entradas'] =
-            (monthlyData[monthKey]!['entradas'] ?? 0) + quantity;
-        monthlyData[monthKey]!['entradas_valor'] =
-            (monthlyData[monthKey]!['entradas_valor'] ?? 0) + total;
-      } else {
-        monthlyData[monthKey]!['salidas'] =
-            (monthlyData[monthKey]!['salidas'] ?? 0) + quantity.abs();
-        monthlyData[monthKey]!['salidas_valor'] =
-            (monthlyData[monthKey]!['salidas_valor'] ?? 0) + total.abs();
-      }
-    }
-
-    final sortedMonths = monthlyData.keys.toList()..sort();
 
     return Card(
       child: Padding(
@@ -1455,52 +1477,29 @@ class _DashboardPageState extends State<DashboardPage>
                   isVisible: true,
                   textStyle: TextStyle(color: Colors.black, fontSize: 12),
                 ),
+                tooltipBehavior: TooltipBehavior(enable: true),
                 series: <CartesianSeries>[
-                  ColumnSeries<MapEntry<String, Map<String, double>>, String>(
-                    dataSource: sortedMonths
-                        .map((month) => MapEntry(month, monthlyData[month]!))
-                        .toList(),
-                    xValueMapper:
-                        (MapEntry<String, Map<String, double>> data, _) =>
-                            DateFormat(
-                      'MMM yyyy',
-                    ).format(DateTime.parse('${data.key}-01')),
-                    yValueMapper:
-                        (MapEntry<String, Map<String, double>> data, _) =>
-                            data.value['entradas_valor'] ?? 0,
+                  ColumnSeries<MonthlyMovement, String>(
+                    dataSource: monthlyMovements,
+                    xValueMapper: (MonthlyMovement data, _) => DateFormat('MMM yyyy').format(DateTime.parse('${data.month}-01')),
+                    yValueMapper: (MonthlyMovement data, _) => data.totalEntries,
                     name: 'Entradas',
                     color: Colors.green,
-                    dataLabelSettings: const DataLabelSettings(
-                      isVisible: true,
-                      textStyle: TextStyle(
-                        color: Colors.black,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
                   ),
-                  ColumnSeries<MapEntry<String, Map<String, double>>, String>(
-                    dataSource: sortedMonths
-                        .map((month) => MapEntry(month, monthlyData[month]!))
-                        .toList(),
-                    xValueMapper:
-                        (MapEntry<String, Map<String, double>> data, _) =>
-                            DateFormat(
-                      'MMM yyyy',
-                    ).format(DateTime.parse('${data.key}-01')),
-                    yValueMapper:
-                        (MapEntry<String, Map<String, double>> data, _) =>
-                            data.value['salidas_valor'] ?? 0,
+                  ColumnSeries<MonthlyMovement, String>(
+                    dataSource: monthlyMovements,
+                    xValueMapper: (MonthlyMovement data, _) => DateFormat('MMM yyyy').format(DateTime.parse('${data.month}-01')),
+                    yValueMapper: (MonthlyMovement data, _) => data.totalExits,
                     name: 'Salidas',
                     color: Colors.red,
-                    dataLabelSettings: const DataLabelSettings(
-                      isVisible: true,
-                      textStyle: TextStyle(
-                        color: Colors.black,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                  ),
+                  LineSeries<MonthlyMovement, String>(
+                    dataSource: monthlyMovements,
+                    xValueMapper: (MonthlyMovement data, _) => DateFormat('MMM yyyy').format(DateTime.parse('${data.month}-01')),
+                    yValueMapper: (MonthlyMovement data, _) => data.closingBalance,
+                    name: 'Saldo',
+                    color: Colors.blue,
+                    markerSettings: const MarkerSettings(isVisible: true),
                   ),
                 ],
               ),
@@ -1514,26 +1513,29 @@ class _DashboardPageState extends State<DashboardPage>
                   DataColumn(label: Text('Mes')),
                   DataColumn(label: Text('Entradas (\$)')),
                   DataColumn(label: Text('Salidas (\$)')),
+                  DataColumn(label: Text('Saldo (\$)')),
                 ],
-                rows: sortedMonths.map((month) {
-                  final data = monthlyData[month]!;
+                rows: monthlyMovements.map((data) {
                   return DataRow(
                     cells: [
                       DataCell(
                         Text(
-                          DateFormat(
-                            'MMM yyyy',
-                          ).format(DateTime.parse('$month-01')),
+                          DateFormat('MMM yyyy').format(DateTime.parse('${data.month}-01')),
                         ),
                       ),
                       DataCell(
                         Text(
-                          CurrencyFormatter.format(data['entradas_valor'] ?? 0),
+                          CurrencyFormatter.format(data.totalEntries),
                         ),
                       ),
                       DataCell(
                         Text(
-                          CurrencyFormatter.format(data['salidas_valor'] ?? 0),
+                          CurrencyFormatter.format(data.totalExits),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          CurrencyFormatter.format(data.closingBalance),
                         ),
                       ),
                     ],

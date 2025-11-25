@@ -3,10 +3,11 @@ from .views import (
     update_inventory, get_batches, get_products, get_records,
     get_product_analysis, create_inventory, get_product_history,
     get_summary, export_analysis, list_inventories,
-    upload_base_file, welcome
+    upload_base_file, welcome, get_monthly_movements
 )
 
 urlpatterns = [
+    path('monthly-movements/', get_monthly_movements, name='get_monthly_movements'),
     path('upload/', update_inventory, name='upload_excel'),
     path('upload/<str:inventory_name>/', update_inventory, name='upload_excel_with_inventory'),
     path('update/', update_inventory, name='update_inventory'),
