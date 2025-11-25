@@ -214,6 +214,7 @@ class _DashboardPageState extends State<DashboardPage>
   final int _tabsCount = 3; // Number of tabs
   Map<String, String> productToGroup = {};
   Map<String, String> descriptionToGroup = {};
+  String? lastUpdateTime;
 
   // Separate loading states for each section
   bool isSummaryLoading = true;
@@ -501,6 +502,36 @@ class _DashboardPageState extends State<DashboardPage>
     }
   }
 
+  Future<void> _loadLastUpdateTime() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:8000/api/inventory/last-update/'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            if (data['last_update'] != null) {
+              final dateTime = DateTime.parse(data['last_update']);
+              lastUpdateTime = DateFormat('dd/MM/yyyy HH:mm').format(dateTime.toLocal());
+            } else {
+              lastUpdateTime = 'No se ha actualizado';
+            }
+          });
+        }
+      } else {
+        throw Exception('Failed to load last update time');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          lastUpdateTime = 'Error';
+        });
+      }
+    }
+  }
+
   Future<void> _loadData() async {
     if (!mounted) return;
 
@@ -571,6 +602,7 @@ class _DashboardPageState extends State<DashboardPage>
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 30)),
         _fetchMonthlyMovements(),
+        _loadLastUpdateTime(),
       ]);
 
       final summaryResponse = results[0] as http.Response;
@@ -1561,6 +1593,22 @@ class _DashboardPageState extends State<DashboardPage>
             ),
             const SizedBox(width: 10),
             const Text('Dashboard de Inventario'),
+            const Spacer(),
+            if (lastUpdateTime != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'Última actualización: $lastUpdateTime',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
           ],
         ),
         backgroundColor: const Color(0xFF10B981),

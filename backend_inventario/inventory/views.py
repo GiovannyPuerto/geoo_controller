@@ -708,19 +708,19 @@ def get_monthly_movements(request):
     inventory_name = request.GET.get('inventory_name', 'default')
     
     try:
-        # Determine the 12-month period
+        # Determinamos un periodos de 12 meses de movimientos 
         today = now().date()
         twelve_months_ago = today - relativedelta(months=11)
         start_of_period = twelve_months_ago.replace(day=1)
 
-        # 1. Get the total initial value of all products
+        # 1. Obtenemos el total inicial de todos los productos
         initial_stock_value = Product.objects.filter(
             inventory_name=inventory_name
         ).aggregate(
             total_initial_value=Sum(F('initial_balance') * F('initial_unit_cost'))
         )['total_initial_value'] or Decimal('0')
 
-        # 2. Get the total value of movements before the 12-month period
+        # 2. Obtenemos el valor total de los movimientos antes de los 12 meses
         past_movements_value = InventoryRecord.objects.filter(
             product__inventory_name=inventory_name,
             date__lt=start_of_period
@@ -728,10 +728,10 @@ def get_monthly_movements(request):
             total_value=Sum('total')
         )['total_value'] or Decimal('0')
 
-        # 3. Calculate starting balance for the period
+        # 3.Calcular el saldo inicial para el período
         starting_balance = initial_stock_value + past_movements_value
 
-        # 4. Get monthly aggregated movements for the last 12 months
+        # 4. Obtenga movimientos agregados mensuales de los últimos 12 meses
         monthly_movements = InventoryRecord.objects.filter(
             product__inventory_name=inventory_name,
             date__gte=start_of_period
@@ -742,7 +742,7 @@ def get_monthly_movements(request):
             total_exits=Sum('total', filter=Q(quantity__lt=0))
         ).order_by('month')
 
-        # 5. Process data and calculate closing balance for each month
+        # 5. Procesar datos y calcular el saldo de cierre de cada mes
         result_data = []
         monthly_data = {
             item['month'].strftime('%Y-%m'): {
@@ -1191,6 +1191,29 @@ def list_inventories(request):
     except Exception as e:
         logger.error(f"Error listing inventories: {str(e)}", exc_info=True)
         return JsonResponse([], safe=False)
+
+
+from django.db.models import Max
+
+@require_http_methods(["GET"])
+def get_last_update_time(request):
+    """
+    Retrieves the timestamp of the last inventory update.
+    """
+    inventory_name = request.GET.get('inventory_name', 'default')
+    try:
+        last_batch = ImportBatch.objects.filter(
+            inventory_name=inventory_name,
+            processed_at__isnull=False
+        ).order_by('-processed_at').first()
+
+        if last_batch:
+            return JsonResponse({'last_update': last_batch.processed_at.isoformat()})
+        else:
+            return JsonResponse({'last_update': None})
+    except Exception as e:
+        logger.error(f"Error retrieving last update time: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @csrf_exempt
