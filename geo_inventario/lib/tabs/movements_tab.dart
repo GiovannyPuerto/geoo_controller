@@ -49,16 +49,18 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     });
 
     try {
-      // Load all movements for filter options and initial chart
-      final allMovementsData =
-          await _apiService.getMovements(inventoryName: 'default');
+      // Load all movements for filter options
+      final allMovementsData = await _apiService.getMovements();
+
+      // Load monthly movements for chart
+      final monthlyMovementsData = await _apiService.getMonthlyMovements();
 
       if (mounted) {
         setState(() {
           allMovements = allMovementsData;
           movements = allMovementsData;
           filteredMovements = movements;
-          monthlyMovements = _computeMonthlyMovements(movements);
+          monthlyMovements = monthlyMovementsData;
           isLoading = false;
         });
       }
@@ -89,12 +91,20 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         dateTo: selectedDateRange?.end,
       );
 
+      final filteredMonthlyMovementsData =
+          await _apiService.getMonthlyMovements(
+        warehouse: selectedWarehouse,
+        category: selectedGroup,
+        search: searchQuery,
+        dateFrom: selectedDateRange?.start,
+        dateTo: selectedDateRange?.end,
+      );
+
       if (mounted) {
         setState(() {
           movements = filteredMovementsData;
           filteredMovements = movements;
-          // Chart updates with filtered data
-          monthlyMovements = _computeMonthlyMovements(movements);
+          monthlyMovements = filteredMonthlyMovementsData;
         });
       }
     } catch (e) {
