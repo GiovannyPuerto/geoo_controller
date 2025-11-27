@@ -51,6 +51,23 @@ class Product(models.Model):
         return f"{self.code} - {self.inventory_name}"
 
 
+class WarehouseDetail(models.Model):
+    """
+    Detalles por almacén para productos del archivo base.
+    Permite filtrar saldos iniciales por almacén.
+    """
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    warehouse = models.CharField(max_length=128)
+    initial_quantity = models.DecimalField(max_digits=15, decimal_places=3, default=0)
+    initial_value = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+
+    class Meta:
+        unique_together = ['product', 'warehouse']
+
+    def __str__(self):
+        return f"{self.product.code} - {self.warehouse}"
+
+
 class InventoryRecord(models.Model):
     """
     Representa una fila del archivo Excel que contiene un movimiento de inventario.

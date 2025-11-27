@@ -36,7 +36,7 @@ from django.db.models.functions import Coalesce, TruncMonth
 from django.utils.timezone import now
 from dateutil.relativedelta import relativedelta
 
-from .models import ImportBatch, Product, InventoryRecord
+from .models import ImportBatch, Product, InventoryRecord, WarehouseDetail
 from .utils import (
     clean_number, parse_date, map_localizacion, map_categoria,
     calculate_file_checksum, parse_document, validate_row_data, clean_text
@@ -500,6 +500,46 @@ def _process_base_file(df, inventory_name):
                 except:
                     continue
 
+    # Crear detalles por almacén para productos del archivo base
+    warehouse_details_to_create = []
+    for _, row in warehouse_df.iterrows():
+        try:
+            codigo = row['codigo']
+            almacen = row['almacen']
+            cantidad = safe_decimal(row['cantidad'])
+            valor_total = safe_decimal(row['valor_total'])
+
+            # Buscar el producto creado
+            try:
+                product = Product.objects.get(code=codigo, inventory_name=inventory_name)
+                warehouse_details_to_create.append(WarehouseDetail(
+                    product=product,
+                    warehouse=almacen,
+                    initial_quantity=cantidad,
+                    initial_value=valor_total
+                ))
+            except Product.DoesNotExist:
+                logger.warning(f"Producto {codigo} no encontrado para crear detalle de almacén")
+                continue
+
+        except Exception as e:
+            logger.error(f"Error creando detalle de almacén para {row.get('codigo', '')}: {str(e)}")
+            continue
+
+    # Insertar detalles de almacén en bloques
+    if warehouse_details_to_create:
+        try:
+            WarehouseDetail.objects.bulk_create(warehouse_details_to_create, ignore_conflicts=True)
+        except Exception as e:
+            logger.error(f"Error en bulk_create de warehouse_details: {str(e)}")
+            # Insertar individualmente en caso de falla
+            for wd in warehouse_details_to_create:
+                try:
+                    wd.save(force_insert=True)
+                except Exception as e2:
+                    logger.error(f"Error saving warehouse detail: {str(e2)}")
+                    continue
+
     logger.info(f"Procesados {records_processed} productos del archivo base ({errors} errores)")
     return records_processed
 
@@ -730,11 +770,25 @@ def get_monthly_movements(request):
             )
 
         # 1. Obtenemos el total inicial de todos los productos (filtered if applicable)
-        initial_stock_value = Product.objects.filter(
-            inventory_name=inventory_name
-        ).aggregate(
-            total_initial_value=Sum(F('initial_balance') * F('initial_unit_cost'))
-        )['total_initial_value'] or Decimal('0')
+        if warehouse_filter:
+            # When filtering by warehouse, use WarehouseDetail for accurate initial values per warehouse
+            initial_stock_query = WarehouseDetail.objects.filter(
+                product__inventory_name=inventory_name,
+                warehouse__icontains=warehouse_filter
+            )
+            if category_filter:
+                initial_stock_query = initial_stock_query.filter(product__group__icontains=category_filter)
+            initial_stock_value = initial_stock_query.aggregate(
+                total_initial_value=Sum('initial_value')
+            )['total_initial_value'] or Decimal('0')
+        else:
+            # No warehouse filter, use Product initial balances
+            initial_stock_query = Product.objects.filter(inventory_name=inventory_name)
+            if category_filter:
+                initial_stock_query = initial_stock_query.filter(group__icontains=category_filter)
+            initial_stock_value = initial_stock_query.aggregate(
+                total_initial_value=Sum(F('initial_balance') * F('initial_unit_cost'))
+            )['total_initial_value'] or Decimal('0')
 
         # 2. Obtenemos el valor total de los movimientos antes de los 12 meses (filtered)
         past_movements_value = base_queryset.filter(
@@ -743,7 +797,8 @@ def get_monthly_movements(request):
             total_value=Sum('total')
         )['total_value'] or Decimal('0')
 
-        # 3.Calcular el saldo inicial para el período
+        # 3. Calcular el saldo inicial para el período
+        # Incluye el stock inicial del archivo base (filtrado por almacén si aplica) más los movimientos pasados
         starting_balance = initial_stock_value + past_movements_value
 
         # 4. Obtenga movimientos agregados mensuales de los últimos 12 meses (filtered)
