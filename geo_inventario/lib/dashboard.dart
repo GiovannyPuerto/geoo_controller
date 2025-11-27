@@ -1982,214 +1982,551 @@ class _DashboardPageState extends State<DashboardPage>
     _loadDataWithFilters();
   }
 
-  void _showFiltersDialog() {
-    final currentTab = _tabController.index;
-    final isAnalysisTab = currentTab == 1;
-    final isMovementsTab = currentTab == 2;
+    void _showFiltersDialog() {
 
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            final DateTimeRange? selectedDateRange = isAnalysisTab
-                ? selectedDateRangeAnalysis
-                : isMovementsTab
-                    ? selectedDateRangeMovements
-                    : null;
+      final currentTab = _tabController.index;
 
-            String dateRangeText = 'Seleccionar rango de fechas (opcional)';
-            if (selectedDateRange != null) {
-              final dateFormat = DateFormat('dd/MM/yyyy');
-              final startDate = dateFormat.format(selectedDateRange.start);
-              final endDate = dateFormat.format(selectedDateRange.end);
-              dateRangeText = '$startDate - $endDate';
-            }
+      final isAnalysisTab = currentTab == 1;
 
-            return AlertDialog(
-              title: Text(
-                  'Filtros - ${isAnalysisTab ? 'Análisis de Productos' : isMovementsTab ? 'Movimientos' : 'General'}'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Filtro por almacén (solo para movimientos)
-                    if (isMovementsTab)
-                      DropdownButtonFormField<String>(
-                        value: selectedWarehouseMovements,
-                        decoration: const InputDecoration(labelText: 'Almacén'),
-                        items: _getUniqueValues('almacen').map((value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedWarehouseMovements = value);
-                        },
-                      ),
+      final isMovementsTab = currentTab == 2;
 
-                    // Filtro por grupo (solo para análisis)
-                    if (isAnalysisTab) ...[
-                      DropdownButtonFormField<String>(
-                        value: selectedGroupAnalysis,
-                        decoration: const InputDecoration(labelText: 'Grupo'),
-                        items: _getUniqueValues('grupo').map((value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedGroupAnalysis = value);
-                        },
-                      ),
+  
 
-                      // Filtro por rotación
-                      DropdownButtonFormField<String>(
-                        value: selectedRotationAnalysis ?? 'Todos',
-                        decoration:
-                            const InputDecoration(labelText: 'Rotación'),
-                        items: ['Todos', 'Activo', 'Estancado', 'Obsoleto']
-                            .map((value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedRotationAnalysis =
-                              value == 'Todos' ? null : value);
-                        },
-                      ),
+      showDialog(
 
-                      // Filtro por estancado
-                      DropdownButtonFormField<String>(
-                        value: selectedStagnantAnalysis ?? 'Todos',
-                        decoration:
-                            const InputDecoration(labelText: 'Estancado'),
-                        items: ['Todos', 'Sí', 'No'].map((value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedStagnantAnalysis =
-                              value == 'Todos' ? null : value);
-                        },
-                      ),
+        context: context,
 
-                      // Filtro por alta rotación
-                      DropdownButtonFormField<String>(
-                        value: selectedHighRotationAnalysis ?? 'Todos',
-                        decoration: const InputDecoration(
-                          labelText: 'Alta Rotación',
+        builder: (BuildContext context) {
+
+          return StatefulBuilder(
+
+            builder: (context, setState) {
+
+              final DateTimeRange? selectedDateRange = isAnalysisTab
+
+                  ? selectedDateRangeAnalysis
+
+                  : isMovementsTab
+
+                      ? selectedDateRangeMovements
+
+                      : null;
+
+              String dateRangeText = 'Seleccionar rango de fechas (opcional)';
+
+              if (selectedDateRange != null) {
+
+                final dateFormat = DateFormat('dd/MM/yyyy');
+
+                final startDate = dateFormat.format(selectedDateRange.start);
+
+                final endDate = dateFormat.format(selectedDateRange.end);
+
+                dateRangeText = '$startDate - $endDate';
+
+              }
+
+  
+
+              // Options for dropdowns
+
+                            final groupsForAnalysis =
+
+                                ['Todos', ..._getUniqueValues('grupo')].toSet().toList();
+
+                            final warehousesForMovements = [
+
+                              'Todos',
+
+                              ..._getUniqueValues('warehouse', source: movements)
+
+                            ].toSet().toList();
+
+                            final groupsForMovements = [
+
+                              'Todos',
+
+                              ...movements
+
+                                  .map((m) => descriptionToGroup[m['product_description']])
+
+                                  .where((g) => g != null && g.isNotEmpty)
+
+                                  .toSet()
+
+                                  .toList()
+
+                                ..sort()
+
+                            ].toSet().toList();
+
+  
+
+              return AlertDialog(
+
+                title: Text(
+
+                    'Filtros - ${isAnalysisTab ? 'Análisis de Productos' : isMovementsTab ? 'Movimientos' : 'General'}'),
+
+                content: SingleChildScrollView(
+
+                  child: Column(
+
+                    mainAxisSize: MainAxisSize.min,
+
+                    children: [
+
+                      // Filtro por almacén (solo para movimientos)
+
+                      if (isMovementsTab)
+
+                        DropdownButtonFormField<String>(
+
+                          value: selectedWarehouseMovements == null || !warehousesForMovements.contains(selectedWarehouseMovements) ? 'Todos' : selectedWarehouseMovements,
+
+                          decoration: const InputDecoration(labelText: 'Almacén'),
+
+                          items: warehousesForMovements.map((value) {
+
+                            return DropdownMenuItem<String>(
+
+                              value: value,
+
+                              child: Text(value),
+
+                            );
+
+                          }).toList(),
+
+                          onChanged: (value) {
+
+                            setState(() => selectedWarehouseMovements = value == 'Todos' ? null : value);
+
+                          },
+
                         ),
-                        items: ['Todos', 'Sí', 'No'].map((value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedHighRotationAnalysis =
-                              value == 'Todos' ? null : value);
-                        },
-                      ),
 
-                      // Campo de búsqueda por código o descripción
+  
+
+                      // Filtro por grupo (solo para análisis)
+
+                      if (isAnalysisTab) ...[
+
+                        DropdownButtonFormField<String>(
+
+                          value: selectedGroupAnalysis == null || !groupsForAnalysis.contains(selectedGroupAnalysis) ? 'Todos' : selectedGroupAnalysis,
+
+                          decoration: const InputDecoration(labelText: 'Grupo'),
+
+                          items: groupsForAnalysis.map((value) {
+
+                            return DropdownMenuItem<String>(
+
+                              value: value,
+
+                              child: Text(value),
+
+                            );
+
+                          }).toList(),
+
+                          onChanged: (value) {
+
+                            setState(() => selectedGroupAnalysis = value == 'Todos' ? null : value);
+
+                          },
+
+                        ),
+
+  
+
+                                                // Filtro por rotación
+
+  
+
+                                                DropdownButtonFormField<String>(
+
+  
+
+                                                  value: (selectedRotationAnalysis != null && selectedRotationAnalysis!.isNotEmpty) ? selectedRotationAnalysis : 'Todos',
+
+  
+
+                                                  decoration:
+
+  
+
+                                                      const InputDecoration(labelText: 'Rotación'),
+
+  
+
+                                                  items: ['Todos', 'Activo', 'Estancado', 'Obsoleto']
+
+  
+
+                                                      .map((value) {
+
+  
+
+                                                    return DropdownMenuItem<String>(
+
+  
+
+                                                      value: value,
+
+  
+
+                                                      child: Text(value),
+
+  
+
+                                                    );
+
+  
+
+                                                  }).toList(),
+
+  
+
+                                                  onChanged: (value) {
+
+  
+
+                                                    setState(() => selectedRotationAnalysis =
+
+  
+
+                                                        value == 'Todos' ? null : value);
+
+  
+
+                                                  },
+
+  
+
+                                                ),
+
+  
+
+                        
+
+  
+
+                                                // Filtro por estancado
+
+  
+
+                                                DropdownButtonFormField<String>(
+
+  
+
+                                                  value: (selectedStagnantAnalysis != null && selectedStagnantAnalysis!.isNotEmpty) ? selectedStagnantAnalysis : 'Todos',
+
+  
+
+                                                  decoration:
+
+  
+
+                                                      const InputDecoration(labelText: 'Estancado'),
+
+  
+
+                                                  items: ['Todos', 'Sí', 'No'].map((value) {
+
+  
+
+                                                    return DropdownMenuItem<String>(
+
+  
+
+                                                      value: value,
+
+  
+
+                                                      child: Text(value),
+
+  
+
+                                                    );
+
+  
+
+                                                  }).toList(),
+
+  
+
+                                                  onChanged: (value) {
+
+  
+
+                                                    setState(() => selectedStagnantAnalysis =
+
+  
+
+                                                        value == 'Todos' ? null : value);
+
+  
+
+                                                  },
+
+  
+
+                                                ),
+
+  
+
+                        
+
+  
+
+                                                // Filtro por alta rotación
+
+  
+
+                                                DropdownButtonFormField<String>(
+
+  
+
+                                                  value: (selectedHighRotationAnalysis != null && selectedHighRotationAnalysis!.isNotEmpty) ? selectedHighRotationAnalysis : 'Todos',
+
+  
+
+                                                  decoration: const InputDecoration(
+
+  
+
+                                                    labelText: 'Alta Rotación',
+
+  
+
+                                                  ),
+
+  
+
+                                                  items: ['Todos', 'Sí', 'No'].map((value) {
+
+  
+
+                                                    return DropdownMenuItem<String>(
+
+  
+
+                                                      value: value,
+
+  
+
+                                                      child: Text(value),
+
+  
+
+                                                    );
+
+  
+
+                                                  }).toList(),
+
+  
+
+                                                  onChanged: (value) {
+
+  
+
+                                                    setState(() => selectedHighRotationAnalysis =
+
+  
+
+                                                        value == 'Todos' ? null : value);
+
+  
+
+                                                  },
+
+  
+
+                                                ),
+
+  
+
+                        // Campo de búsqueda por código o descripción
+
+                        const SizedBox(height: 16),
+
+                        TextFormField(
+
+                          initialValue: searchQueryAnalysis,
+
+                          decoration: const InputDecoration(
+
+                            labelText: 'Buscar por código o descripción',
+
+                            hintText: 'Ingrese código o descripción del producto',
+
+                            prefixIcon: Icon(Icons.search_rounded),
+
+                          ),
+
+                          onChanged: (value) {
+
+                            setState(() => searchQueryAnalysis = value);
+
+                          },
+
+                        ),
+
+                      ],
+
+  
+
+                      // Filtro por grupo para movimientos
+
+                      if (isMovementsTab) ...[
+
+                        DropdownButtonFormField<String>(
+
+                          value: selectedGroupMovements == null || !groupsForMovements.contains(selectedGroupMovements) ? 'Todos' : selectedGroupMovements,
+
+                          decoration: const InputDecoration(labelText: 'Grupo'),
+
+                          items: groupsForMovements.map((value) {
+
+                            return DropdownMenuItem<String>(
+
+                              value: value,
+
+                              child: Text(value!),
+
+                            );
+
+                          }).toList(),
+
+                          onChanged: (value) {
+
+                            setState(() => selectedGroupMovements = value == 'Todos' ? null : value);
+
+                          },
+
+                        ),
+
+                      ],
+
+  
+
+                      // Filtro por rango de fechas
+
                       const SizedBox(height: 16),
-                      TextFormField(
-                        initialValue: searchQueryAnalysis,
-                        decoration: const InputDecoration(
-                          labelText: 'Buscar por código o descripción',
-                          hintText: 'Ingrese código o descripción del producto',
-                          prefixIcon: Icon(Icons.search_rounded),
-                        ),
-                        onChanged: (value) {
-                          setState(() => searchQueryAnalysis = value);
-                        },
-                      ),
-                    ],
 
-                    // Filtro por grupo para movimientos
-                    if (isMovementsTab) ...[
-                      DropdownButtonFormField<String>(
-                        value: selectedGroupMovements,
-                        decoration: const InputDecoration(labelText: 'Grupo'),
-                        items: _getUniqueValues('grupo').map((value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(value),
+                      const Text(
+
+                        'Rango de Fechas',
+
+                        style: TextStyle(fontWeight: FontWeight.bold),
+
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      ElevatedButton(
+
+                        onPressed: () async {
+
+                          final picked = await showDateRangePicker(
+
+                            context: context,
+
+                            firstDate: DateTime(2020),
+
+                            lastDate: DateTime.now(),
+
+                            initialDateRange: selectedDateRange,
+
                           );
-                        }).toList(),
-                        onChanged: (value) {
-                          setState(() => selectedGroupMovements = value);
+
+                          if (picked != null) {
+
+                            setState(() {
+
+                              if (isAnalysisTab) {
+
+                                selectedDateRangeAnalysis = picked;
+
+                              } else if (isMovementsTab) {
+
+                                selectedDateRangeMovements = picked;
+
+                              }
+
+                            });
+
+                          }
+
                         },
+
+                        child: Text(dateRangeText),
+
                       ),
+
                     ],
 
-                    // Filtro por rango de fechas
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Rango de Fechas',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: () async {
-                        final picked = await showDateRangePicker(
-                          context: context,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime.now(),
-                          initialDateRange: selectedDateRange,
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            if (isAnalysisTab) {
-                              selectedDateRangeAnalysis = picked;
-                            } else if (isMovementsTab) {
-                              selectedDateRangeMovements = picked;
-                            }
-                          });
-                        }
-                      },
-                      child: Text(dateRangeText),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    _clearFilters();
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('Limpiar'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    _applyFilters();
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('Aplicar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+                  ),
 
-  List<String> _getUniqueValues(String field) {
-    return analysis
+                ),
+
+                actions: [
+
+                  TextButton(
+
+                    onPressed: () {
+
+                      _clearFilters();
+
+                      Navigator.of(context).pop();
+
+                    },
+
+                    child: const Text('Limpiar'),
+
+                  ),
+
+                  TextButton(
+
+                    onPressed: () {
+
+                      _applyFilters();
+
+                      Navigator.of(context).pop();
+
+                    },
+
+                    child: const Text('Aplicar'),
+
+                  ),
+
+                ],
+
+              );
+
+            },
+
+          );
+
+        },
+
+      );
+
+    }
+
+  List<String> _getUniqueValues(String field, {List<Map<String, dynamic>>? source}) {
+    final dataSource = source ?? analysis;
+    var values = dataSource
         .map((item) => item[field]?.toString() ?? '')
-        .where((value) => value.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+        .where((value) => value.isNotEmpty);
+
+    if (field == 'grupo') {
+      values = values.map(_getGroupName);
+    }
+
+    return values.toSet().toList()..sort();
   }
 
   void _showExportDialog() {
