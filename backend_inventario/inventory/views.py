@@ -703,26 +703,41 @@ def _process_update_file(batch, df, inventory_name):
 @require_http_methods(["GET"])
 def get_monthly_movements(request):
     """
-    Retornamos las entradas y salidas por mes y el saldo final de cada mes en inventario 
+    Retornamos las entradas y salidas por mes y el saldo final de cada mes en inventario
     """
     inventory_name = request.GET.get('inventory_name', 'default')
-    
+    warehouse_filter = request.GET.get('warehouse', '')
+    category_filter = request.GET.get('category', '')
+    search_filter = request.GET.get('search', '')
+
     try:
-        # Determinamos un periodos de 12 meses de movimientos 
+        # Determinamos un periodos de 12 meses de movimientos
         today = now().date()
         twelve_months_ago = today - relativedelta(months=11)
         start_of_period = twelve_months_ago.replace(day=1)
 
-        # 1. Obtenemos el total inicial de todos los productos
+        # Base queryset for filtering
+        base_queryset = InventoryRecord.objects.filter(product__inventory_name=inventory_name)
+
+        # Apply filters
+        if warehouse_filter:
+            base_queryset = base_queryset.filter(warehouse__icontains=warehouse_filter)
+        if category_filter:
+            base_queryset = base_queryset.filter(category__icontains=category_filter)
+        if search_filter:
+            base_queryset = base_queryset.filter(
+                Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
+            )
+
+        # 1. Obtenemos el total inicial de todos los productos (filtered if applicable)
         initial_stock_value = Product.objects.filter(
             inventory_name=inventory_name
         ).aggregate(
             total_initial_value=Sum(F('initial_balance') * F('initial_unit_cost'))
         )['total_initial_value'] or Decimal('0')
 
-        # 2. Obtenemos el valor total de los movimientos antes de los 12 meses
-        past_movements_value = InventoryRecord.objects.filter(
-            product__inventory_name=inventory_name,
+        # 2. Obtenemos el valor total de los movimientos antes de los 12 meses (filtered)
+        past_movements_value = base_queryset.filter(
             date__lt=start_of_period
         ).aggregate(
             total_value=Sum('total')
@@ -731,9 +746,8 @@ def get_monthly_movements(request):
         # 3.Calcular el saldo inicial para el período
         starting_balance = initial_stock_value + past_movements_value
 
-        # 4. Obtenga movimientos agregados mensuales de los últimos 12 meses
-        monthly_movements = InventoryRecord.objects.filter(
-            product__inventory_name=inventory_name,
+        # 4. Obtenga movimientos agregados mensuales de los últimos 12 meses (filtered)
+        monthly_movements = base_queryset.filter(
             date__gte=start_of_period
         ).annotate(
             month=TruncMonth('date')
@@ -756,14 +770,14 @@ def get_monthly_movements(request):
         for i in range(12):
             current_month_date = (twelve_months_ago + relativedelta(months=i))
             month_key = current_month_date.strftime('%Y-%m')
-            
+
             month_data = monthly_data.get(month_key, {'entries': Decimal('0'), 'exits': Decimal('0')})
-            
+
             entries = month_data['entries']
             exits = month_data['exits']
-            
+
             current_balance += entries - exits
-            
+
             result_data.append({
                 'month': month_key,
                 'total_entries': float(entries),
@@ -782,14 +796,19 @@ def get_monthly_movements(request):
 def get_product_analysis(request):
     inventory_name = request.GET.get('inventory_name', 'default')
     category_filter = request.GET.get('category', '')
+    warehouse_filter = request.GET.get('warehouse', '')
+    rotation_filter = request.GET.get('rotation', '')
+    stagnant_filter = request.GET.get('stagnant', '')
+    high_rotation_filter = request.GET.get('high_rotation', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    search_filter = request.GET.get('search', '')
 
     try:
         products_query = Product.objects.filter(inventory_name=inventory_name)
 
         if category_filter:
             products_query = products_query.filter(group__icontains=category_filter)
-
-
 
         products = products_query
     except Exception as e:
@@ -802,7 +821,19 @@ def get_product_analysis(request):
     for p in products:
         try:
             # Get the most recent inventory record to determine current stock and cost
-            last_record = InventoryRecord.objects.filter(product=p).order_by('-date', '-id').first()
+            records_query = InventoryRecord.objects.filter(product=p)
+
+            # Apply warehouse filter to records
+            if warehouse_filter:
+                records_query = records_query.filter(warehouse__icontains=warehouse_filter)
+
+            # Apply date filters
+            if date_from:
+                records_query = records_query.filter(date__gte=date_from)
+            if date_to:
+                records_query = records_query.filter(date__lte=date_to)
+
+            last_record = records_query.order_by('-date', '-id').first()
 
             if last_record:
                 current_stock = Decimal(last_record.final_quantity or 0)
@@ -862,6 +893,24 @@ def get_product_analysis(request):
             )
             high_rotation = 'Sí' if consecutive_changes >= 2 else 'No'
 
+            # Apply filters
+            if rotation_filter and rotation != rotation_filter:
+                continue
+            if stagnant_filter:
+                if stagnant_filter == 'Sí' and not is_stagnant:
+                    continue
+                elif stagnant_filter == 'No' and is_stagnant:
+                    continue
+            if high_rotation_filter:
+                if high_rotation_filter == 'Sí' and high_rotation != 'Sí':
+                    continue
+                elif high_rotation_filter == 'No' and high_rotation == 'Sí':
+                    continue
+            if search_filter:
+                search_lower = search_filter.lower()
+                if not (search_lower in p.code.lower() or search_lower in p.description.lower()):
+                    continue
+
             analysis_data.append({
                 'codigo': p.code,
                 'nombre_producto': p.description,
@@ -873,7 +922,7 @@ def get_product_analysis(request):
                 'estancado': 'Sí' if is_stagnant else 'No',
                 'rotacion': rotation,
                 'alta_rotacion': high_rotation,
-                'almacen': 'almacen',
+                'almacen': warehouse_filter or 'Todos',  # Return applied warehouse filter
             })
 
         except Exception as e:
@@ -946,6 +995,7 @@ def get_records(request):
         category (str): Filter by category
         date_from (str): Start date filter
         date_to (str): End date filter
+        search (str): Search by product code or description
 
     Returns:
         JsonResponse: List of inventory records or empty list on error
@@ -955,6 +1005,7 @@ def get_records(request):
     category_filter = request.GET.get('category', '')
     date_from = request.GET.get('date_from', '')
     date_to = request.GET.get('date_to', '')
+    search_filter = request.GET.get('search', '')
 
     try:
         records_query = InventoryRecord.objects.filter(product__inventory_name=inventory_name).select_related('product', 'batch')
@@ -968,6 +1019,10 @@ def get_records(request):
             records_query = records_query.filter(date__gte=date_from)
         if date_to:
             records_query = records_query.filter(date__lte=date_to)
+        if search_filter:
+            records_query = records_query.filter(
+                Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
+            )
 
         # Limit records for performance - return only recent 1000 records
         records = records_query.order_by('-date')[:1000]
@@ -1175,6 +1230,130 @@ def export_analysis(request, inventory_name='default', format_type='excel'):
 
 
 @require_http_methods(["GET"])
+def export_movements(request, inventory_name='default', format_type='excel'):
+    """
+    Exports inventory movements data.
+
+    Args:
+        request: Django HttpRequest
+        inventory_name (str): Inventory name
+        format_type (str): Export format (excel or pdf)
+
+    Returns:
+        HttpResponse: File response
+    """
+    try:
+        # Get movements data using the same filtering as get_records
+        inventory_name_param = request.GET.get('inventory_name', inventory_name)
+        warehouse_filter = request.GET.get('warehouse', '')
+        category_filter = request.GET.get('category', '')
+        date_from = request.GET.get('date_from', '')
+        date_to = request.GET.get('date_to', '')
+        search_filter = request.GET.get('search', '')
+
+        records_query = InventoryRecord.objects.filter(product__inventory_name=inventory_name_param).select_related('product', 'batch')
+
+        # Apply filters
+        if warehouse_filter:
+            records_query = records_query.filter(warehouse__icontains=warehouse_filter)
+        if category_filter:
+            records_query = records_query.filter(category__icontains=category_filter)
+        if date_from:
+            records_query = records_query.filter(date__gte=date_from)
+        if date_to:
+            records_query = records_query.filter(date__lte=date_to)
+        if search_filter:
+            records_query = records_query.filter(
+                Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
+            )
+
+        # Get all records (not limited like in get_records)
+        records = records_query.order_by('-date')
+        movements_data = [{
+            'fecha': r.date.isoformat(),
+            'codigo': r.product.code,
+            'nombre_producto': r.product.description,
+            'almacen': r.warehouse,
+            'tipo_documento': r.document_type,
+            'documento': r.document_number,
+            'cantidad': float(r.quantity),
+            'costo_unitario': float(r.unit_cost),
+            'costo_total': float(r.total),
+            'categoria': r.category,
+        } for r in records]
+
+        if format_type == 'excel':
+            # Create Excel file
+            df = pd.DataFrame(movements_data)
+            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            response['Content-Disposition'] = f'attachment; filename="movimientos_inventario_{inventory_name_param}.xlsx"'
+            df.to_excel(response, index=False)
+            return response
+        elif format_type == 'pdf':
+            # Create PDF file
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            elements = []
+
+            # Use Times fonts which support Unicode/Latin characters
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Title'],
+                fontName='Times-Bold',
+                fontSize=18,
+            )
+            title = Paragraph(f"Movimientos de Inventario - {inventory_name_param}", title_style)
+            elements.append(title)
+            elements.append(Spacer(1, 12))
+
+            # Prepare data for table
+            if movements_data:
+                headers = ['Fecha', 'Código', 'Producto', 'Almacén', 'Tipo Doc.', 'Documento', 'Cantidad', 'Costo Unit.', 'Total', 'Categoría']
+                data = [headers] + [[
+                    item['fecha'],
+                    item['codigo'],
+                    item['nombre_producto'][:30] + '...' if len(item['nombre_producto']) > 30 else item['nombre_producto'],
+                    item['almacen'],
+                    item['tipo_documento'] or '',
+                    item['documento'] or '',
+                    str(item['cantidad']),
+                    f"${item['costo_unitario']:,.2f}",
+                    f"${item['costo_total']:,.2f}",
+                    item['categoria'],
+                ] for item in movements_data]
+
+                # Create table
+                table = Table(data)
+                style = TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ])
+                table.setStyle(style)
+                elements.append(table)
+
+            doc.build(elements)
+            buffer.seek(0)
+
+            response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="movimientos_inventario_{inventory_name_param}.pdf"'
+            return response
+        else:
+            return JsonResponse({'error': 'Formato no soportado'}, status=400)
+    except Exception as e:
+        logger.error(f"Error exporting movements: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["GET"])
 def list_inventories(request):
     """
     Lists all available inventories.
@@ -1245,4 +1424,4 @@ def welcome(request):
         JsonResponse: Welcome message
     """
     logger.info(f"Request received: {request.method} {request.path}")
-    return JsonResponse({'message': 'Welcome to the Inventory API Service!'})
+    return JsonResponse({'message': 'Bienvenido a el sistema de analisis de inventarios'})

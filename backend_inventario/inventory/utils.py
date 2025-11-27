@@ -17,7 +17,7 @@ CATEGORIA_MAP = {
     '4': 'PAPELERIA Y ASEO',
     '5': 'DOTACION Y SEGURIDAD'
 }
-    
+
 def clean_number(s):
     """
     limpiamos y convertimos a Decimal una cadena que puede tener diferentes formatos

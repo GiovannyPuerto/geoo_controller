@@ -1,7 +1,14 @@
-# TODO: Improve Dashboard Performance and Filters
+# TODO: Fix Flutter Analyze Issues
 
-## Tasks
-- [x] Add mounted checks to setState calls in async methods (_loadData, _uploadBaseFile, _loadFiltersFromPrefs, _uploadUpdateFile, _clearFilters)
-- [x] Implement local filtering for searchQueryAnalysis in analysis tab
-- [x] Change analysis table to DataTable2 for better performance
-- [x] Test the app to ensure filters work and rendering is smoother
+## Files to Edit
+- [ ] dashboard.dart: Fix use_build_context_synchronously
+- [ ] dashboard_fixed.dart: Fix use_build_context_synchronously, deprecated_member_use, unnecessary_string_interpolations
+- [ ] dashboard_new.dart: Fix use_build_context_synchronously, unnecessary_string_interpolations
+- [ ] dashboard_no_chart.dart: Fix use_build_context_synchronously, unnecessary_string_interpolations
+- [ ] main.dart: Fix deprecated_member_use (withOpacity)
+- [ ] services/api_service.dart: Fix curly_braces_in_flow_control_structures
+- [ ] tabs/analysis_tab.dart: Fix unnecessary_brace_in_string_interps, prefer_collection_literals, deprecated_member_use, unnecessary_this
+- [ ] tabs/movements_tab.dart: Fix const_with_non_const
+
+## Followup
+- [ ] Run flutter analyze to verify all issues are fixed

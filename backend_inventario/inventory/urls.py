@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     update_inventory, get_batches, get_products, get_records,
     get_product_analysis, create_inventory, get_product_history,
-    get_summary, export_analysis, list_inventories,
+    get_summary, export_analysis, export_movements, list_inventories,
     upload_base_file, welcome, get_monthly_movements, get_last_update_time
 )
 
@@ -20,10 +20,10 @@ urlpatterns = [
     path('product/<str:product_code>/history/', get_product_history, name='get_product_history'),
     path('product/<str:inventory_name>/<str:product_code>/history/', get_product_history, name='get_product_history_with_inventory'),
     path('summary/', get_summary, name='get_summary'),
-    path('export/excel/', export_analysis, name='export_excel'),
-    path('export/excel/<str:inventory_name>/', export_analysis, name='export_excel_with_inventory'),
-    path('export/pdf/', export_analysis, {'format_type': 'pdf'}, name='export_pdf'),
-    path('export/pdf/<str:inventory_name>/', export_analysis, {'format_type': 'pdf'}, name='export_pdf_with_inventory'),
+    path('export-analysis/', export_analysis, name='export_analysis'),
+    path('export-analysis/<str:inventory_name>/', export_analysis, name='export_analysis_with_inventory'),
+    path('export-movements/', export_movements, name='export_movements'),
+    path('export-movements/<str:inventory_name>/', export_movements, name='export_movements_with_inventory'),
     path('create/', create_inventory, name='create_inventory'),
     path('inventories/', list_inventories, name='list_inventories'),
     path('upload-base/', upload_base_file, name='upload_base_file'),

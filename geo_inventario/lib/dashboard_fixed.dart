@@ -83,12 +83,14 @@ class _DashboardPageState extends State<DashboardPage>
       setState(() {
         isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al cargar los datos: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al cargar los datos: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -145,7 +147,7 @@ class _DashboardPageState extends State<DashboardPage>
                                     const Text('Total Productos',
                                         style: TextStyle(
                                             fontSize: 14, color: Colors.grey)),
-                                    Text('${products.length}',
+                                    Text(products.length.toString(),
                                         style: const TextStyle(
                                             fontSize: 24,
                                             fontWeight: FontWeight.bold)),
@@ -161,7 +163,7 @@ class _DashboardPageState extends State<DashboardPage>
                                     const Text('Total Registros',
                                         style: TextStyle(
                                             fontSize: 14, color: Colors.grey)),
-                                    Text('${records.length}',
+                                    Text(records.length.toString(),
                                         style: const TextStyle(
                                             fontSize: 24,
                                             fontWeight: FontWeight.bold)),
@@ -214,7 +216,6 @@ class _DashboardPageState extends State<DashboardPage>
                               borderData: FlBorderData(show: false),
                               barGroups: _getBarGroups(),
                             ),
-                            swapAnimationDuration: Duration.zero,
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -394,10 +395,13 @@ class _DashboardPageState extends State<DashboardPage>
                                   DataCell(Text(item['grupo'] ?? '')),
                                   DataCell(Text(
                                       item['saldo_actual']?.toString() ?? '0')),
-                                  DataCell(Text(
-                                      '${(item['valor_saldo'] as double?)?.toStringAsFixed(2) ?? '0.00'}')),
-                                  DataCell(Text(
-                                      '${(item['costo_unitario_promedio'] as double?)?.toStringAsFixed(2) ?? '0.00'}')),
+                                  DataCell(Text((item['valor_saldo'] as double?)
+                                          ?.toStringAsFixed(2) ??
+                                      '0.00')),
+                                  DataCell(Text((item['costo_unitario_promedio']
+                                              as double?)
+                                          ?.toStringAsFixed(2) ??
+                                      '0.00')),
                                   DataCell(Text(item['estancado'] ?? 'No')),
                                   DataCell(Text(item['rotacion'] ?? 'Activo')),
                                   DataCell(Text(item['alta_rotacion'] ?? 'No')),
@@ -452,6 +456,8 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _uploadFile() async {
+    final localContext = context;
+
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
@@ -468,7 +474,7 @@ class _DashboardPageState extends State<DashboardPage>
             .toList();
 
         final bool? confirmed = await Navigator.push(
-          context,
+          localContext,
           MaterialPageRoute(
             builder: (context) => PreviewPage(data: data, filePath: path),
           ),
@@ -479,24 +485,29 @@ class _DashboardPageState extends State<DashboardPage>
             'POST',
             Uri.parse('http://127.0.0.1:8000/api/inventory/upload-base/'),
           );
-          request.files.add(await http.MultipartFile.fromPath('base_file', path));
+          request.files
+              .add(await http.MultipartFile.fromPath('base_file', path));
           var response = await request.send();
           if (response.statusCode == 200) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Archivo subido correctamente.'),
-                backgroundColor: Colors.green,
-              ),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(localContext).showSnackBar(
+                const SnackBar(
+                  content: Text('Archivo subido correctamente.'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
             _loadData();
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content:
-                    Text('Error al subir el archivo: ${response.reasonPhrase}'),
-                backgroundColor: Colors.red,
-              ),
-            );
+            if (mounted) {
+              ScaffoldMessenger.of(localContext).showSnackBar(
+                SnackBar(
+                  content: Text(
+                      'Error al subir el archivo: ${response.reasonPhrase}'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
           }
         }
       }
