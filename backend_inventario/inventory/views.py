@@ -46,6 +46,46 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+def _normalize_update_df_columns(df):
+    """
+    Normalizes column names of an update-file DataFrame using a synonym map.
+    Returns the normalized DataFrame and a list of missing required columns.
+    """
+    if df is None:
+        return None, []
+    
+    df.columns = df.columns.str.lower().str.strip()
+    column_mapping = {}
+    synonyms = {
+        'item': ['item', 'codigo', 'code', 'producto', 'cod', 'código'],
+        'desc_item': ['desc_item', 'descripcion', 'description', 'desc', 'producto_desc', 'descripción'],
+        'localizacion': ['localizacion', 'local', 'almacen', 'warehouse', 'location', 'localización'],
+        'categoria': ['categoria', 'category', 'grupo', 'group', 'tipo', 'categoría'],
+        'fecha': ['fecha', 'date', 'fecha_mov', 'fecha_documento', 'fecha_registro'],
+        'documento': ['documento', 'doc', 'document', 'numero_documento', 'número_documento'],
+        'entradas': ['entradas', 'entrada', 'in', 'input', 'ingreso'],
+        'salidas': ['salidas', 'salida', 'out', 'output', 'egreso'],
+        'unitario': ['unitario', 'unit_cost', 'costo_unitario', 'precio_unitario', 'unit', 'costo_unit'],
+        'total': ['total', 'total_cost', 'valor_total', 'monto'],
+        'cantidad': ['cantidad', 'quantity', 'qty', 'cant', 'amount'],
+        'cost_center': ['cost_center', 'centro_costo', 'cc', 'costcenter', 'centro_costo']
+    }
+    
+    for expected, syn_list in synonyms.items():
+        if expected in df.columns:
+            continue
+        for syn in syn_list:
+            if syn in df.columns:
+                column_mapping[syn] = expected
+                break
+    df.rename(columns=column_mapping, inplace=True)
+    
+    required_columns = ['item', 'desc_item', 'localizacion', 'categoria', 'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    
+    return df, missing_columns
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_inventory(request, inventory_name='default'):
@@ -179,15 +219,18 @@ def update_inventory(request, inventory_name='default'):
                 status=400
             )
 
-        # Calculate checksum based on provided files
-        checksum_content = b''
+        # Calculate checksum based on provided files (order-independent)
+        file_hashes = []
         if base_content:
-            checksum_content += base_content
-        if update_content:
-            checksum_content += update_content
+            file_hashes.append(calculate_file_checksum(base_content))
+        for update_content in update_files_data:
+            file_hashes.append(calculate_file_checksum(update_content[1]))  # update_content[1] is the file content
 
-        if checksum_content:
-            checksum = calculate_file_checksum(checksum_content)
+        if file_hashes:
+            # Sort hashes to make checksum order-independent
+            file_hashes.sort()
+            combined_hash_input = ''.join(file_hashes).encode('utf-8')
+            checksum = calculate_file_checksum(combined_hash_input)
         else:
             checksum = 'no-files'
 
@@ -204,7 +247,9 @@ def update_inventory(request, inventory_name='default'):
             inventory_name=inventory_name
         ).first()
         if existing_batch:
-            logger.info(f"Deleting existing batch {existing_batch.id} with same checksum for re-import")
+            logger.info(f"Deleting existing batch {existing_batch.id} and its records for re-import")
+            # Delete associated inventory records first
+            InventoryRecord.objects.filter(batch=existing_batch).delete()
             existing_batch.delete()
 
         batch = ImportBatch.objects.create(
@@ -232,47 +277,38 @@ def update_inventory(request, inventory_name='default'):
                 update_df = None
                 read_success = False
 
-                # First, try flexible reading with header=3 (row 4)
-                try:
-                    update_df = pd.read_excel(io.BytesIO(update_content), header=3)
-                    logger.info(f"Trying flexible read for '{file_name}' with header=3, columns found: {list(update_df.columns)}")
-                    # Normalize column names to lowercase for case-insensitive matching
-                    update_df.columns = update_df.columns.str.lower().str.strip()
-                    # Rename columns to match expected names using synonyms
-                    column_mapping = {}
-                    synonyms = {
-                        'item': ['item', 'codigo', 'code', 'producto', 'cod', 'código'],
-                        'desc_item': ['desc_item', 'descripcion', 'description', 'desc', 'producto_desc', 'descripción'],
-                        'localizacion': ['localizacion', 'local', 'almacen', 'warehouse', 'location', 'localización'],
-                        'categoria': ['categoria', 'category', 'grupo', 'group', 'tipo', 'categoría'],
-                        'fecha': ['fecha', 'date', 'fecha_mov', 'fecha_documento', 'fecha_registro'],
-                        'documento': ['documento', 'doc', 'document', 'numero_documento', 'número_documento'],
-                        'entradas': ['entradas', 'entrada', 'in', 'input', 'ingreso'],
-                        'salidas': ['salidas', 'salida', 'out', 'output', 'egreso'],
-                        'unitario': ['unitario', 'unit_cost', 'costo_unitario', 'precio_unitario', 'unit', 'costo_unit'],
-                        'total': ['total', 'total_cost', 'valor_total', 'monto'],
-                        'cantidad': ['cantidad', 'quantity', 'qty', 'cant', 'amount'],
-                        'cost_center': ['cost_center', 'centro_costo', 'cc', 'costcenter', 'centro_costo']
-                    }
-                    expected_names = list(synonyms.keys())
-                    for expected in expected_names:
-                        if expected in update_df.columns:
-                            continue  # Already correct
-                        for syn in synonyms[expected]:
-                            if syn in update_df.columns:
-                                column_mapping[syn] = expected
-                                break
-                    update_df.rename(columns=column_mapping, inplace=True)
-                    # Check if required columns are present
-                    required_columns = ['item', 'desc_item', 'localizacion', 'categoria', 'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad']
-                    missing_columns = [col for col in required_columns if col not in update_df.columns]
-                    if not missing_columns:
-                        read_success = True
-                        logger.info(f"Flexible read successful for '{file_name}' with header=3")
-                    else:
-                        logger.warning(f"Flexible read missing columns for '{file_name}': {missing_columns}. Available: {list(update_df.columns)}")
-                except Exception as e:
-                    logger.warning(f"Flexible read failed for '{file_name}': {str(e)}")
+                # If file appears to be HTML, try parsing it first
+                if file_name.lower().endswith('.xls') and b'<html' in update_content.lower():
+                    logger.info(f"File '{file_name}' appears to be an HTML table, attempting to parse.")
+                    try:
+                        dfs = pd.read_html(io.BytesIO(update_content), encoding='utf-8', header=3)
+                        if dfs:
+                            update_df = dfs[0]
+                            update_df, missing_cols = _normalize_update_df_columns(update_df)
+                            if not missing_cols:
+                                read_success = True
+                                logger.info(f"Successfully parsed HTML file '{file_name}'.")
+                            else:
+                                logger.warning(f"HTML parse missing columns for '{file_name}': {missing_cols}")
+                                update_df = None  # Invalidate df if columns are wrong
+                        else:
+                            logger.warning(f"No tables found in HTML file '{file_name}'.")
+                    except Exception as e:
+                        logger.warning(f"Could not parse file '{file_name}' as HTML: {e}")
+
+                # If not successfully read as HTML, try as Excel (flexible read)
+                if not read_success:
+                    try:
+                        update_df = pd.read_excel(io.BytesIO(update_content), header=3)
+                        update_df, missing_cols = _normalize_update_df_columns(update_df)
+                        if not missing_cols:
+                            read_success = True
+                            logger.info(f"Flexible Excel read successful for '{file_name}'.")
+                        else:
+                            logger.warning(f"Flexible Excel read missing columns for '{file_name}': {missing_cols}")
+                            update_df = None # Invalidate df
+                    except Exception as e:
+                        logger.warning(f"Flexible Excel read failed for '{file_name}': {str(e)}")
 
                 # If flexible read failed, try specific column positions with different headers
                 if not read_success:
@@ -422,24 +458,25 @@ def _process_base_file(df, inventory_name):
 
     # Agrupar por código de producto para sumar cantidades y valores de productos repetidos en diferentes almacenes
     # Calcular costo unitario ponderado cuando hay productos en múltiples almacenes
-    def calculate_weighted_unit_cost(group):
+    def process_group(group):
         total_quantity = group['cantidad'].sum()
         total_value = group['valor_total'].sum()
         if total_quantity != 0:
             weighted_cost = total_value / total_quantity
         else:
-            weighted_cost = group['costo_unitario'].iloc[0]  # Si cantidad es 0, usar el primero
-        return weighted_cost
+            weighted_cost = group['costo_unitario'].iloc[0] if not group.empty else 0
+        
+        return pd.Series({
+            'cantidad': total_quantity,
+            'valor_total': total_value,
+            'costo_unitario': weighted_cost,
+            'almacen': ', '.join(sorted(set(group['almacen']))),
+            'fecha_corte': group['fecha_corte'].iloc[0],
+            'mes': group['mes'].iloc[0],
+            'unidad_medida': group['unidad_medida'].iloc[0]
+        })
 
-    df_grouped = df.groupby(['codigo', 'descripcion', 'grupo']).agg({
-        'cantidad': 'sum',
-        'valor_total': 'sum',
-        'costo_unitario': calculate_weighted_unit_cost,  # Calcular costo unitario ponderado
-        'almacen': lambda x: ', '.join(sorted(set(x))),  # Concatenar almacenes únicos
-        'fecha_corte': 'first',
-        'mes': 'first',
-        'unidad_medida': 'first'
-    }).reset_index()
+    df_grouped = df.groupby(['codigo', 'descripcion', 'grupo']).apply(process_group).reset_index()
 
 
     # Crear un DataFrame con información detallada por almacén para productos agrupados
@@ -471,8 +508,18 @@ def _process_base_file(df, inventory_name):
 
             # traer valores de la fila agrupada
             cantidad_total = safe_decimal(row.get('cantidad'))
+            valor_total = safe_decimal(row.get('valor_total'))
             costo_unitario = safe_decimal(row.get('costo_unitario'))
             descripcion = row.get('descripcion', '').strip()
+
+            # Si cantidad es 0 pero hay valor_total, ajustar para preservar el valor
+            if cantidad_total == 0 and valor_total > 0:
+                if costo_unitario > 0:
+                    cantidad_total = valor_total / costo_unitario
+                else:
+                    # Si no hay costo unitario, asumir costo 1 para preservar valor
+                    costo_unitario = Decimal('1')
+                    cantidad_total = valor_total
 
             if not descripcion:
                 logger.warning(f"Producto con código {codigo} sin descripción, se omitirá")
@@ -691,12 +738,28 @@ def _process_update_file(batch, df, inventory_name):
                     errors += 1
                     continue
 
-                # Check for duplicate record based on unique_together constraint
+                # Create inventory record - check for duplicates across all batches
                 warehouse = map_localizacion(str(row.get('localizacion', '')).strip())
                 category = map_categoria(str(row.get('categoria', '')).strip())
                 cost_center = str(row.get('cost_center', '')).strip() if pd.notna(row.get('cost_center')) else None
 
-                if InventoryRecord.objects.filter(
+                # Check if record already exists across all batches
+                existing_record = InventoryRecord.objects.filter(
+                    document_type=doc_type,
+                    document_number=doc_number,
+                    product=product,
+                    cost_center=cost_center,
+                    date=date,
+                    warehouse=warehouse
+                ).first()
+
+                if existing_record:
+                    duplicates_count += 1
+                    logger.info(f"Duplicate record skipped: {doc_type}-{doc_number} for product {product.code} on {date}")
+                    continue
+
+                # Creamos el registro de inventario
+                records_to_create.append(InventoryRecord(
                     batch=batch,
                     product=product,
                     warehouse=warehouse,
@@ -709,29 +772,12 @@ def _process_update_file(batch, df, inventory_name):
                     category=category,
                     final_quantity=final_quantity,
                     cost_center=cost_center
-                ).exists():
-                    duplicates_count += 1
-                else:
-                    # Creamos el registro de inventario
-                    records_to_create.append(InventoryRecord(
-                        batch=batch,
-                        product=product,
-                        warehouse=warehouse,
-                        date=date,
-                        document_type=doc_type,
-                        document_number=doc_number,
-                        quantity=quantity,
-                        unit_cost=unit_cost,
-                        total=total,
-                        category=category,
-                        final_quantity=final_quantity,
-                        cost_center=cost_center
-                    ))
+                ))
 
-                    # No actualizamos información del producto desde archivo de actualización
-                    # Solo registramos los movimientos
+                # No actualizamos información del producto desde archivo de actualización
+                # Solo registramos los movimientos
 
-                    records_processed += 1
+                records_processed += 1
 
                 # INSERTAMOS EN BLOQUES DE 500
                 if len(records_to_create) >= 500:
@@ -995,10 +1041,16 @@ def get_product_analysis(request):
             try:
                 # Get current stock and cost from last records per warehouse or initial values
                 last_records = last_records_dict.get(product.id, [])
+                warehouse_details = warehouse_detail_dict.get(product.id, {})
+
+                # Calculate current stock as initial balance + sum of all quantity movements
+                total_movements = InventoryRecord.objects.filter(product=product).aggregate(
+                    total_quantity=Sum('quantity')
+                )['total_quantity'] or Decimal('0')
+                current_stock = Decimal(product.initial_balance or 0) + total_movements
+
+                # Get unit cost from the most recent record with non-zero unit_cost across warehouses
                 if last_records:
-                    # Sum final_quantity across all warehouses for total current stock
-                    current_stock = sum(Decimal(record.final_quantity or 0) for record in last_records)
-                    # Get unit cost from the most recent record with non-zero unit_cost across warehouses
                     recent_records_with_cost = [r for r in last_records if r.unit_cost and r.unit_cost > 0]
                     if recent_records_with_cost:
                         most_recent_with_cost = max(recent_records_with_cost, key=lambda r: r.date)
@@ -1006,7 +1058,6 @@ def get_product_analysis(request):
                     else:
                         current_unit_cost = Decimal(product.initial_unit_cost or 0)
                 else:
-                    current_stock = Decimal(product.initial_balance or 0)
                     current_unit_cost = Decimal(product.initial_unit_cost or 0)
 
                 # Producto consumido

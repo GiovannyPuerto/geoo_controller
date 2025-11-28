@@ -463,51 +463,44 @@ class _DashboardPageState extends State<DashboardPage>
       allowedExtensions: ['xlsx'],
     );
 
-    if (result != null) {
-      final path = result.files.single.path;
-      if (path != null) {
-        var bytes = File(path).readAsBytesSync();
-        var excel = Excel.decodeBytes(bytes);
-        var sheet = excel.tables[excel.tables.keys.first];
-        var data = sheet!.rows
-            .map((row) => row.map((cell) => cell?.value).toList())
-            .toList();
-
-        final bool? confirmed = await Navigator.push(
-          localContext,
-          MaterialPageRoute(
-            builder: (context) => PreviewPage(data: data, filePath: path),
-          ),
+    if (result != null && result.files.isNotEmpty) {
+      final file = result.files.single;
+      if (file != null) {
+        var request = http.MultipartRequest(
+          'POST',
+          Uri.parse('http://127.0.0.1:8000/api/inventory/upload-base/'),
         );
+        if (file.path != null) {
+          var bytes = File(file.path!).readAsBytesSync();
+          request.files.add(http.MultipartFile.fromBytes('base_file', bytes,
+              filename: file.name));
+        } else if (file.bytes != null) {
+          request.files.add(http.MultipartFile.fromBytes(
+              'base_file', file.bytes!,
+              filename: file.name));
+        }
+        var response = await request.send();
+        var responseBody = await response.stream.bytesToString();
+        var data = json.decode(responseBody);
 
-        if (confirmed == true) {
-          var request = http.MultipartRequest(
-            'POST',
-            Uri.parse('http://127.0.0.1:8000/api/inventory/upload-base/'),
-          );
-          request.files
-              .add(await http.MultipartFile.fromPath('base_file', path));
-          var response = await request.send();
-          if (response.statusCode == 200) {
-            if (mounted) {
-              ScaffoldMessenger.of(localContext).showSnackBar(
-                const SnackBar(
-                  content: Text('Archivo subido correctamente.'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
-            _loadData();
-          } else {
-            if (mounted) {
-              ScaffoldMessenger.of(localContext).showSnackBar(
-                SnackBar(
-                  content: Text(
-                      'Error al subir el archivo: ${response.reasonPhrase}'),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            }
+        if (data['ok'] == true) {
+          if (mounted) {
+            ScaffoldMessenger.of(localContext).showSnackBar(
+              const SnackBar(
+                content: Text('Archivo subido correctamente.'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+          _loadData();
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(localContext).showSnackBar(
+              SnackBar(
+                content: Text(data['error'] ?? 'Error al subir el archivo'),
+                backgroundColor: Colors.red,
+              ),
+            );
           }
         }
       }

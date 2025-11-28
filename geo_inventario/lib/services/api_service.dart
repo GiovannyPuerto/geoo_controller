@@ -219,14 +219,24 @@ class ApiService {
           };
         }
       } else {
-        return {
-          'statusCode': streamedResponse.statusCode,
-          'body': responseData,
-          'ok': false,
-          'message': '',
-          'error':
-              'HTTP ${streamedResponse.statusCode}: ${streamedResponse.reasonPhrase}',
-        };
+        try {
+          final jsonResponse = json.decode(responseData);
+          return {
+            'statusCode': streamedResponse.statusCode,
+            'body': responseData,
+            'ok': jsonResponse['ok'] ?? false,
+            'message': jsonResponse['message'] ?? '',
+            'error': jsonResponse['error'] ?? 'Error del servidor',
+          };
+        } catch (e) {
+          return {
+            'statusCode': streamedResponse.statusCode,
+            'body': responseData,
+            'ok': false,
+            'message': '',
+            'error': 'Error: ${streamedResponse.statusCode}',
+          };
+        }
       }
     } catch (e) {
       return {
