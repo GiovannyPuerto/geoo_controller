@@ -33,6 +33,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists, Min
 from django.db.models.functions import Coalesce, TruncMonth
+from django.contrib.postgres.aggregates import StringAgg as GroupConcat
 from django.utils.timezone import now
 from dateutil.relativedelta import relativedelta
 
@@ -860,131 +861,181 @@ def get_product_analysis(request):
     search_filter = request.GET.get('search', '')
 
     try:
+        # Base product query with filters
         products_query = Product.objects.filter(inventory_name=inventory_name)
 
         if category_filter:
             products_query = products_query.filter(group__icontains=category_filter)
 
-        products = products_query
-    except Exception as e:
-        logger.error(f"Error in product analysis query: {str(e)}", exc_info=True)
-        return JsonResponse([], safe=False)
+        # Apply warehouse filter at product level using WarehouseDetail
+        if warehouse_filter:
+            products_query = products_query.filter(
+                warehousedetail__warehouse__icontains=warehouse_filter
+            ).distinct()
 
-    analysis_data = []
-    current_year = datetime.now().year
+        # Get product IDs for bulk queries
+        product_ids = list(products_query.values_list('id', flat=True))
+        if not product_ids:
+            return JsonResponse([], safe=False)
 
-    for p in products:
-        try:
-            # Get the most recent inventory record to determine current stock and cost
-            records_query = InventoryRecord.objects.filter(product=p)
+        # BULK QUERY 1: Get last records for all products
+        records_subquery = InventoryRecord.objects.filter(
+            product_id=OuterRef('pk')
+        )
 
-            # Apply warehouse filter to records
-            if warehouse_filter:
-                records_query = records_query.filter(warehouse__icontains=warehouse_filter)
+        # Apply warehouse and date filters to records
+        if warehouse_filter:
+            records_subquery = records_subquery.filter(warehouse__icontains=warehouse_filter)
+        if date_from:
+            records_subquery = records_subquery.filter(date__gte=date_from)
+        if date_to:
+            records_subquery = records_subquery.filter(date__lte=date_to)
 
-            # Apply date filters
-            if date_from:
-                records_query = records_query.filter(date__gte=date_from)
-            if date_to:
-                records_query = records_query.filter(date__lte=date_to)
+        last_records = InventoryRecord.objects.filter(
+            id__in=records_subquery.values('product_id').annotate(
+                latest_id=Max('id')
+            ).values('latest_id')
+        ).select_related('product')
 
-            last_record = records_query.order_by('-date', '-id').first()
+        # Create lookup dict for last records
+        last_records_dict = {record.product_id: record for record in last_records}
 
-            if last_record:
-                current_stock = Decimal(last_record.final_quantity or 0)
-                current_unit_cost = Decimal(last_record.unit_cost or p.initial_unit_cost or 0)
-            else:
-                current_stock = Decimal(p.initial_balance or 0)
-                current_unit_cost = Decimal(p.initial_unit_cost or 0)
+        # BULK QUERY 2: Get pre-year sums for all products
+        pre_year_sums = InventoryRecord.objects.filter(
+            product_id__in=product_ids,
+            date__year__lt=datetime.now().year
+        ).values('product_id').annotate(
+            total_quantity=Sum('quantity')
+        )
 
-            # Producto consumido
-            is_consumed = (current_stock <= 0)
+        pre_year_dict = {item['product_id']: item['total_quantity'] or Decimal('0')
+                        for item in pre_year_sums}
 
-            # ------------------------------------------
-            #        ROTACIÓN / ESTANCAMIENTO
-            # ------------------------------------------
-            pre_year_sum = InventoryRecord.objects.filter(
-                product=p,
-                date__year__lt=current_year
-            ).aggregate(s=Sum('quantity'))['s'] or Decimal('0')
+        # BULK QUERY 3: Get monthly movements for current year for all products
+        monthly_movements = InventoryRecord.objects.filter(
+            product_id__in=product_ids,
+            date__year=datetime.now().year
+        ).annotate(month=TruncMonth('date')).values('product_id', 'month').annotate(
+            monthly_total=Sum('quantity')
+        ).order_by('product_id', 'month')
 
-            balance_pre_year = Decimal(p.initial_balance or 0) + Decimal(pre_year_sum)
+        # Group monthly movements by product
+        monthly_dict = {}
+        for movement in monthly_movements:
+            product_id = movement['product_id']
+            if product_id not in monthly_dict:
+                monthly_dict[product_id] = {}
+            monthly_dict[product_id][movement['month'].month] = movement['monthly_total']
 
-            monthly_movements = InventoryRecord.objects.filter(
-                product=p,
-                date__year=current_year
-            ).annotate(month=TruncMonth('date')).values('month').annotate(
-                monthly_total=Sum('quantity')
-            ).order_by('month')
+        # BULK QUERY 4: Get warehouses for all products
+        warehouse_details = WarehouseDetail.objects.filter(
+            product_id__in=product_ids
+        ).values('product_id').annotate(
+            warehouses=GroupConcat('warehouse', delimiter=', ', distinct=True)
+        )
 
-            movements_by_month = {m['month'].month: m['monthly_total'] for m in monthly_movements}
+        warehouses_dict = {item['product_id']: item['warehouses'] or 'Todos'
+                          for item in warehouse_details}
 
-            monthly_balances = []
-            running_balance = balance_pre_year
-            for m in range(1, 13):
-                running_balance += movements_by_month.get(m, Decimal('0'))
-                monthly_balances.append(running_balance)
+        # Process all products in memory
+        analysis_data = []
+        current_year = datetime.now().year
 
-            all_zero_balance = all(b == 0 for b in monthly_balances)
-            unique_balances = set(monthly_balances)
+        for product in products_query:
+            try:
+                # Get current stock and cost from last record or initial values
+                last_record = last_records_dict.get(product.id)
+                if last_record:
+                    current_stock = Decimal(last_record.final_quantity or 0)
+                    current_unit_cost = Decimal(last_record.unit_cost or product.initial_unit_cost or 0)
+                else:
+                    current_stock = Decimal(product.initial_balance or 0)
+                    current_unit_cost = Decimal(product.initial_unit_cost or 0)
 
-            # Rotación logic
-            if all_zero_balance and balance_pre_year == 0:
-                rotation = "Activo"
-            elif all_zero_balance and balance_pre_year > 0:
-                rotation = "Obsoleto"
-            elif len(unique_balances) == 1 and monthly_balances[0] > 0:
-                rotation = "Obsoleto"
-            elif len(monthly_balances) >= 3 and len(set(monthly_balances[-3:])) == 1 and monthly_balances[-1] > 0:
-                rotation = "Estancado"
-            else:
-                rotation = "Activo"
+                # Producto consumido
+                is_consumed = (current_stock <= 0)
 
-            is_stagnant = rotation in ["Estancado", "Obsoleto"]
+                # ------------------------------------------#
+                #        ROTACIÓN / ESTANCAMIENTO
+                # ------------------------------------------#
+                pre_year_sum = pre_year_dict.get(product.id, Decimal('0'))
+                balance_pre_year = Decimal(product.initial_balance or 0) + pre_year_sum
 
-            consecutive_changes = sum(
-                1 for i in range(len(monthly_balances)-1)
-                if monthly_balances[i] != monthly_balances[i+1]
-            )
-            high_rotation = 'Sí' if consecutive_changes >= 2 else 'No'
+                movements_by_month = monthly_dict.get(product.id, {})
 
-            # Apply filters
-            if rotation_filter and rotation != rotation_filter:
+                monthly_balances = []
+                running_balance = balance_pre_year
+                for m in range(1, 13):
+                    running_balance += movements_by_month.get(m, Decimal('0'))
+                    monthly_balances.append(running_balance)
+
+                all_zero_balance = all(b == 0 for b in monthly_balances)
+                unique_balances = set(monthly_balances)
+
+                # Rotación logic
+                if all_zero_balance and balance_pre_year == 0:
+                    rotation = "Activo"
+                elif all_zero_balance and balance_pre_year > 0:
+                    rotation = "Obsoleto"
+                elif len(unique_balances) == 1 and monthly_balances[0] > 0:
+                    rotation = "Obsoleto"
+                elif len(monthly_balances) >= 3 and len(set(monthly_balances[-3:])) == 1 and monthly_balances[-1] > 0:
+                    rotation = "Estancado"
+                else:
+                    rotation = "Activo"
+
+                is_stagnant = rotation in ["Estancado", "Obsoleto"]
+
+                consecutive_changes = sum(
+                    1 for i in range(len(monthly_balances)-1)
+                    if monthly_balances[i] != monthly_balances[i+1]
+                )
+                high_rotation = 'Sí' if consecutive_changes >= 2 else 'No'
+
+                # Apply filters
+                if rotation_filter and rotation != rotation_filter:
+                    continue
+                if stagnant_filter:
+                    if stagnant_filter == 'Sí' and not is_stagnant:
+                        continue
+                    elif stagnant_filter == 'No' and is_stagnant:
+                        continue
+                if high_rotation_filter:
+                    if high_rotation_filter == 'Sí' and high_rotation != 'Sí':
+                        continue
+                    elif high_rotation_filter == 'No' and high_rotation == 'Sí':
+                        continue
+                if search_filter:
+                    search_lower = search_filter.lower()
+                    if not (search_lower in product.code.lower() or search_lower in product.description.lower()):
+                        continue
+
+                # Get warehouses for this product
+                product_warehouses = warehouses_dict.get(product.id, 'Todos')
+
+                analysis_data.append({
+                    'codigo': product.code,
+                    'nombre_producto': product.description,
+                    'grupo': product.group,
+                    'cantidad_saldo_actual': float(current_stock),
+                    'valor_saldo_actual': float(current_stock * current_unit_cost),
+                    'costo_unitario': float(current_unit_cost),
+                    'consumed': 'Sí' if is_consumed else 'No',
+                    'estancado': 'Sí' if is_stagnant else 'No',
+                    'rotacion': rotation,
+                    'alta_rotacion': high_rotation,
+                    'almacen': product_warehouses,
+                })
+
+            except Exception as e:
+                logger.error(f"Error processing product {product.code}: {str(e)}", exc_info=True)
                 continue
-            if stagnant_filter:
-                if stagnant_filter == 'Sí' and not is_stagnant:
-                    continue
-                elif stagnant_filter == 'No' and is_stagnant:
-                    continue
-            if high_rotation_filter:
-                if high_rotation_filter == 'Sí' and high_rotation != 'Sí':
-                    continue
-                elif high_rotation_filter == 'No' and high_rotation == 'Sí':
-                    continue
-            if search_filter:
-                search_lower = search_filter.lower()
-                if not (search_lower in p.code.lower() or search_lower in p.description.lower()):
-                    continue
 
-            analysis_data.append({
-                'codigo': p.code,
-                'nombre_producto': p.description,
-                'grupo': p.group,
-                'cantidad_saldo_actual': float(current_stock),
-                'valor_saldo_actual': float(current_stock * current_unit_cost),
-                'costo_unitario': float(current_unit_cost),
-                'consumed': 'Sí' if is_consumed else 'No',
-                'estancado': 'Sí' if is_stagnant else 'No',
-                'rotacion': rotation,
-                'alta_rotacion': high_rotation,
-                'almacen': warehouse_filter or 'Todos',  # Return applied warehouse filter
-            })
+        return JsonResponse(analysis_data, safe=False)
 
-        except Exception as e:
-            logger.error(f"Error processing product {p.code}: {str(e)}", exc_info=True)
-            continue
-
-    return JsonResponse(analysis_data, safe=False)
+    except Exception as e:
+        logger.error(f"Error in product analysis: {str(e)}", exc_info=True)
+        return JsonResponse([], safe=False)
 
 
 
