@@ -631,6 +631,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
 
       final monthKey = '${date.year}-${date.month.toString().padLeft(2, '0')}';
       final cantidad = (movement['cantidad'] as num?)?.toDouble() ?? 0.0;
+      final total = (movement['total'] as num?)?.toDouble() ?? 0.0;
 
       monthlyData.putIfAbsent(
           monthKey,
@@ -643,16 +644,15 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       // Positive quantity = entry, negative = exit
       if (cantidad > 0) {
         monthlyData[monthKey]!['totalEntries'] =
-            (monthlyData[monthKey]!['totalEntries'] ?? 0) + cantidad;
+            (monthlyData[monthKey]!['totalEntries'] ?? 0) + total;
       } else if (cantidad < 0) {
         monthlyData[monthKey]!['totalExits'] =
-            (monthlyData[monthKey]!['totalExits'] ?? 0) + cantidad.abs();
+            (monthlyData[monthKey]!['totalExits'] ?? 0) + total.abs();
       }
 
-      // Calculate closing balance (entries - exits)
+      // Calculate closing balance (sum of all totals)
       monthlyData[monthKey]!['closingBalance'] =
-          (monthlyData[monthKey]!['totalEntries'] ?? 0) -
-              (monthlyData[monthKey]!['totalExits'] ?? 0);
+          (monthlyData[monthKey]!['closingBalance'] ?? 0) + total;
     }
 
     final sortedMonths = monthlyData.keys.toList()..sort();

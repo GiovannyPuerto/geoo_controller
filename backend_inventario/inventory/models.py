@@ -106,19 +106,18 @@ class InventoryRecord(models.Model):
 
     class Meta:
         """
-        La unicidad NO debe impedir que un producto aparezca varias veces
-        con el mismo documento/fecha.
-
-        Lo que debe ser único es:
+        La unicidad impide duplicados de registros de inventario.
+        Un registro es único por:
         - documento
         - producto
         - centro de costo
-        - archivo origen
+        - fecha
+        - almacén
 
-        Esto permite que:
-        - un mismo documento tenga varias filas del mismo producto, mientras cambie cost_center.
+        Esto permite re-subidas sin duplicados, pero mantiene la posibilidad de múltiples
+        movimientos del mismo producto en el mismo documento si cambian otros campos.
         """
-        unique_together = ['document_type', 'document_number', 'product', 'batch', 'cost_center']
+        unique_together = ['document_type', 'document_number', 'product', 'cost_center', 'date', 'warehouse']
 
         indexes = [
             models.Index(fields=['product', 'date']),

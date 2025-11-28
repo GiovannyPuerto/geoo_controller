@@ -28,7 +28,7 @@ def safe_decimal(value):
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists, Min
@@ -224,6 +224,7 @@ def update_inventory(request, inventory_name='default'):
 
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0
+        total_duplicates = 0
         if update_files_data:
             for file_name, update_content in update_files_data:
                 # Support both .xlsx and .xls formats for update files
@@ -342,7 +343,9 @@ def update_inventory(request, inventory_name='default'):
                 update_df['cantidad'] = update_df['cantidad'].str.replace('[^0-9.-]', '', regex=True)
                 update_df['cantidad'] = pd.to_numeric(update_df['cantidad'], errors='coerce').fillna(0)
 
-                update_records_count += _process_update_file(batch, update_df, inventory_name)
+                records_count, duplicates_count = _process_update_file(batch, update_df, inventory_name)
+                update_records_count += records_count
+                total_duplicates += duplicates_count
 
         total_imported = base_records_count + update_records_count
 
@@ -418,10 +421,20 @@ def _process_base_file(df, inventory_name):
     df = df[df['descripcion'].notna() & (df['descripcion'].str.strip() != '')]
 
     # Agrupar por código de producto para sumar cantidades y valores de productos repetidos en diferentes almacenes
+    # Calcular costo unitario ponderado cuando hay productos en múltiples almacenes
+    def calculate_weighted_unit_cost(group):
+        total_quantity = group['cantidad'].sum()
+        total_value = group['valor_total'].sum()
+        if total_quantity != 0:
+            weighted_cost = total_value / total_quantity
+        else:
+            weighted_cost = group['costo_unitario'].iloc[0]  # Si cantidad es 0, usar el primero
+        return weighted_cost
+
     df_grouped = df.groupby(['codigo', 'descripcion', 'grupo']).agg({
         'cantidad': 'sum',
         'valor_total': 'sum',
-        'costo_unitario': 'last',  # Tomar el último costo unitario del archivo base
+        'costo_unitario': calculate_weighted_unit_cost,  # Calcular costo unitario ponderado
         'almacen': lambda x: ', '.join(sorted(set(x))),  # Concatenar almacenes únicos
         'fecha_corte': 'first',
         'mes': 'first',
@@ -551,7 +564,8 @@ def _process_update_file(batch, df, inventory_name):
 
     This function takes a pandas DataFrame from update Excel files, validates and cleans the data,
     and creates InventoryRecord objects for each movement. It handles missing products by creating
-    them with zero initial balance if needed.
+    them with zero initial balance if needed. It also detects and counts duplicate records based on
+    the unique_together constraint.
 
     Args:
         batch (ImportBatch): The import batch to associate records with
@@ -559,7 +573,7 @@ def _process_update_file(batch, df, inventory_name):
         inventory_name (str): Name of the inventory
 
     Returns:
-        int: Number of inventory records processed and created
+        tuple: (int, int) Number of inventory records processed and created, number of duplicates found
 
     Raises:
         Logs errors for invalid data but continues processing other records
@@ -567,6 +581,7 @@ def _process_update_file(batch, df, inventory_name):
     # Creamos la base de datos para movimientos de inventario
     records_to_create = []
     records_processed = 0
+    duplicates_count = 0
     errors = 0
 
     # Columnas requeridas para el archivo de actualización
@@ -676,26 +691,47 @@ def _process_update_file(batch, df, inventory_name):
                     errors += 1
                     continue
 
-                # Creamos el registro de inventario
-                records_to_create.append(InventoryRecord(
+                # Check for duplicate record based on unique_together constraint
+                warehouse = map_localizacion(str(row.get('localizacion', '')).strip())
+                category = map_categoria(str(row.get('categoria', '')).strip())
+                cost_center = str(row.get('cost_center', '')).strip() if pd.notna(row.get('cost_center')) else None
+
+                if InventoryRecord.objects.filter(
                     batch=batch,
                     product=product,
-                    warehouse=map_localizacion(str(row.get('localizacion', '')).strip()),
+                    warehouse=warehouse,
                     date=date,
                     document_type=doc_type,
                     document_number=doc_number,
                     quantity=quantity,
                     unit_cost=unit_cost,
                     total=total,
-                    category=map_categoria(str(row.get('categoria', '')).strip()),
+                    category=category,
                     final_quantity=final_quantity,
-                    cost_center=str(row.get('cost_center', '')).strip() if pd.notna(row.get('cost_center')) else None
-                ))
+                    cost_center=cost_center
+                ).exists():
+                    duplicates_count += 1
+                else:
+                    # Creamos el registro de inventario
+                    records_to_create.append(InventoryRecord(
+                        batch=batch,
+                        product=product,
+                        warehouse=warehouse,
+                        date=date,
+                        document_type=doc_type,
+                        document_number=doc_number,
+                        quantity=quantity,
+                        unit_cost=unit_cost,
+                        total=total,
+                        category=category,
+                        final_quantity=final_quantity,
+                        cost_center=cost_center
+                    ))
 
-                # No actualizamos información del producto desde archivo de actualización
-                # Solo registramos los movimientos
+                    # No actualizamos información del producto desde archivo de actualización
+                    # Solo registramos los movimientos
 
-                records_processed += 1
+                    records_processed += 1
 
                 # INSERTAMOS EN BLOQUES DE 500
                 if len(records_to_create) >= 500:
@@ -737,8 +773,8 @@ def _process_update_file(batch, df, inventory_name):
                     logger.error(f"Error saving final individual record: {str(e2)}")
                     continue
 
-    logger.info(f"Procesados {records_processed} registros de movimientos ({errors} errores)")
-    return records_processed
+    logger.info(f"Procesados {records_processed} registros de movimientos ({duplicates_count} duplicados, {errors} errores)")
+    return records_processed, duplicates_count
 
 
 @require_http_methods(["GET"])
@@ -878,27 +914,29 @@ def get_product_analysis(request):
         if not product_ids:
             return JsonResponse([], safe=False)
 
-        # BULK QUERY 1: Get last records for all products
-        records_subquery = InventoryRecord.objects.filter(
-            product_id=OuterRef('pk')
-        )
+        # BULK QUERY 1: Get last records for all products per warehouse (for current stock calculation)
+        # Note: Warehouse filter is NOT applied here because current stock is total across all warehouses
+        # Date filters are not applied to current stock calculation to always get the latest stock
 
-        # Apply warehouse and date filters to records
-        if warehouse_filter:
-            records_subquery = records_subquery.filter(warehouse__icontains=warehouse_filter)
-        if date_from:
-            records_subquery = records_subquery.filter(date__gte=date_from)
-        if date_to:
-            records_subquery = records_subquery.filter(date__lte=date_to)
-
-        last_records = InventoryRecord.objects.filter(
-            id__in=records_subquery.values('product_id').annotate(
-                latest_id=Max('id')
+        # Get latest record per product per warehouse by date, not by id
+        last_records_per_warehouse = InventoryRecord.objects.filter(
+            id__in=InventoryRecord.objects.values('product_id', 'warehouse').annotate(
+                latest_id=Subquery(
+                    InventoryRecord.objects.filter(
+                        product_id=OuterRef('product_id'),
+                        warehouse=OuterRef('warehouse')
+                    ).order_by('-date').values('id')[:1]
+                )
             ).values('latest_id')
         ).select_related('product')
 
-        # Create lookup dict for last records
-        last_records_dict = {record.product_id: record for record in last_records}
+        # Group by product
+        last_records_dict = {}
+        for record in last_records_per_warehouse:
+            product_id = record.product_id
+            if product_id not in last_records_dict:
+                last_records_dict[product_id] = []
+            last_records_dict[product_id].append(record)
 
         # BULK QUERY 2: Get pre-year sums for all products
         pre_year_sums = InventoryRecord.objects.filter(
@@ -937,17 +975,36 @@ def get_product_analysis(request):
         warehouses_dict = {item['product_id']: item['warehouses'] or 'Todos'
                           for item in warehouse_details}
 
+        # BULK QUERY 5: Get warehouse details for current stock calculation
+        warehouse_detail_records = WarehouseDetail.objects.filter(
+            product_id__in=product_ids
+        ).select_related('product')
+
+        warehouse_detail_dict = {}
+        for wd in warehouse_detail_records:
+            product_id = wd.product_id
+            if product_id not in warehouse_detail_dict:
+                warehouse_detail_dict[product_id] = {}
+            warehouse_detail_dict[product_id][wd.warehouse] = wd
+
         # Process all products in memory
         analysis_data = []
         current_year = datetime.now().year
 
         for product in products_query:
             try:
-                # Get current stock and cost from last record or initial values
-                last_record = last_records_dict.get(product.id)
-                if last_record:
-                    current_stock = Decimal(last_record.final_quantity or 0)
-                    current_unit_cost = Decimal(last_record.unit_cost or product.initial_unit_cost or 0)
+                # Get current stock and cost from last records per warehouse or initial values
+                last_records = last_records_dict.get(product.id, [])
+                if last_records:
+                    # Sum final_quantity across all warehouses for total current stock
+                    current_stock = sum(Decimal(record.final_quantity or 0) for record in last_records)
+                    # Get unit cost from the most recent record with non-zero unit_cost across warehouses
+                    recent_records_with_cost = [r for r in last_records if r.unit_cost and r.unit_cost > 0]
+                    if recent_records_with_cost:
+                        most_recent_with_cost = max(recent_records_with_cost, key=lambda r: r.date)
+                        current_unit_cost = Decimal(most_recent_with_cost.unit_cost)
+                    else:
+                        current_unit_cost = Decimal(product.initial_unit_cost or 0)
                 else:
                     current_stock = Decimal(product.initial_balance or 0)
                     current_unit_cost = Decimal(product.initial_unit_cost or 0)
