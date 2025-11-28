@@ -1,9 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:file_saver/file_saver.dart';
 import 'package:data_table_2/data_table_2.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:universal_html/html.dart' as html;
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
@@ -854,6 +854,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   }
 
   Future<void> _exportAnalysis(String format) async {
+    final localContext = context;
     try {
       final response = await _apiService.exportAnalysis(
         format: format,
@@ -868,37 +869,35 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       );
 
       if (response.statusCode == 200) {
-        // Handle file download
-        final blob = html.Blob([response.bodyBytes]);
-        final url = html.Url.createObjectUrlFromBlob(blob);
-        html.AnchorElement(href: url)
-          ..setAttribute('download',
-              'analisis_productos.${format == 'excel' ? 'xlsx' : 'pdf'}')
-          ..click();
-        html.Url.revokeObjectUrl(url);
+        final Uint8List fileBytes = response.bodyBytes;
+        final String? path = await FileSaver.instance.saveAs(
+            name:
+                'analysis_export_${DateTime.now().toIso8601String()}.$format',
+            bytes: fileBytes,
+            ext: format,
+            mimeType:
+                format == 'excel' ? MimeType.microsoftExcel : MimeType.pdf);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Análisis exportado exitosamente en ${format.toUpperCase()}'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(localContext).showSnackBar(
+            SnackBar(
+              content: Text('Análisis exportado a $path'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        throw Exception('Failed to export analysis');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
-            content: Text('Error al exportar análisis: ${response.statusCode}'),
+            content: Text('Error al exportar análisis: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al exportar análisis: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 }

@@ -50,6 +50,7 @@ dependencies:
   share_plus: ^12.0.1
   shared_preferences: ^2.3.2
   universal_html: ^2.2.4
+  file_saver: ^0.2.12
   flutter_svg: ^2.2.2
   dtd: ^4.0.0
   flutter_lints: ^6.0.0

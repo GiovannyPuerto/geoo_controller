@@ -52,6 +52,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _loadData() async {
+    final localContext = context;
     setState(() {
       isLoading = true;
     });
@@ -83,7 +84,7 @@ class _DashboardPageState extends State<DashboardPage>
       setState(() {
         isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(localContext).showSnackBar(
         SnackBar(
           content: Text('Error al cargar los datos: ${e.toString()}'),
           backgroundColor: Colors.red,
@@ -145,7 +146,7 @@ class _DashboardPageState extends State<DashboardPage>
                                     const Text('Total Productos',
                                         style: TextStyle(
                                             fontSize: 14, color: Colors.grey)),
-                                    Text('${products.length}',
+                                    Text(products.length.toString(),
                                         style: const TextStyle(
                                             fontSize: 24,
                                             fontWeight: FontWeight.bold)),
@@ -161,7 +162,7 @@ class _DashboardPageState extends State<DashboardPage>
                                     const Text('Total Registros',
                                         style: TextStyle(
                                             fontSize: 14, color: Colors.grey)),
-                                    Text('${records.length}',
+                                    Text(records.length.toString(),
                                         style: const TextStyle(
                                             fontSize: 24,
                                             fontWeight: FontWeight.bold)),

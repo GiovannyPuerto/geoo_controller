@@ -941,10 +941,19 @@ def get_product_analysis(request):
     date_from = request.GET.get('date_from', '')
     date_to = request.GET.get('date_to', '')
     search_filter = request.GET.get('search', '')
+    limit = request.GET.get('limit', '')
 
     try:
         # Base product query with filters
         products_query = Product.objects.filter(inventory_name=inventory_name)
+
+        # Apply limit if specified (for exports)
+        if limit:
+            try:
+                limit_int = int(limit)
+                products_query = products_query[:limit_int]
+            except ValueError:
+                pass  # Ignore invalid limit
 
         if category_filter:
             products_query = products_query.filter(group__icontains=category_filter)
@@ -1366,21 +1375,24 @@ def get_summary(request):
 
 
 @require_http_methods(["GET"])
-def export_analysis(request, inventory_name='default', format_type='excel'):
+def export_analysis(request, inventory_name='default'):
     """
     Exports product analysis data.
 
     Args:
         request: Django HttpRequest
         inventory_name (str): Inventory name
-        format_type (str): Export format (excel or pdf)
 
     Returns:
         HttpResponse: File response
     """
     try:
-        # Get analysis data
-        analysis_data = get_product_analysis(request).content
+        # Get format from query params
+        format_type = request.GET.get('format', 'excel')
+
+        # Get analysis data (no limit for complete export)
+        analysis_response = get_product_analysis(request)
+        analysis_data = analysis_response.content
         analysis_list = json.loads(analysis_data)
 
         if format_type == 'excel':
@@ -1410,22 +1422,43 @@ def export_analysis(request, inventory_name='default', format_type='excel'):
 
             # Prepare data for table
             if analysis_list:
-                headers = list(analysis_list[0].keys())
-                data = [headers] + [list(item.values()) for item in analysis_list]
+                headers = ['Código', 'Producto', 'Grupo', 'Cantidad Actual', 'Valor Actual', 'Costo Unitario', 'Consumido', 'Estancado', 'Rotación', 'Alta Rotación', 'Almacén']
+                formatted_data = []
+                for item in analysis_list:
+                    formatted_item = [
+                        str(item['codigo']),
+                        str(item['nombre_producto'])[:30] + '...' if len(str(item['nombre_producto'])) > 30 else str(item['nombre_producto']),
+                        str(item['grupo']),
+                        f"{item['cantidad_saldo_actual']:,.2f}",
+                        f"${item['valor_saldo_actual']:,.2f}",
+                        f"${item['costo_unitario']:,.2f}",
+                        str(item['consumed']),
+                        str(item['estancado']),
+                        str(item['rotacion']),
+                        str(item['alta_rotacion']),
+                        str(item['almacen'])[:15] + '...' if len(str(item['almacen'])) > 15 else str(item['almacen']),
+                    ]
+                    formatted_data.append(formatted_item)
+                data = [headers] + formatted_data
 
-                # Create table
-                table = Table(data)
+                # Define column widths to fit A4 page (total ~267 points)
+                colWidths = [18, 35, 22, 28, 28, 28, 18, 18, 22, 22, 28]
+
+                # Create table with column widths
+                table = Table(data, colWidths=colWidths, repeatRows=1)  # Repeat headers on each page
                 style = TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('ALIGN', (3, 1), (5, -1), 'RIGHT'),  # Right align numeric columns
                     ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 14),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
                     ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
                     ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
-                    ('FONTSIZE', (0, 1), (-1, -1), 10),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ])
                 table.setStyle(style)
                 elements.append(table)
@@ -1444,19 +1477,21 @@ def export_analysis(request, inventory_name='default', format_type='excel'):
 
 
 @require_http_methods(["GET"])
-def export_movements(request, inventory_name='default', format_type='excel'):
+def export_movements(request, inventory_name='default'):
     """
     Exports inventory movements data.
 
     Args:
         request: Django HttpRequest
         inventory_name (str): Inventory name
-        format_type (str): Export format (excel or pdf)
 
     Returns:
         HttpResponse: File response
     """
     try:
+        # Get format from query params
+        format_type = request.GET.get('format', 'excel')
+
         # Get movements data using the same filtering as get_records
         inventory_name_param = request.GET.get('inventory_name', inventory_name)
         warehouse_filter = request.GET.get('warehouse', '')
@@ -1481,8 +1516,8 @@ def export_movements(request, inventory_name='default', format_type='excel'):
                 Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
             )
 
-        # Get all records (not limited like in get_records)
-        records = records_query.order_by('-date')
+        # Limit records for performance - export up to 5000 records
+        records = records_query.order_by('-date')[:5000]
         movements_data = [{
             'fecha': r.date.isoformat(),
             'codigo': r.product.code,
@@ -1497,14 +1532,14 @@ def export_movements(request, inventory_name='default', format_type='excel'):
         } for r in records]
 
         if format_type == 'excel':
-            # Create Excel file
+            # Cracion archivo excel
             df = pd.DataFrame(movements_data)
             response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="movimientos_inventario_{inventory_name_param}.xlsx"'
             df.to_excel(response, index=False)
             return response
         elif format_type == 'pdf':
-            # Create PDF file
+            # creacion archivo pdf
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=A4)
             elements = []
@@ -1516,6 +1551,7 @@ def export_movements(request, inventory_name='default', format_type='excel'):
                 parent=styles['Title'],
                 fontName='Times-Bold',
                 fontSize=18,
+                alignment=1,  # alineacion hacia el centro 
             )
             title = Paragraph(f"Movimientos de Inventario - {inventory_name_param}", title_style)
             elements.append(title)
@@ -1524,33 +1560,51 @@ def export_movements(request, inventory_name='default', format_type='excel'):
             # Prepare data for table
             if movements_data:
                 headers = ['Fecha', 'Código', 'Producto', 'Almacén', 'Tipo Doc.', 'Documento', 'Cantidad', 'Costo Unit.', 'Total', 'Categoría']
-                data = [headers] + [[
-                    item['fecha'],
-                    item['codigo'],
-                    item['nombre_producto'][:30] + '...' if len(item['nombre_producto']) > 30 else item['nombre_producto'],
-                    item['almacen'],
-                    item['tipo_documento'] or '',
-                    item['documento'] or '',
-                    str(item['cantidad']),
-                    f"${item['costo_unitario']:,.2f}",
-                    f"${item['costo_total']:,.2f}",
-                    item['categoria'],
-                ] for item in movements_data]
+                formatted_data = []
+                for item in movements_data:
+                    formatted_item = [
+                        item['fecha'],
+                        str(item['codigo']),
+                        str(item['nombre_producto'])[:25] + '...' if len(str(item['nombre_producto'])) > 25 else str(item['nombre_producto']),
+                        str(item['almacen']),
+                        str(item['tipo_documento'] or ''),
+                        str(item['documento'] or ''),
+                        f"{item['cantidad']:,.2f}",
+                        f"${item['costo_unitario']:,.2f}",
+                        f"${item['costo_total']:,.2f}",
+                        str(item['categoria']),
+                    ]
+                    formatted_data.append(formatted_item)
+                data = [headers] + formatted_data
 
-                # Create table
-                table = Table(data)
+                # Define column widths to fit A4 page (total ~350 points)
+                colWidths = [35, 30, 50, 30, 25, 30, 30, 35, 35, 30]
+
+                # Create table with column widths
+                table = Table(data, colWidths=colWidths, repeatRows=1)  # Repeat headers on each page
                 style = TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('ALIGN', (6, 1), (8, -1), 'RIGHT'),  # Right align numeric columns (Cantidad, Costo Unit., Total)
                     ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                    ('TOPPADDING', (0, 0), (-1, 0), 6),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
                     ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
-                    ('FONTSIZE', (0, 1), (-1, -1), 8),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ('FONTSIZE', (0, 1), (-1, -1), 7),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
                 ])
+                # Alternate row colors
+                for i in range(1, len(data)):
+                    if i % 2 == 0:
+                        style.add('BACKGROUND', (0, i), (-1, i), colors.whitesmoke)
+                    else:
+                        style.add('BACKGROUND', (0, i), (-1, i), colors.white)
                 table.setStyle(style)
                 elements.append(table)
 

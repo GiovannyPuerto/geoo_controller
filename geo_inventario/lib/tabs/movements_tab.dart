@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:io' as io;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:data_table_2/data_table_2.dart';
@@ -80,6 +83,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   }
 
   Future<void> _loadMovementsData() async {
+    final localContext = context;
     if (!mounted) return;
 
     try {
@@ -109,7 +113,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
             content: Text('Error al cargar movimientos: ${e.toString()}'),
             backgroundColor: Colors.red,
@@ -427,6 +431,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   }
 
   Future<void> _exportMovements(String format) async {
+    final localContext = context;
     try {
       final response = await _apiService.exportMovements(
         format: format,
@@ -437,42 +442,78 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         dateTo: selectedDateRange?.end,
       );
 
-      if (!mounted) return;
-
       if (response.statusCode == 200) {
+        final Uint8List fileBytes = response.bodyBytes;
+        final String timestamp = DateTime.now()
+            .toString()
+            .replaceAll(':', '-')
+            .replaceAll('.', '-')
+            .replaceAll(' ', '_');
+        final String extension = format == 'excel' ? 'xlsx' : 'pdf';
+        final String fileName = 'movements_export_$timestamp.$extension';
+
         if (kIsWeb) {
-          final blob = html.Blob([response.bodyBytes]);
+          // For web, use html.AnchorElement to trigger download
+          final blob = html.Blob([fileBytes]);
           final url = html.Url.createObjectUrlFromBlob(blob);
-          final fileName = format == 'excel'
-              ? 'movimientos_inventario.xlsx'
-              : 'movimientos_inventario.pdf';
-          html.AnchorElement(href: url)
+          final anchor = html.AnchorElement(href: url)
             ..setAttribute('download', fileName)
             ..click();
           html.Url.revokeObjectUrl(url);
+
+          if (mounted) {
+            ScaffoldMessenger.of(localContext).showSnackBar(
+              const SnackBar(
+                content: Text('Movimientos exportados correctamente'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else {
+          // For desktop, use FilePicker to get save path and write file
+          final String? path = await FilePicker.platform.saveFile(
+            dialogTitle: 'Guardar archivo',
+            fileName: fileName,
+            allowedExtensions: [extension],
+            type: FileType.custom,
+          );
+
+          if (path != null) {
+            final file = io.File(path);
+            await file.writeAsBytes(fileBytes);
+
+            if (mounted) {
+              ScaffoldMessenger.of(localContext).showSnackBar(
+                SnackBar(
+                  content: Text('Movimientos exportados a $path'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          } else {
+            // User cancelled the save dialog
+            if (mounted) {
+              ScaffoldMessenger.of(localContext).showSnackBar(
+                const SnackBar(
+                  content: Text('Exportación cancelada'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
+          }
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Exportado a ${format.toUpperCase()} exitosamente'),
-            backgroundColor: Colors.green,
-          ),
-        );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        throw Exception('Failed to export movements');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
-            content: Text('Error al exportar: ${response.statusCode}'),
+            content: Text('Error al exportar movimientos: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al exportar: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 

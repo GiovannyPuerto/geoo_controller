@@ -64,6 +64,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _pickAndUploadFile() async {
+    final localContext = context;
     try {
       FilePickerResult? result = await getPlatformFilePicker().pickFiles(
         type: FileType.custom,
@@ -76,7 +77,7 @@ class _DashboardPageState extends State<DashboardPage>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
             content: Text('Error al seleccionar el archivo: $e'),
             backgroundColor: Colors.red,
@@ -87,12 +88,13 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _uploadBaseFile(PlatformFile platformFile) async {
+    final localContext = context;
     if (!mounted) return;
 
     // Check if file bytes are available
     if (platformFile.bytes == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(localContext).showSnackBar(
           const SnackBar(
             content: Text('Error: No se pudieron leer los bytes del archivo'),
             backgroundColor: Colors.red,
@@ -148,7 +150,7 @@ class _DashboardPageState extends State<DashboardPage>
         // A better approach would be to have a global state management to notify tabs
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          ScaffoldMessenger.of(localContext).showSnackBar(
             SnackBar(
               content: Text(
                 responseData['error'] ?? 'Error al cargar el archivo',
@@ -160,9 +162,9 @@ class _DashboardPageState extends State<DashboardPage>
       }
     } catch (e) {
       if (!mounted) return;
-      Navigator.of(context).pop();
+      Navigator.of(localContext).pop();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
             content: Text('Error de conexión: $e'),
             backgroundColor: Colors.red,
@@ -173,6 +175,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _uploadUpdateFile() async {
+    final localContext = context;
     try {
       FilePickerResult? result = await getPlatformFilePicker().pickFiles(
         type: FileType.custom,
@@ -213,8 +216,8 @@ class _DashboardPageState extends State<DashboardPage>
             bytes = await ioFile.readAsBytes();
           } else {
             if (mounted) {
-              Navigator.of(context).pop(); // Close loading dialog
-              ScaffoldMessenger.of(context).showSnackBar(
+              Navigator.of(localContext).pop(); // Close loading dialog
+              ScaffoldMessenger.of(localContext).showSnackBar(
                 SnackBar(
                   content: Text(
                       'Error: No se pudieron leer los bytes del archivo ${file.name}'),
@@ -238,7 +241,7 @@ class _DashboardPageState extends State<DashboardPage>
         try {
           var jsonResponse = json.decode(responseData['body']);
           if (jsonResponse['ok'] == true) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            ScaffoldMessenger.of(localContext).showSnackBar(
               SnackBar(
                 content: Text(jsonResponse['message'] ??
                     'Archivos de actualización procesados exitosamente.'),
@@ -247,7 +250,7 @@ class _DashboardPageState extends State<DashboardPage>
             );
             _loadLastUpdateTime(); // Reload data
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
+            ScaffoldMessenger.of(localContext).showSnackBar(
               SnackBar(
                 content:
                     Text(jsonResponse['error'] ?? 'Error al procesar archivos'),
@@ -257,7 +260,7 @@ class _DashboardPageState extends State<DashboardPage>
           }
         } catch (parseError) {
           // If response is not JSON, show raw response
-          ScaffoldMessenger.of(context).showSnackBar(
+          ScaffoldMessenger.of(localContext).showSnackBar(
             SnackBar(
               content: Text('Respuesta del servidor: ${responseData['body']}'),
               backgroundColor:
@@ -267,8 +270,8 @@ class _DashboardPageState extends State<DashboardPage>
         }
       } catch (e) {
         if (!mounted) return;
-        Navigator.of(context).pop(); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
+        Navigator.of(localContext).pop(); // Close loading dialog
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
             content: Text('Error de conexión: ${e.toString()}'),
             backgroundColor: Colors.red,

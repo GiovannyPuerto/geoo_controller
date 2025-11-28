@@ -7,6 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:data_table_2/data_table_2.dart';
+import 'dart:typed_data';
+import 'package:file_saver/file_saver.dart';
+import 'package:geo_inventario/services/api_service.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -24,6 +27,7 @@ class _DashboardPageState extends State<DashboardPage>
   bool isLoading = true;
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
@@ -52,6 +56,7 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _loadData() async {
+    final localContext = context;
     setState(() {
       isLoading = true;
     });
@@ -84,7 +89,7 @@ class _DashboardPageState extends State<DashboardPage>
         isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(localContext).showSnackBar(
           SnackBar(
             content: Text('Error al cargar los datos: ${e.toString()}'),
             backgroundColor: Colors.red,
@@ -221,9 +226,35 @@ class _DashboardPageState extends State<DashboardPage>
                         const SizedBox(height: 24),
 
                         // Tabla de registros recientes
-                        const Text('Registros Recientes',
-                            style: TextStyle(
-                                fontSize: 20, fontWeight: FontWeight.bold)),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Registros Recientes',
+                                style: TextStyle(
+                                    fontSize: 20, fontWeight: FontWeight.bold)),
+                            Row(
+                              children: [
+                                ElevatedButton.icon(
+                                  onPressed: () => _exportMovements('excel'),
+                                  icon: const Icon(Icons.file_download),
+                                  label: const Text('Exportar Excel'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton.icon(
+                                  onPressed: () => _exportMovements('pdf'),
+                                  icon: const Icon(Icons.picture_as_pdf),
+                                  label: const Text('Exportar PDF'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 16),
                         SizedBox(
                           height: 400,
@@ -352,9 +383,36 @@ class _DashboardPageState extends State<DashboardPage>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Análisis de Productos',
-                              style: TextStyle(
-                                  fontSize: 20, fontWeight: FontWeight.bold)),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Análisis de Productos',
+                                  style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold)),
+                              Row(
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: () => _exportAnalysis('excel'),
+                                    icon: const Icon(Icons.file_download),
+                                    label: const Text('Exportar Excel'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: () => _exportAnalysis('pdf'),
+                                    icon: const Icon(Icons.picture_as_pdf),
+                                    label: const Text('Exportar PDF'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                           const SizedBox(height: 16),
                           Card(
                             child: DataTable2(
@@ -391,17 +449,19 @@ class _DashboardPageState extends State<DashboardPage>
                               rows: analysis.map((item) {
                                 return DataRow(cells: [
                                   DataCell(Text(item['codigo'] ?? '')),
-                                  DataCell(Text(item['descripcion'] ?? '')),
+                                  DataCell(Text(item['nombre_producto'] ?? '')),
                                   DataCell(Text(item['grupo'] ?? '')),
+                                  DataCell(Text(item['cantidad_saldo_actual']
+                                          ?.toString() ??
+                                      '0')),
                                   DataCell(Text(
-                                      item['saldo_actual']?.toString() ?? '0')),
-                                  DataCell(Text((item['valor_saldo'] as double?)
-                                          ?.toStringAsFixed(2) ??
-                                      '0.00')),
-                                  DataCell(Text((item['costo_unitario_promedio']
-                                              as double?)
-                                          ?.toStringAsFixed(2) ??
-                                      '0.00')),
+                                      (item['valor_saldo_actual'] as double?)
+                                              ?.toStringAsFixed(2) ??
+                                          '0.00')),
+                                  DataCell(Text(
+                                      (item['costo_unitario'] as double?)
+                                              ?.toStringAsFixed(2) ??
+                                          '0.00')),
                                   DataCell(Text(item['estancado'] ?? 'No')),
                                   DataCell(Text(item['rotacion'] ?? 'Activo')),
                                   DataCell(Text(item['alta_rotacion'] ?? 'No')),
@@ -453,6 +513,92 @@ class _DashboardPageState extends State<DashboardPage>
     return groupCounts.entries
         .map((e) => {'group': e.key, 'count': e.value})
         .toList();
+  }
+
+  Future<void> _exportAnalysis(String format) async {
+    final localContext = context;
+    try {
+      final response = await _apiService.exportAnalysis(format: format);
+
+      if (response.statusCode == 200) {
+        final Uint8List fileBytes = response.bodyBytes;
+        final String timestamp = DateTime.now()
+            .toString()
+            .replaceAll(':', '-')
+            .replaceAll('.', '-')
+            .replaceAll(' ', '_');
+        final String extension = format == 'excel' ? 'xlsx' : 'pdf';
+        final String? path = await FileSaver.instance.saveAs(
+            name: 'analysis_export_$timestamp.$extension',
+            bytes: fileBytes,
+            ext: extension,
+            mimeType:
+                format == 'excel' ? MimeType.microsoftExcel : MimeType.pdf);
+
+        if (mounted) {
+          ScaffoldMessenger.of(localContext).showSnackBar(
+            SnackBar(
+              content: Text('Análisis exportado a $path'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception('Failed to export analysis');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(localContext).showSnackBar(
+          SnackBar(
+            content: Text('Error al exportar análisis: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportMovements(String format) async {
+    final localContext = context;
+    try {
+      final response = await _apiService.exportMovements(format: format);
+
+      if (response.statusCode == 200) {
+        final Uint8List fileBytes = response.bodyBytes;
+        final String timestamp = DateTime.now()
+            .toString()
+            .replaceAll(':', '-')
+            .replaceAll('.', '-')
+            .replaceAll(' ', '_');
+        final String extension = format == 'excel' ? 'xlsx' : 'pdf';
+        final String? path = await FileSaver.instance.saveAs(
+            name: 'movements_export_$timestamp.$extension',
+            bytes: fileBytes,
+            ext: extension,
+            mimeType:
+                format == 'excel' ? MimeType.microsoftExcel : MimeType.pdf);
+
+        if (mounted) {
+          ScaffoldMessenger.of(localContext).showSnackBar(
+            SnackBar(
+              content: Text('Movimientos exportados a $path'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception('Failed to export movements');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(localContext).showSnackBar(
+          SnackBar(
+            content: Text('Error al exportar movimientos: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _uploadFile() async {
