@@ -1628,9 +1628,9 @@ def export_movements(request, inventory_name='default'):
             df.to_excel(response, index=False)
             return response
         elif format_type == 'pdf':
-            # creacion archivo pdf
+            # Create PDF file in landscape orientation
             buffer = BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
             elements = []
 
             # Use Times fonts which support Unicode/Latin characters
@@ -1640,65 +1640,93 @@ def export_movements(request, inventory_name='default'):
                 parent=styles['Title'],
                 fontName='Times-Bold',
                 fontSize=18,
-                alignment=1,  # alineacion hacia el centro 
             )
-            title = Paragraph(f"Movimientos de Inventario - {inventory_name_param}", title_style)
+            title = Paragraph(f"Movimientos de Inventario - {datetime.now().strftime('%Y-%m-%d')}", title_style)
             elements.append(title)
             elements.append(Spacer(1, 12))
 
             # Prepare data for table
             if movements_data:
-                headers = ['Fecha', 'Código', 'Producto', 'Almacén', 'Tipo Doc.', 'Documento', 'Cantidad', 'Costo Unit.', 'Total', 'Categoría']
+                # Create styles for text wrapping
+                normal_style = ParagraphStyle(
+                    'Normal',
+                    parent=styles['Normal'],
+                    fontName='Times-Roman',
+                    fontSize=7,
+                    wordWrap='LTR',
+                    splitLongWords=True,
+                    leading=9,  # Line spacing
+                )
+                header_style = ParagraphStyle(
+                    'Header',
+                    parent=styles['Normal'],
+                    fontName='Times-Bold',
+                    fontSize=9,
+                    alignment=1,  # Center
+                )
+
+                headers = [
+                    Paragraph('Fecha', header_style),
+                    Paragraph('Código', header_style),
+                    Paragraph('Producto', header_style),
+                    Paragraph('Almacén', header_style),
+                    Paragraph('Tipo Doc.', header_style),
+                    Paragraph('Documento', header_style),
+                    Paragraph('Cantidad', header_style),
+                    Paragraph('Costo Unit.', header_style),
+                    Paragraph('Total', header_style),
+                    Paragraph('Categoría', header_style)
+                ]
                 formatted_data = []
                 for item in movements_data:
                     formatted_item = [
-                        item['fecha'],
-                        str(item['codigo']),
-                        str(item['nombre_producto'])[:25] + '...' if len(str(item['nombre_producto'])) > 25 else str(item['nombre_producto']),
-                        str(item['almacen']),
-                        str(item['tipo_documento'] or ''),
-                        str(item['documento'] or ''),
-                        f"{item['cantidad']:,.2f}",
-                        f"${item['costo_unitario']:,.2f}",
-                        f"${item['costo_total']:,.2f}",
-                        str(item['categoria']),
+                        Paragraph(str(item['fecha']), normal_style),
+                        Paragraph(str(item['codigo']), normal_style),
+                        Paragraph(str(item['nombre_producto']), normal_style),
+                        Paragraph(str(item['almacen']), normal_style),
+                        Paragraph(str(item['tipo_documento'] or ''), normal_style),
+                        Paragraph(str(item['documento'] or ''), normal_style),
+                        Paragraph(f"{item['cantidad']:,.2f}", normal_style),
+                        Paragraph(f"${item['costo_unitario']:,.2f}", normal_style),
+                        Paragraph(f"${item['costo_total']:,.2f}", normal_style),
+                        Paragraph(str(item['categoria']), normal_style),
                     ]
                     formatted_data.append(formatted_item)
                 data = [headers] + formatted_data
 
-                # Define column widths to fit A4 page (total ~350 points)
-                colWidths = [35, 30, 50, 30, 25, 30, 30, 35, 35, 30]
+                # Define column widths to fit landscape A4 page (842 points total)
+                colWidths = [70, 60, 150, 80, 60, 60, 80, 90, 90, 70]
 
                 # Create table with column widths
                 table = Table(data, colWidths=colWidths, repeatRows=1)  # Repeat headers on each page
                 style = TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('ALIGN', (6, 1), (8, -1), 'RIGHT'),  # Right align numeric columns (Cantidad, Costo Unit., Total)
+                    ('ALIGN', (6, 1), (8, -1), 'CENTER'),  # Alineacion de columna numericas
                     ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
                     ('FONTSIZE', (0, 0), (-1, 0), 9),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-                    ('TOPPADDING', (0, 0), (-1, 0), 6),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
-                    ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
-                    ('FONTSIZE', (0, 1), (-1, -1), 7),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                    ('TOPPADDING', (0, 0), (-1, 0), 4),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
                     ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('LEFTPADDING', (0, 0), (-1, -1), 2),
                     ('RIGHTPADDING', (0, 0), (-1, -1), 2),
                 ])
-                # Alternate row colors
-                for i in range(1, len(data)):
-                    if i % 2 == 0:
-                        style.add('BACKGROUND', (0, i), (-1, i), colors.whitesmoke)
-                    else:
-                        style.add('BACKGROUND', (0, i), (-1, i), colors.white)
                 table.setStyle(style)
                 elements.append(table)
 
-            doc.build(elements)
-            buffer.seek(0)
+            try:
+                doc.build(elements)
+                buffer.seek(0)
+                pdf_content = buffer.getvalue()
+                if not pdf_content:
+                    logger.error("PDF buffer is empty after build")
+                    return JsonResponse({'error': 'PDF generation failed - empty content'}, status=500)
+            except Exception as e:
+                logger.error(f"Error building PDF: {str(e)}", exc_info=True)
+                return JsonResponse({'error': f'PDF generation failed: {str(e)}'}, status=500)
 
             response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
             response['Content-Disposition'] = f'attachment; filename="movimientos_inventario_{inventory_name_param}.pdf"'
