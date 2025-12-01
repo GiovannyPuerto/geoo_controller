@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:geo_inventario/models/monthly_movement.dart';
 
-
 class ApiService {
   static const String baseUrl = 'http://127.0.0.1:8000/api/inventory';
 
@@ -441,6 +440,31 @@ class ApiService {
       return [];
     } catch (e) {
       throw Exception('Error loading inventories: $e');
+    }
+  }
+
+  // Get inventory at date
+  Future<List<Map<String, dynamic>>> getInventoryAtDate(DateTime date) async {
+    try {
+      final params = <String, String>{
+        'date': date.toIso8601String().split('T')[0]
+      };
+
+      final uri = Uri.parse('$baseUrl/inventory-at-date/')
+          .replace(queryParameters: params);
+      final response = await http.get(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        final List<dynamic> products = data['products'] ?? [];
+        return List<Map<String, dynamic>>.from(products);
+      }
+      return [];
+    } catch (e) {
+      throw Exception('Error loading inventory at date: $e');
     }
   }
 }

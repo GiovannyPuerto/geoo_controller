@@ -31,6 +31,8 @@ from .utils import (
     calculate_file_checksum, parse_document, validate_row_data, clean_text
 )
 
+from django.db.models import Max
+
 logger = logging.getLogger(__name__)
 
 
@@ -931,6 +933,14 @@ def get_product_analysis(request):
     limit = request.GET.get('limit', '')
 
     try:
+        # Parse dates if provided
+        target_date = None
+        if date_to:
+            try:
+                target_date = datetime.strptime(date_to, '%Y-%m-%d').date()
+            except ValueError:
+                pass  # Ignore invalid date
+
         # Base product query with filters
         products_query = Product.objects.filter(inventory_name=inventory_name)
 
@@ -958,17 +968,19 @@ def get_product_analysis(request):
 
         # BULK QUERY 1: Get last records for all products per warehouse (for current stock calculation)
         # Note: Warehouse filter is NOT applied here because current stock is total across all warehouses
-        # Date filters are not applied to current stock calculation to always get the latest stock
+        # If target_date is provided, filter records up to that date
 
         # Get latest record per product per warehouse by date, not by id
+        latest_records_query = InventoryRecord.objects.filter(
+            product_id=OuterRef('product_id'),
+            warehouse=OuterRef('warehouse')
+        ).order_by('-date')
+        if target_date:
+            latest_records_query = latest_records_query.filter(date__lte=target_date)
+
         last_records_per_warehouse = InventoryRecord.objects.filter(
             id__in=InventoryRecord.objects.values('product_id', 'warehouse').annotate(
-                latest_id=Subquery(
-                    InventoryRecord.objects.filter(
-                        product_id=OuterRef('product_id'),
-                        warehouse=OuterRef('warehouse')
-                    ).order_by('-date').values('id')[:1]
-                )
+                latest_id=Subquery(latest_records_query.values('id')[:1])
             ).values('latest_id')
         ).select_related('product')
 
@@ -981,10 +993,16 @@ def get_product_analysis(request):
             last_records_dict[product_id].append(record)
 
         # BULK QUERY 2: Get pre-year sums for all products
-        pre_year_sums = InventoryRecord.objects.filter(
-            product_id__in=product_ids,
-            date__year__lt=datetime.now().year
-        ).values('product_id').annotate(
+        # If target_date is provided, filter up to target_date
+        pre_year_query = InventoryRecord.objects.filter(
+            product_id__in=product_ids
+        )
+        if target_date:
+            pre_year_query = pre_year_query.filter(date__lt=target_date.replace(day=1, month=1))
+        else:
+            pre_year_query = pre_year_query.filter(date__year__lt=datetime.now().year)
+
+        pre_year_sums = pre_year_query.values('product_id').annotate(
             total_quantity=Sum('quantity')
         )
 
@@ -992,10 +1010,16 @@ def get_product_analysis(request):
                         for item in pre_year_sums}
 
         # BULK QUERY 3: Get monthly movements for current year for all products
+        # If target_date is provided, use that year instead of current year
+        rotation_year = target_date.year if target_date else datetime.now().year
         monthly_movements = InventoryRecord.objects.filter(
             product_id__in=product_ids,
-            date__year=datetime.now().year
-        ).annotate(month=TruncMonth('date')).values('product_id', 'month').annotate(
+            date__year=rotation_year
+        )
+        if target_date:
+            monthly_movements = monthly_movements.filter(date__lte=target_date)
+
+        monthly_movements = monthly_movements.annotate(month=TruncMonth('date')).values('product_id', 'month').annotate(
             monthly_total=Sum('quantity')
         ).order_by('product_id', 'month')
 
@@ -1016,6 +1040,7 @@ def get_product_analysis(request):
 
         warehouses_dict = {item['product_id']: item['warehouses'] or 'Todos'
                           for item in warehouse_details}
+
 
         # BULK QUERY 5: Get warehouse details for current stock calculation
         warehouse_detail_records = WarehouseDetail.objects.filter(
@@ -1039,27 +1064,27 @@ def get_product_analysis(request):
                 last_records = last_records_dict.get(product.id, [])
                 warehouse_details = warehouse_detail_dict.get(product.id, {})
 
-                # Calculate current stock by summing initial balance + all movements per warehouse, then sum across warehouses
+                # Calculate current stock by summing final_quantity from last records per warehouse
                 current_stock = Decimal('0')
                 negative_stock_alert = False
                 justification = None
 
-                # Sum stock per warehouse: initial_quantity + sum of movements for each warehouse
-                for wd in warehouse_detail_dict.get(product.id, {}).values():
-                    warehouse_stock = Decimal(wd.initial_quantity or 0)
-                    # Get all movements for this product and warehouse
-                    warehouse_movements = InventoryRecord.objects.filter(
-                        product_id=product.id,
-                        warehouse=wd.warehouse
-                    ).aggregate(total_movement=Sum('quantity'))['total_movement'] or Decimal('0')
-                    warehouse_stock += warehouse_movements
-                    if warehouse_stock < 0:
-                        negative_stock_alert = True
-                    current_stock += warehouse_stock
-
-                # If no negative warehouse stock found, check if total current stock is negative
-                if not negative_stock_alert:
-                    negative_stock_alert = current_stock < 0
+                if last_records:
+                    # Sum final_quantity from the last record per warehouse
+                    for r in last_records:
+                        final_qty = Decimal(r.final_quantity or 0)
+                        current_stock += final_qty
+                        if final_qty < 0:
+                            negative_stock_alert = True
+                            justification = "Stock actual negativo en al menos un almacén."
+                else:
+                    # If no records, use initial quantities from warehouse details
+                    for wd in warehouse_detail_dict.get(product.id, {}).values():
+                        initial_qty = Decimal(wd.initial_quantity or 0)
+                        current_stock += initial_qty
+                        if initial_qty < 0:
+                            negative_stock_alert = True
+                            justification = "Stock inicial negativo en al menos un almacén."
 
                 # Get unit cost from the most recent record across warehouses
                 if last_records:
@@ -1757,7 +1782,6 @@ def list_inventories(request):
         return JsonResponse([], safe=False)
 
 
-from django.db.models import Max
 
 @require_http_methods(["GET"])
 def get_last_update_time(request):
@@ -1795,6 +1819,154 @@ def upload_base_file(request, inventory_name='default'):
     """
     # This is similar to update_inventory but only for base files
     return update_inventory(request, inventory_name)
+
+
+@require_http_methods(["GET"])
+def get_inventory_at_date(request):
+    """
+    Calculates the inventory state (quantity and value) at a specific date.
+
+    Args:
+        request: Django HttpRequest with query parameters
+
+    Query Parameters:
+        inventory_name (str): Name of the inventory (default: 'default')
+        date (str): Date in YYYY-MM-DD format (required)
+        warehouse (str): Filter by warehouse (optional)
+        category (str): Filter by category (optional)
+
+    Returns:
+        JsonResponse: Inventory summary at the specified date
+    """
+    inventory_name = request.GET.get('inventory_name', 'default')
+    date_str = request.GET.get('date', '')
+    warehouse_filter = request.GET.get('warehouse', '')
+    category_filter = request.GET.get('category', '')
+
+    if not date_str:
+        return JsonResponse({'error': 'Date parameter is required (format: YYYY-MM-DD)'}, status=400)
+
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
+
+    try:
+        # Base product query with filters
+        products_query = Product.objects.filter(inventory_name=inventory_name)
+
+        if category_filter:
+            products_query = products_query.filter(group__icontains=category_filter)
+
+        # Apply warehouse filter at product level using WarehouseDetail
+        if warehouse_filter:
+            products_query = products_query.filter(
+                warehousedetail__warehouse__icontains=warehouse_filter
+            ).distinct()
+
+        product_ids = list(products_query.values_list('id', flat=True))
+        if not product_ids:
+            return JsonResponse({
+                'date': date_str,
+                'total_quantity': 0.0,
+                'total_value': 0.0,
+                'products': []
+            })
+
+        # Get warehouse details for initial quantities
+        warehouse_details = WarehouseDetail.objects.filter(
+            product_id__in=product_ids
+        ).select_related('product')
+
+        warehouse_detail_dict = {}
+        for wd in warehouse_details:
+            product_id = wd.product_id
+            if product_id not in warehouse_detail_dict:
+                warehouse_detail_dict[product_id] = {}
+            warehouse_detail_dict[product_id][wd.warehouse] = wd
+
+        # Get movements up to the target date
+        movements_up_to_date = InventoryRecord.objects.filter(
+            product_id__in=product_ids,
+            date__lte=target_date
+        ).select_related('product')
+
+        # Group movements by product and warehouse
+        movements_dict = {}
+        for record in movements_up_to_date:
+            product_id = record.product_id
+            warehouse = record.warehouse
+            if product_id not in movements_dict:
+                movements_dict[product_id] = {}
+            if warehouse not in movements_dict[product_id]:
+                movements_dict[product_id][warehouse] = []
+            movements_dict[product_id][warehouse].append(record)
+
+        # Get latest unit cost up to target date for each product
+        latest_costs = InventoryRecord.objects.filter(
+            product_id__in=product_ids,
+            date__lte=target_date
+        ).values('product_id').annotate(
+            latest_cost=Max('unit_cost')
+        )
+
+        latest_cost_dict = {item['product_id']: item['latest_cost'] or Decimal('0')
+                           for item in latest_costs}
+
+        # Calculate inventory at date
+        total_quantity = Decimal('0')
+        total_value = Decimal('0')
+        products_data = []
+
+        for product in products_query:
+            product_quantity = Decimal('0')
+            product_value = Decimal('0')
+
+            # Get warehouses for this product (filtered if warehouse_filter is set)
+            product_warehouses = warehouse_detail_dict.get(product.id, {})
+
+            # If warehouse filter is applied, only consider those warehouses
+            if warehouse_filter:
+                product_warehouses = {k: v for k, v in product_warehouses.items()
+                                    if warehouse_filter.lower() in k.lower()}
+
+            for warehouse, wd in product_warehouses.items():
+                # Start with initial quantity
+                warehouse_quantity = Decimal(wd.initial_quantity or 0)
+
+                # Add movements up to target date
+                warehouse_movements = movements_dict.get(product.id, {}).get(warehouse, [])
+                for record in warehouse_movements:
+                    warehouse_quantity += Decimal(record.quantity or 0)
+
+                product_quantity += warehouse_quantity
+
+            # Get unit cost (latest before or on target date, or initial)
+            unit_cost = latest_cost_dict.get(product.id, Decimal(product.initial_unit_cost or 0))
+
+            product_value = product_quantity * unit_cost
+            total_quantity += product_quantity
+            total_value += product_value
+
+            products_data.append({
+                'codigo': product.code,
+                'nombre_producto': product.description,
+                'grupo': product.group,
+                'cantidad': float(product_quantity),
+                'valor': float(product_value),
+                'costo_unitario': float(unit_cost),
+            })
+
+        return JsonResponse({
+            'date': date_str,
+            'total_quantity': float(total_quantity),
+            'total_value': float(total_value),
+            'products': products_data
+        })
+
+    except Exception as e:
+        logger.error(f"Error calculating inventory at date: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 @require_http_methods(["GET"])

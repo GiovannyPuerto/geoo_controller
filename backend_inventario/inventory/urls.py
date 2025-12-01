@@ -3,7 +3,8 @@ from .views import (
     update_inventory, get_batches, get_products, get_records,
     get_product_analysis, create_inventory, get_product_history,
     get_summary, export_analysis, export_movements, list_inventories,
-    upload_base_file, welcome, get_monthly_movements, get_last_update_time
+    upload_base_file, welcome, get_monthly_movements, get_last_update_time,
+    get_inventory_at_date
 )
 
 urlpatterns = [
@@ -28,5 +29,6 @@ urlpatterns = [
     path('inventories/', list_inventories, name='list_inventories'),
     path('upload-base/', upload_base_file, name='upload_base_file'),
     path('upload-base/<str:inventory_name>/', upload_base_file, name='upload_base_file_with_inventory'),
+    path('inventory-at-date/', get_inventory_at_date, name='get_inventory_at_date'),
     path('welcome/', welcome, name='welcome'),
 ]
