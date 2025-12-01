@@ -324,7 +324,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     TextButton.icon(
                       onPressed: _showExportDialog,
                       icon: const Icon(Icons.download_outlined),
-                      label: const Text('Exportar Excel'),
+                      label: const Text('Exportar'),
                     ),
                     IconButton(
                       icon: const Icon(Icons.filter_list),

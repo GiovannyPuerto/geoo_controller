@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:geo_inventario/models/monthly_movement.dart';
 
+
 class ApiService {
   static const String baseUrl = 'http://127.0.0.1:8000/api/inventory';
 

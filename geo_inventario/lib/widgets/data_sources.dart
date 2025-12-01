@@ -96,6 +96,16 @@ class AnalysisDataSource extends DataTableSource {
         DataCell(
           Text(
             item['cantidad_saldo_actual']?.toString() ?? '0',
+            style: TextStyle(
+              color: (item['cantidad_saldo_actual'] is num &&
+                      item['cantidad_saldo_actual'] < 0)
+                  ? Colors.red
+                  : Colors.black,
+              fontWeight: (item['cantidad_saldo_actual'] is num &&
+                      item['cantidad_saldo_actual'] < 0)
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+            ),
           ),
         ),
         DataCell(

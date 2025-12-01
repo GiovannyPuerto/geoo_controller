@@ -7,24 +7,12 @@ from datetime import datetime
 from zipfile import BadZipFile
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from io import BytesIO
 import pandas as pd
 
-def safe_decimal(value):
-    """
-    Safely converts a value to Decimal, handling empty, None, or invalid values.
-    """
-    if pd.isna(value) or value == '' or str(value).strip() == '':
-        return Decimal('0')
-    try:
-        # Handle Colombian format (comma as decimal separator)
-        cleaned_value = str(value).replace(',', '.').strip()
-        return Decimal(cleaned_value)
-    except (ValueError, TypeError, InvalidOperation):
-        return Decimal('0')
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -43,8 +31,8 @@ from .utils import (
     calculate_file_checksum, parse_document, validate_row_data, clean_text
 )
 
-
 logger = logging.getLogger(__name__)
+
 
 def _normalize_update_df_columns(df):
     """
@@ -507,9 +495,9 @@ def _process_base_file(df, inventory_name):
                 continue
 
             # traer valores de la fila agrupada
-            cantidad_total = safe_decimal(row.get('cantidad'))
-            valor_total = safe_decimal(row.get('valor_total'))
-            costo_unitario = safe_decimal(row.get('costo_unitario'))
+            cantidad_total = clean_number(row.get('cantidad'))
+            valor_total = clean_number(row.get('valor_total'))
+            costo_unitario = clean_number(row.get('costo_unitario'))
             descripcion = row.get('descripcion', '').strip()
 
             # Si cantidad es 0 pero hay valor_total, ajustar para preservar el valor
@@ -567,8 +555,8 @@ def _process_base_file(df, inventory_name):
         try:
             codigo = row['codigo']
             almacen = row['almacen']
-            cantidad = safe_decimal(row['cantidad'])
-            valor_total = safe_decimal(row['valor_total'])
+            cantidad = clean_number(row['cantidad'])
+            valor_total = clean_number(row['valor_total'])
 
             # Buscar el producto creado
             try:
@@ -708,12 +696,11 @@ def _process_update_file(batch, df, inventory_name):
 
             # Get quantities - usar la columna 'cantidad' como cantidad final después del movimiento
             try:
-                final_quantity = safe_decimal(row.get('cantidad'))
-
+                final_quantity = clean_number(row.get('cantidad'))
                 # Para calcular el movimiento neto, necesitamos el saldo anterior
                 # Pero como no tenemos el saldo anterior aquí, calculamos el movimiento basado en entradas y salidas
-                entradas = safe_decimal(row.get('entradas'))
-                salidas = safe_decimal(row.get('salidas'))
+                entradas = clean_number(row.get('entradas'))
+                salidas = clean_number(row.get('salidas'))
                 quantity = entradas - salidas
 
                 if quantity == 0:
@@ -721,8 +708,8 @@ def _process_update_file(batch, df, inventory_name):
                     continue  # Saltamos registros sin movimiento
 
                 # Traemos costos y totales
-                unit_cost = safe_decimal(row.get('unitario'))
-                total = safe_decimal(row.get('total')) or (abs(quantity) * unit_cost)
+                unit_cost = clean_number(row.get('unitario'))
+                total = clean_number(row.get('total')) or (quantity * unit_cost)
 
                 # Calculate unit_cost from total if missing
                 if unit_cost == 0 and total != 0 and quantity != 0:
@@ -1052,20 +1039,32 @@ def get_product_analysis(request):
                 last_records = last_records_dict.get(product.id, [])
                 warehouse_details = warehouse_detail_dict.get(product.id, {})
 
-                # Calculate current stock as initial balance + sum of all quantity movements
-                total_movements = InventoryRecord.objects.filter(product=product).aggregate(
-                    total_quantity=Sum('quantity')
-                )['total_quantity'] or Decimal('0')
-                current_stock = Decimal(product.initial_balance or 0) + total_movements
+                # Calculate current stock by summing initial balance + all movements per warehouse, then sum across warehouses
+                current_stock = Decimal('0')
+                negative_stock_alert = False
+                justification = None
 
-                # Get unit cost from the most recent record with non-zero unit_cost across warehouses
+                # Sum stock per warehouse: initial_quantity + sum of movements for each warehouse
+                for wd in warehouse_detail_dict.get(product.id, {}).values():
+                    warehouse_stock = Decimal(wd.initial_quantity or 0)
+                    # Get all movements for this product and warehouse
+                    warehouse_movements = InventoryRecord.objects.filter(
+                        product_id=product.id,
+                        warehouse=wd.warehouse
+                    ).aggregate(total_movement=Sum('quantity'))['total_movement'] or Decimal('0')
+                    warehouse_stock += warehouse_movements
+                    if warehouse_stock < 0:
+                        negative_stock_alert = True
+                    current_stock += warehouse_stock
+
+                # If no negative warehouse stock found, check if total current stock is negative
+                if not negative_stock_alert:
+                    negative_stock_alert = current_stock < 0
+
+                # Get unit cost from the most recent record across warehouses
                 if last_records:
-                    recent_records_with_cost = [r for r in last_records if r.unit_cost and r.unit_cost > 0]
-                    if recent_records_with_cost:
-                        most_recent_with_cost = max(recent_records_with_cost, key=lambda r: r.date)
-                        current_unit_cost = Decimal(most_recent_with_cost.unit_cost)
-                    else:
-                        current_unit_cost = Decimal(product.initial_unit_cost or 0)
+                    latest_record = max(last_records, key=lambda r: r.date)
+                    current_unit_cost = Decimal(latest_record.unit_cost or product.initial_unit_cost or 0)
                 else:
                     current_unit_cost = Decimal(product.initial_unit_cost or 0)
 
@@ -1142,6 +1141,7 @@ def get_product_analysis(request):
                     'rotacion': rotation,
                     'alta_rotacion': high_rotation,
                     'almacen': product_warehouses,
+                    'has_negative_stock_alert': negative_stock_alert,
                 })
 
             except Exception as e:
@@ -1351,23 +1351,53 @@ def get_summary(request):
         total_records = InventoryRecord.objects.filter(product__inventory_name=inventory_name).count()
         total_batches = ImportBatch.objects.filter(inventory_name=inventory_name).count()
 
-        # Get analysis data to calculate totals
-        analysis_response = get_product_analysis(request)
-        if analysis_response.status_code == 200:
-            analysis_data = json.loads(analysis_response.content)
-            total_quantity = sum(item['cantidad_saldo_actual'] for item in analysis_data if item['cantidad_saldo_actual'] > 0)
-            total_value = sum(item['valor_saldo_actual'] for item in analysis_data)
-        else:
-            total_quantity = 0
-            total_value = 0
+        # Calculate total_value and total_quantity as sum of current stock values from product analysis
+        total_value = Decimal('0')
+        total_quantity = Decimal('0')
+        negative_stock_alerts = []
+        products = Product.objects.filter(inventory_name=inventory_name)
+        for product in products:
+            # Calculate current stock by summing initial balance + all movements per warehouse, then sum across warehouses
+            warehouse_details = WarehouseDetail.objects.filter(product=product)
+            current_stock = Decimal('0')
+            for wd in warehouse_details:
+                warehouse_stock = Decimal(wd.initial_quantity or 0)
+                movements_sum = InventoryRecord.objects.filter(
+                    product=product, warehouse=wd.warehouse
+                ).aggregate(sum=Sum('quantity'))['sum'] or Decimal('0')
+                warehouse_stock += movements_sum
+                current_stock += warehouse_stock
+
+            # Accumulate total_quantity
+            total_quantity += current_stock
+
+            # Get unit cost from the most recent record across warehouses
+            last_records = InventoryRecord.objects.filter(product=product).order_by('-date')[:1]
+            if last_records:
+                current_unit_cost = Decimal(last_records[0].unit_cost or product.initial_unit_cost or 0)
+            else:
+                current_unit_cost = Decimal(product.initial_unit_cost or 0)
+
+            # Add to total value
+            total_value += current_stock * current_unit_cost
+
+            # Check for negative stock alerts
+            if current_stock < 0:
+                negative_stock_alerts.append({
+                    'codigo': product.code,
+                    'nombre_producto': product.description,
+                    'cantidad_saldo_actual': float(current_stock),
+                    'justification': f"Stock actual negativo: {current_stock} unidades."
+                })
 
         return JsonResponse({
             'inventory_name': inventory_name,
             'total_products': total_products,
             'total_records': total_records,
             'total_batches': total_batches,
-            'total_quantity': total_quantity,
-            'total_value': total_value,
+            'total_quantity': float(total_quantity),
+            'total_value': float(total_value),
+            'negative_stock_alerts': negative_stock_alerts,
         })
     except Exception as e:
         logger.error(f"Error retrieving summary: {str(e)}", exc_info=True)
@@ -1390,22 +1420,43 @@ def export_analysis(request, inventory_name='default'):
         # Get format from query params
         format_type = request.GET.get('format', 'excel')
 
-        # Get analysis data (no limit for complete export)
+        #
         analysis_response = get_product_analysis(request)
-        analysis_data = analysis_response.content
+        analysis_data = analysis_response.content.decode('utf-8')
         analysis_list = json.loads(analysis_data)
 
         if format_type == 'excel':
-            # Create Excel file
+            # Create Excel file with proper column widths
             df = pd.DataFrame(analysis_list)
-            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Analysis')
+                workbook = writer.book
+                worksheet = writer.sheets['Analysis']
+                # Set column widths to prevent overlapping
+                column_widths = {
+                    'A': 15,  # codigo
+                    'B': 40,  # nombre_producto
+                    'C': 20,  # grupo
+                    'D': 18,  # cantidad_saldo_actual
+                    'E': 18,  # valor_saldo_actual
+                    'F': 18,  # costo_unitario
+                    'G': 12,  # consumed
+                    'H': 12,  # estancado
+                    'I': 15,  # rotacion
+                    'J': 15,  # alta_rotacion
+                    'K': 25   # almacen
+                }
+                for col, width in column_widths.items():
+                    worksheet.column_dimensions[col].width = width
+            buffer.seek(0)
+            response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="inventory_analysis_{inventory_name}.xlsx"'
-            df.to_excel(response, index=False)
             return response
         elif format_type == 'pdf':
-            # Create PDF file
+            # Create PDF file in landscape orientation
             buffer = BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
             elements = []
 
             # Use Times fonts which support Unicode/Latin characters
@@ -1416,55 +1467,93 @@ def export_analysis(request, inventory_name='default'):
                 fontName='Times-Bold',
                 fontSize=18,
             )
-            title = Paragraph(f"Análisis de Inventario - {inventory_name}", title_style)
+            title = Paragraph(f"Análisis de Inventario - {datetime.now().strftime('%Y-%m-%d')}", title_style)
             elements.append(title)
             elements.append(Spacer(1, 12))
 
             # Prepare data for table
             if analysis_list:
-                headers = ['Código', 'Producto', 'Grupo', 'Cantidad Actual', 'Valor Actual', 'Costo Unitario', 'Consumido', 'Estancado', 'Rotación', 'Alta Rotación', 'Almacén']
+                # Create styles for text wrapping
+                normal_style = ParagraphStyle(
+                    'Normal',
+                    parent=styles['Normal'],
+                    fontName='Times-Roman',
+                    fontSize=7,
+                    wordWrap='LTR',
+                    splitLongWords=True,
+                    leading=9,  # Line spacing
+                )
+                header_style = ParagraphStyle(
+                    'Header',
+                    parent=styles['Normal'],
+                    fontName='Times-Bold',
+                    fontSize=9,
+                    alignment=1,  # Center
+                )
+
+                headers = [
+                    Paragraph('Código', header_style),
+                    Paragraph('Producto', header_style),
+                    Paragraph('Grupo', header_style),
+                    Paragraph('Cantidad Actual', header_style),
+                    Paragraph('Valor Actual', header_style),
+                    Paragraph('Costo Unitario', header_style),
+                    Paragraph('Estancado', header_style),
+                    Paragraph('Rotación', header_style),
+                    Paragraph('Alta Rotación', header_style),
+                    Paragraph('Almacén', header_style)
+                ]
                 formatted_data = []
                 for item in analysis_list:
                     formatted_item = [
-                        str(item['codigo']),
-                        str(item['nombre_producto'])[:30] + '...' if len(str(item['nombre_producto'])) > 30 else str(item['nombre_producto']),
-                        str(item['grupo']),
-                        f"{item['cantidad_saldo_actual']:,.2f}",
-                        f"${item['valor_saldo_actual']:,.2f}",
-                        f"${item['costo_unitario']:,.2f}",
-                        str(item['consumed']),
-                        str(item['estancado']),
-                        str(item['rotacion']),
-                        str(item['alta_rotacion']),
-                        str(item['almacen'])[:15] + '...' if len(str(item['almacen'])) > 15 else str(item['almacen']),
+                        Paragraph(str(item['codigo']), normal_style),
+                        Paragraph(str(item['nombre_producto']), normal_style),
+                        Paragraph(str(item['grupo']), normal_style),
+                        Paragraph(f"{item['cantidad_saldo_actual']:,.2f}", normal_style),
+                        Paragraph(f"${item['valor_saldo_actual']:,.2f}", normal_style),
+                        Paragraph(f"${item['costo_unitario']:,.2f}", normal_style),
+                        Paragraph(str(item['consumed']), normal_style),
+                        Paragraph(str(item['estancado']), normal_style),
+                        Paragraph(str(item['rotacion']), normal_style),
+                        Paragraph(str(item['alta_rotacion']), normal_style),
+                        Paragraph(str(item['almacen']), normal_style),
                     ]
                     formatted_data.append(formatted_item)
                 data = [headers] + formatted_data
 
-                # Define column widths to fit A4 page (total ~267 points)
-                colWidths = [18, 35, 22, 28, 28, 28, 18, 18, 22, 22, 28]
+                # Define column widths to fit landscape A4 page (842 points total)
+                colWidths = [57, 130, 71, 71, 78, 71, 57, 57, 64, 64, 105]
 
                 # Create table with column widths
                 table = Table(data, colWidths=colWidths, repeatRows=1)  # Repeat headers on each page
                 style = TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.green),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('ALIGN', (3, 1), (5, -1), 'RIGHT'),  # Right align numeric columns
+                    ('ALIGN', (3, 1), (5, -1), 'CENTER'),  # Alineacion de columna numericas
                     ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                    ('TOPPADDING', (0, 0), (-1, 0), 4),
                     ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                    ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
-                    ('FONTSIZE', (0, 1), (-1, -1), 8),
                     ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
                 ])
                 table.setStyle(style)
                 elements.append(table)
 
-            doc.build(elements)
-            buffer.seek(0)
+            try:
+                doc.build(elements)
+                buffer.seek(0)
+                pdf_content = buffer.getvalue()
+                if not pdf_content:
+                    logger.error("PDF buffer is empty after build")
+                    return JsonResponse({'error': 'PDF generation failed - empty content'}, status=500)
+            except Exception as e:
+                logger.error(f"Error building PDF: {str(e)}", exc_info=True)
+                return JsonResponse({'error': f'PDF generation failed: {str(e)}'}, status=500)
 
             response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
             response['Content-Disposition'] = f'attachment; filename="inventory_analysis_{inventory_name}.pdf"'

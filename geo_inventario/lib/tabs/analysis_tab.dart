@@ -1,6 +1,11 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:file_saver/file_saver.dart';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:universal_html/html.dart' as html;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -125,6 +130,9 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
             const SizedBox(height: 16),
             // Charts
             _buildAnalysisCharts(),
+            const SizedBox(height: 24),
+            // Negative Stock Alerts
+            _buildNegativeStockAlerts(),
             const SizedBox(height: 24),
             // Table
             _buildAnalysisTable(),
@@ -493,6 +501,58 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildNegativeStockAlerts() {
+    final negativeStockItems = filteredAnalysis
+        .where((item) => item['negative_stock_alert'] == true)
+        .toList();
+
+    if (negativeStockItems.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.warning, color: Colors.red),
+                const SizedBox(width: 8),
+                Text(
+                  'Alertas de Stock Negativo (${negativeStockItems.length})',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 200,
+              child: ListView.builder(
+                itemCount: negativeStockItems.length,
+                itemBuilder: (context, index) {
+                  final item = negativeStockItems[index];
+                  return ListTile(
+                    leading: Icon(Icons.error, color: Colors.red),
+                    title: Text(item['nombre_producto'] ?? ''),
+                    subtitle: Text(
+                        'Código: ${item['codigo']} - Justificación: ${item['justification'] ?? 'N/A'}'),
+                    dense: true,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -870,21 +930,40 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
 
       if (response.statusCode == 200) {
         final Uint8List fileBytes = response.bodyBytes;
-        final String? path = await FileSaver.instance.saveAs(
-            name:
-                'analysis_export_${DateTime.now().toIso8601String()}.$format',
-            bytes: fileBytes,
-            ext: format,
-            mimeType:
-                format == 'excel' ? MimeType.microsoftExcel : MimeType.pdf);
+        final String timestamp = DateTime.now()
+            .toIso8601String()
+            .replaceAll(':', '-')
+            .replaceAll('.', '-');
+        final String extension = format == 'excel' ? 'xlsx' : format;
+        final String filename = 'analysis_export_$timestamp.$extension';
 
-        if (mounted) {
-          ScaffoldMessenger.of(localContext).showSnackBar(
-            SnackBar(
-              content: Text('Análisis exportado a $path'),
-              backgroundColor: Colors.green,
-            ),
-          );
+        // Use file picker to save file on all platforms
+        String? path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar archivo de análisis',
+          fileName: filename,
+        );
+
+        if (path != null) {
+          final file = File(path);
+          await file.writeAsBytes(fileBytes);
+
+          if (mounted) {
+            ScaffoldMessenger.of(localContext).showSnackBar(
+              SnackBar(
+                content: Text('Archivo guardado en: ${file.path}'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(localContext).showSnackBar(
+              const SnackBar(
+                content: Text('Guardado cancelado'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
         }
       } else {
         throw Exception('Failed to export analysis');
