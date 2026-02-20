@@ -823,7 +823,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             (monthlyData[monthKey]!['totalExits'] ?? 0) + total.abs();
       }
 
-      // Calculate closing balance (sum of all totals)
+      // Calcula el ciere de el valance sumando todos lo totales
       monthlyData[monthKey]!['closingBalance'] =
           (monthlyData[monthKey]!['closingBalance'] ?? 0) + total;
     }

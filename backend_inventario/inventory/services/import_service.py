@@ -668,6 +668,74 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 inventory_name
             )
 
+        # ── Validación de continuidad de fechas ───────────────────────────────
+        # Regla de negocio:
+        #   1. La fecha mínima del archivo a subir debe ser >= la fecha máxima
+        #      ya registrada en BD para no dejar huecos en la serie.
+        #   2. Si la fecha mínima del archivo == la fecha máxima en BD (mismo día),
+        #      se permite la re-carga: se eliminan primero los registros de ese día
+        #      y se reemplazan con los datos nuevos.
+        #   3. Si la fecha mínima del archivo > fecha máxima + 1 día, hay un hueco
+        #      → se rechaza la carga con mensaje explicativo.
+        if update_files_data:
+            from ..models import InventoryRecord as _IR
+            from django.db.models import Max as _Max
+            import datetime as _dt
+
+            # Fecha máxima ya existente en BD para este inventario
+            last_date_in_db = _IR.objects.filter(
+                product__inventory_name=inventory_name
+            ).aggregate(max_date=_Max('date'))['max_date']
+
+            if last_date_in_db is not None:
+                # Fecha mínima en los archivos que se van a subir
+                min_file_date = None
+                for _fname, _fcontent in update_files_data:
+                    try:
+                        _df_tmp = _read_update_dataframe(_fcontent, _fname)
+                        _df_tmp = _normalize_update_dataframe(_df_tmp)
+                        _dates = _df_tmp['fecha'].apply(_parse_date_fast).dropna()
+                        if not _dates.empty:
+                            _file_min = _dates.min()
+                            if isinstance(_file_min, _dt.datetime):
+                                _file_min = _file_min.date()
+                            if min_file_date is None or _file_min < min_file_date:
+                                min_file_date = _file_min
+                        del _df_tmp
+                    except Exception as _exc:
+                        logger.warning(f"No se pudo leer fecha mínima de '{_fname}': {_exc}")
+
+                if min_file_date is not None:
+                    if isinstance(last_date_in_db, _dt.datetime):
+                        last_date_in_db = last_date_in_db.date()
+
+                    if min_file_date < last_date_in_db:
+                        # Hueco hacia atrás → rechazo total
+                        return JsonResponse({
+                            'ok': False,
+                            'error': (
+                                f'El archivo contiene movimientos desde {min_file_date.strftime("%d/%m/%Y")}, '
+                                f'pero ya existen registros hasta {last_date_in_db.strftime("%d/%m/%Y")}. '
+                                f'Los archivos de actualización deben empezar desde '
+                                f'{last_date_in_db.strftime("%d/%m/%Y")} en adelante '
+                                f'para no dejar vacíos en el inventario.'
+                            )
+                        }, status=400)
+
+                    if min_file_date == last_date_in_db:
+                        # Re-carga del último día: eliminar registros de ese día para reemplazarlos
+                        deleted_count, _ = _IR.objects.filter(
+                            product__inventory_name=inventory_name,
+                            date=last_date_in_db
+                        ).delete()
+                        logger.info(
+                            f"Re-carga del día {last_date_in_db}: "
+                            f"eliminados {deleted_count} registros previos de ese día."
+                        )
+
+                    # min_file_date > last_date_in_db → continuidad normal, sin huecos
+        # ── Fin validación de continuidad ─────────────────────────────────────
+
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0
         total_duplicates = 0

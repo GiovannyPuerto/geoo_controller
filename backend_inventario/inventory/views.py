@@ -1,15 +1,12 @@
 import logging
 import json
 from datetime import datetime
-
 from io import BytesIO
 import pandas as pd
-
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db.models import Q
-
 from .models import ImportBatch, Product, InventoryRecord
 from .services.analytics_service import (
     get_inventory_at_date_data,
@@ -95,13 +92,7 @@ def get_product_analysis(request):
 @require_http_methods(["GET"])
 def get_batches(request):
     """
-    Retrieves a list of import batches for the specified inventory.
-
-    Args:
-        request: Django HttpRequest with query parameter 'inventory_name'
-
-    Returns:
-        JsonResponse: List of batch data including IDs, file names, timestamps, and processing stats
+    ENdpoint para obtener información de las importaciones realizadas.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     batches = ImportBatch.objects.filter(inventory_name=inventory_name).order_by('-started_at')
@@ -121,13 +112,7 @@ def get_batches(request):
 @require_http_methods(["GET"])
 def get_products(request):
     """
-    Retrieves a list of products for the specified inventory.
-
-    Args:
-        request: Django HttpRequest with query parameter 'inventory_name'
-
-    Returns:
-        JsonResponse: List of product data including codes, descriptions, groups, and balances
+    Endpoint para obtener información de los productos.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     products = Product.objects.filter(inventory_name=inventory_name)
@@ -143,21 +128,7 @@ def get_products(request):
 @require_http_methods(["GET"])
 def get_records(request):
     """
-    Retrieves inventory records with optional filtering.
-
-    Args:
-        request: Django HttpRequest with query parameters for filtering
-
-    Query Parameters:
-        inventory_name (str): Name of the inventory
-        warehouse (str): Filter by warehouse
-        category (str): Filter by category
-        date_from (str): Start date filter
-        date_to (str): End date filter
-        search (str): Search by product code or description
-
-    Returns:
-        JsonResponse: List of inventory records or empty list on error
+    Endpoint para obtener los movimientos de inventario con filtros y paginación.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     warehouse_filter = request.GET.get('warehouse', '')
@@ -189,7 +160,7 @@ def get_records(request):
                 Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
             )
 
-        # Limit records for performance - return only recent 1000 records
+        # Aplicar paginación
         records = records_query.order_by('-date')[:1000]
         records_data = [{
             'id': r.id,
@@ -208,20 +179,14 @@ def get_records(request):
         return JsonResponse(records_data, safe=False)
 
     except Exception as e:
-        logger.error(f"Error retrieving records: {str(e)}", exc_info=True)
+        logger.error(f"Error en obtener registros: {str(e)}", exc_info=True)
         return JsonResponse([], safe=False)
 
 
 @require_http_methods(["POST"])
 def create_inventory(request):
     """
-    Creates a new inventory.
-
-    Args:
-        request: Django HttpRequest with inventory data
-
-    Returns:
-        JsonResponse: Success or error response
+    Endpoint para crear un nuevo inventario. Verifica que el nombre no exista
     """
     try:
         data = json.loads(request.body)
@@ -229,7 +194,7 @@ def create_inventory(request):
         if not inventory_name:
             return JsonResponse({'ok': False, 'error': 'Nombre de inventario requerido'}, status=400)
 
-        # Check if inventory already exists
+        # Verifica si ya existe un inventario con el mismo nombre que uno existente en la base de datos
         if Product.objects.filter(inventory_name=inventory_name).exists():
             return JsonResponse({'ok': False, 'error': 'El inventario ya existe'}, status=400)
 
@@ -242,15 +207,7 @@ def create_inventory(request):
 @require_http_methods(["GET"])
 def get_product_history(request, product_code, inventory_name='default'):
     """
-    Retrieves the history of movements for a specific product.
-
-    Args:
-        request: Django HttpRequest
-        product_code (str): Product code
-        inventory_name (str): Inventory name
-
-    Returns:
-        JsonResponse: List of product movement records
+    Endpoint para obtener el historial de un producto.
     """
     try:
         records = InventoryRecord.objects.filter(
@@ -279,13 +236,9 @@ def get_product_history(request, product_code, inventory_name='default'):
 @require_http_methods(["GET"])
 def get_summary(request):
     """
-    Retrieves a summary of the inventory.
-
-    Args:
-        request: Django HttpRequest
-
-    Returns:
-        JsonResponse: Inventory summary data
+    Endpoint para obtener el resumen del inventario, incluyendo métricas clave como:
+    - Total de productos
+    - Total de inventario
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     try:
@@ -299,17 +252,10 @@ def get_summary(request):
 @require_http_methods(["GET"])
 def export_analysis(request, inventory_name='default'):
     """
-    Exports product analysis data.
-
-    Args:
-        request: Django HttpRequest
-        inventory_name (str): Inventory name
-
-    Returns:
-        HttpResponse: File response
+    Endpoint para exportar el análisis de productos.
     """
     try:
-        # Get format from query params
+        # Obtener el tipo de formato deseado
         format_type = request.GET.get('format', 'excel')
 
         #
@@ -318,14 +264,14 @@ def export_analysis(request, inventory_name='default'):
         analysis_list = json.loads(analysis_data)
 
         if format_type == 'excel':
-            # Create Excel file with proper column widths
+            # Crear archivo Excel con anchos de columna adecuados
             df = pd.DataFrame(analysis_list)
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='Analysis')
                 workbook = writer.book
                 worksheet = writer.sheets['Analysis']
-                # Set column widths to prevent overlapping
+                # Ajustar el ancho de las columnas para mejorar la legibilidad
                 column_widths = {
                     'A': 15,  # codigo
                     'B': 40,  # nombre_producto

@@ -121,8 +121,11 @@ class InventoryRecord(models.Model):
 
         indexes = [
             models.Index(fields=['product', 'date']),
+            models.Index(fields=['product', 'warehouse']),
+            models.Index(fields=['product', 'warehouse', 'date']),
             models.Index(fields=['warehouse', 'date']),
             models.Index(fields=['document_type', 'document_number']),
+            models.Index(fields=['date']),
         ]
 
     def __str__(self):

@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db.models import Sum, Subquery, OuterRef
+from django.db.models import Max, Sum
 
 from ..models import Product, InventoryRecord, ImportBatch, WarehouseDetail
 
@@ -8,11 +8,12 @@ from ..models import Product, InventoryRecord, ImportBatch, WarehouseDetail
 def get_inventory_summary_data(inventory_name="default"):
     """
     Construye el payload de resumen de inventario para la API.
+    Usa queries SQL masivas para evitar loops lentos N+1.
     """
-    product_qs = Product.objects.filter(inventory_name=inventory_name).only(
-        "id", "code", "description", "initial_unit_cost"
+    product_ids = list(
+        Product.objects.filter(inventory_name=inventory_name).values_list("id", flat=True)
     )
-    total_products = product_qs.count()
+    total_products = len(product_ids)
     total_records = InventoryRecord.objects.filter(
         product__inventory_name=inventory_name
     ).count()
@@ -29,70 +30,68 @@ def get_inventory_summary_data(inventory_name="default"):
             "negative_stock_alerts": [],
         }
 
-    product_ids = list(product_qs.values_list("id", flat=True))
-
-    # Cargar datos por almacén y movimientos en bloque.
-    warehouse_rows = WarehouseDetail.objects.filter(product_id__in=product_ids).values(
-        "product_id", "warehouse"
-    ).annotate(initial_qty=Sum("initial_quantity"))
-    movement_rows = InventoryRecord.objects.filter(product_id__in=product_ids).values(
-        "product_id", "warehouse"
-    ).annotate(movement_qty=Sum("quantity"))
-
-    warehouse_by_product = {}
-    for row in warehouse_rows:
-        product_id = row["product_id"]
-        if product_id not in warehouse_by_product:
-            warehouse_by_product[product_id] = []
-        warehouse_by_product[product_id].append(
-            {
-                "warehouse": row["warehouse"],
-                "initial_qty": row["initial_qty"] or Decimal("0"),
-            }
+    # ── Stock inicial agregado por (producto, almacén) ────────────────────────
+    # initial_qty[product_id][warehouse] = qty
+    initial_map: dict[int, dict[str, Decimal]] = {}
+    for row in WarehouseDetail.objects.filter(product_id__in=product_ids).values(
+        "product_id", "warehouse", "initial_quantity"
+    ):
+        initial_map.setdefault(row["product_id"], {})[row["warehouse"]] = Decimal(
+            row["initial_quantity"] or 0
         )
 
-    movement_map = {
-        (row["product_id"], row["warehouse"]): row["movement_qty"] or Decimal("0")
-        for row in movement_rows
+    # ── Movimientos acumulados por (producto, almacén) ────────────────────────
+    movement_map: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"]): row["qty"] or Decimal("0")
+        for row in InventoryRecord.objects.filter(product_id__in=product_ids)
+        .values("product_id", "warehouse")
+        .annotate(qty=Sum("quantity"))
     }
 
-    latest_unit_cost_subquery = (
-        InventoryRecord.objects.filter(product_id=OuterRef("id"))
-        .order_by("-date", "-id")
-        .values("unit_cost")[:1]
-    )
-    product_rows = Product.objects.filter(id__in=product_ids).annotate(
-        latest_unit_cost=Subquery(latest_unit_cost_subquery)
-    ).values("id", "code", "description", "initial_unit_cost", "latest_unit_cost")
+    # ── Último unit_cost por producto (MAX id = registro más reciente) ────────
+    latest_ids = {
+        row["product_id"]: row["lid"]
+        for row in InventoryRecord.objects.filter(product_id__in=product_ids)
+        .values("product_id")
+        .annotate(lid=Max("id"))
+    }
+    cost_map: dict[int, Decimal] = {
+        row["product_id"]: Decimal(row["unit_cost"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=latest_ids.values()).values(
+            "product_id", "unit_cost"
+        )
+    }
 
-    total_value = Decimal("0")
+    # ── Datos de producto (code, description, initial_unit_cost) ─────────────
+    product_meta = {
+        p["id"]: p
+        for p in Product.objects.filter(id__in=product_ids).values(
+            "id", "code", "description", "initial_unit_cost"
+        )
+    }
+
+    # ── Calcular totales en Python (una sola pasada) ──────────────────────────
     total_quantity = Decimal("0")
+    total_value = Decimal("0")
     negative_stock_alerts = []
 
-    for product in product_rows:
-        # Mantener comportamiento funcional actual: solo almacenes de WarehouseDetail.
+    for pid in product_ids:
         current_stock = Decimal("0")
-        for warehouse_data in warehouse_by_product.get(product["id"], []):
-            warehouse_stock = Decimal(warehouse_data["initial_qty"] or 0)
-            movements_sum = movement_map.get(
-                (product["id"], warehouse_data["warehouse"]),
-                Decimal("0"),
-            )
-            warehouse_stock += movements_sum
-            current_stock += warehouse_stock
+        warehouses = initial_map.get(pid, {})
+        for warehouse, init_qty in warehouses.items():
+            current_stock += init_qty + movement_map.get((pid, warehouse), Decimal("0"))
 
         total_quantity += current_stock
 
-        current_unit_cost = Decimal(
-            product["latest_unit_cost"] or product["initial_unit_cost"] or 0
-        )
-        total_value += current_stock * current_unit_cost
+        meta = product_meta.get(pid, {})
+        unit_cost = cost_map.get(pid) or Decimal(meta.get("initial_unit_cost") or 0)
+        total_value += current_stock * unit_cost
 
         if current_stock < 0:
             negative_stock_alerts.append(
                 {
-                    "codigo": product["code"],
-                    "nombre_producto": product["description"],
+                    "codigo": meta.get("code", ""),
+                    "nombre_producto": meta.get("description", ""),
                     "cantidad_saldo_actual": float(current_stock),
                     "justification": f"Stock actual negativo: {current_stock} unidades.",
                 }

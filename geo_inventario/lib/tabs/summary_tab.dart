@@ -233,7 +233,7 @@ class _SummaryTabPageState extends State<SummaryTabPage>
           value: _totalProducts.toString(),
           icon: Icons.inventory_2_rounded,
           gradient: AppGradients.infoCard,
-          subtitle: '${_analysis.length} SKUs únicos',
+          subtitle: '${_analysis.length} productos únicos',
         ),
         _KpiCard(
           label: 'Valor del inventario',
@@ -308,7 +308,7 @@ class _SummaryTabPageState extends State<SummaryTabPage>
         children: [
           Expanded(flex: 3, child: statusCard),
           const SizedBox(width: AppSpacing.md),
-          Expanded(flex: 2, child: rotCard),
+          Expanded(flex: 3, child: rotCard),
         ],
       );
     });
@@ -442,7 +442,7 @@ class _SummaryTabPageState extends State<SummaryTabPage>
           ..._topValueProducts.asMap().entries.map((e) {
             final index = e.key;
             final item = e.value;
-            final name = (item['nombre_producto'] ?? item['descripcion'] ?? '–')
+            final name = (item['nombre_producto'] ?? item['descripcion'] ?? '-')
                 .toString();
             final qty =
                 (item['cantidad_saldo_actual'] ?? 0.0) as num;

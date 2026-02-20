@@ -268,8 +268,9 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       ),
                       const SizedBox(height: 16),
                       SizedBox(
-                        height: 400,
+                        height: 500,
                         child: SfCircularChart(
+                          margin: EdgeInsets.zero,
                           legend: const Legend(
                             isVisible: true,
                             position: LegendPosition.bottom,
@@ -300,38 +301,36 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                     groupData.values.reduce((a, b) => a + b);
                                 final percentage = (data.value / total * 100)
                                     .toStringAsFixed(1);
-                                final valueFormatted =
-                                    data.value.toStringAsFixed(0);
                                 final shortName = _getShortGroupName(data.key);
-                                return '$shortName\n$valueFormatted ($percentage%)';
+                                return '$shortName\n$percentage%';
                               },
+                              radius: '60%',
                               dataLabelSettings: DataLabelSettings(
                                 isVisible: true,
                                 textStyle: const TextStyle(
                                   color: Colors.black87,
-                                  fontSize: 9,
+                                  fontSize: 10,
                                   fontWeight: FontWeight.w600,
                                 ),
                                 labelPosition: ChartDataLabelPosition.outside,
                                 connectorLineSettings: ConnectorLineSettings(
-                                  type: ConnectorType.curve,
-                                  length: '25%',
-                                  color: Colors.grey.shade600,
-                                  width: 1.5,
+                                  type: ConnectorType.line,
+                                  length: '10%',
+                                  color: Colors.grey.shade500,
+                                  width: 1.2,
                                 ),
                                 useSeriesColor: false,
                                 color: Colors.white,
-                                borderRadius: 6,
+                                borderRadius: 4,
                                 borderWidth: 1,
                                 borderColor: Colors.grey.shade300,
-                                margin: const EdgeInsets.all(3),
+                                margin: const EdgeInsets.symmetric(
+                                    horizontal: 4, vertical: 2),
                                 labelIntersectAction:
                                     LabelIntersectAction.shift,
                               ),
-                              explode: true,
-                              explodeOffset: '3%',
-                              explodeAll: false,
-                              animationDuration: 1500,
+                              explode: false,
+                              animationDuration: 1200,
                               enableTooltip: true,
                               strokeColor: Colors.white,
                               strokeWidth: 2,
@@ -386,7 +385,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                             position: LegendPosition.bottom,
                             textStyle: TextStyle(
                               color: Colors.black87,
-                              fontSize: 10,
+                              fontSize: 8,
                               fontWeight: FontWeight.w500,
                             ),
                             overflowMode: LegendItemOverflowMode.wrap,
@@ -463,13 +462,13 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                     primaryXAxis: const CategoryAxis(
                       labelStyle: TextStyle(
                         color: Colors.black87,
-                        fontSize: 11,
+                        fontSize: 8,
                         fontWeight: FontWeight.w500,
                       ),
                       axisLine: AxisLine(width: 1, color: Colors.grey),
                       majorTickLines: MajorTickLines(size: 0),
                       majorGridLines: MajorGridLines(width: 0),
-                      labelRotation: 45,
+                      labelRotation: 30,
                     ),
                     primaryYAxis: NumericAxis(
                       numberFormat: NumberFormat.currency(
@@ -478,7 +477,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       ),
                       labelStyle: const TextStyle(
                         color: Colors.black87,
-                        fontSize: 11,
+                        fontSize: 8,
                         fontWeight: FontWeight.w500,
                       ),
                       axisLine: const AxisLine(width: 1, color: Colors.grey),

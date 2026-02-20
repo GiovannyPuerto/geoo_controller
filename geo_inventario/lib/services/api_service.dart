@@ -5,7 +5,7 @@ import 'package:geo_inventario/models/monthly_movement.dart';
 class ApiService {
   static const String baseUrl = 'http://127.0.0.1:8000/api/inventory';
 
-  // Summary endpoints
+  // Suamtoria endpoints
   Future<Map<String, dynamic>?> getSummary() async {
     try {
       final response = await http.get(
@@ -22,7 +22,7 @@ class ApiService {
     }
   }
 
-  // Analysis endpoints
+  // Enpoints de analisis y movimientos
   Future<List<Map<String, dynamic>>> getAnalysis({
     String? warehouse,
     String? category,
@@ -35,21 +35,30 @@ class ApiService {
   }) async {
     try {
       final params = <String, String>{};
-      if (warehouse != null && warehouse.isNotEmpty)
+      if (warehouse != null && warehouse.isNotEmpty) {
         params['warehouse'] = warehouse;
-      if (category != null && category.isNotEmpty)
+      }
+      if (category != null && category.isNotEmpty) {
         params['category'] = category;
-      if (rotation != null && rotation.isNotEmpty)
+      }
+      if (rotation != null && rotation.isNotEmpty) {
         params['rotation'] = rotation;
-      if (stagnant != null && stagnant.isNotEmpty)
+      }
+      if (stagnant != null && stagnant.isNotEmpty) {
         params['stagnant'] = stagnant;
-      if (highRotation != null && highRotation.isNotEmpty)
+      }
+      if (highRotation != null && highRotation.isNotEmpty) {
         params['high_rotation'] = highRotation;
-      if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null)
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+      if (dateFrom != null) {
         params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      if (dateTo != null)
+      }
+      if (dateTo != null) {
         params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      }
 
       final uri =
           Uri.parse('$baseUrl/analysis/').replace(queryParameters: params);
@@ -79,18 +88,24 @@ class ApiService {
   }) async {
     try {
       final params = <String, String>{};
-      if (inventoryName != null && inventoryName.isNotEmpty)
+      if (inventoryName != null && inventoryName.isNotEmpty) {
         params['inventory_name'] = inventoryName;
-      if (warehouse != null && warehouse.isNotEmpty)
+      }
+      if (warehouse != null && warehouse.isNotEmpty) {
         params['warehouse'] = warehouse;
-      if (category != null && category.isNotEmpty)
+      }
+      if (category != null && category.isNotEmpty) {
         params['category'] = category;
-      if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null)
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+      if (dateFrom != null) {
         params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      if (dateTo != null)
+      }
+      if (dateTo != null) {
         params['date_to'] = dateTo.toIso8601String().split('T')[0];
-
+      }
       final uri =
           Uri.parse('$baseUrl/records/').replace(queryParameters: params);
       final response = await http.get(
@@ -118,15 +133,19 @@ class ApiService {
   }) async {
     try {
       final params = <String, String>{};
-      if (warehouse != null && warehouse.isNotEmpty)
+      if (warehouse != null && warehouse.isNotEmpty) {
         params['warehouse'] = warehouse;
-      if (category != null && category.isNotEmpty)
+      }
+      if (category != null && category.isNotEmpty) {
         params['category'] = category;
+      }
       if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null)
+      if (dateFrom != null) {
         params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      if (dateTo != null)
+      }
+      if (dateTo != null) {
         params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      }
 
       final uri = Uri.parse('$baseUrl/monthly-movements/')
           .replace(queryParameters: params);
@@ -289,21 +308,30 @@ class ApiService {
   }) async {
     try {
       final params = <String, String>{'format': format};
-      if (warehouse != null && warehouse.isNotEmpty)
+      if (warehouse != null && warehouse.isNotEmpty) {
         params['warehouse'] = warehouse;
-      if (category != null && category.isNotEmpty)
+      }
+
+      if (category != null && category.isNotEmpty) {
         params['category'] = category;
-      if (rotation != null && rotation.isNotEmpty)
+      }
+      if (rotation != null && rotation.isNotEmpty) {
         params['rotation'] = rotation;
-      if (stagnant != null && stagnant.isNotEmpty)
+      }
+      if (stagnant != null && stagnant.isNotEmpty) {
         params['stagnant'] = stagnant;
-      if (highRotation != null && highRotation.isNotEmpty)
+      }
+      if (highRotation != null && highRotation.isNotEmpty) {
         params['high_rotation'] = highRotation;
+      }
       if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null)
+      if (dateFrom != null) {
         params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      if (dateTo != null)
+      }
+
+      if (dateTo != null) {
         params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      }
 
       final uri = Uri.parse('$baseUrl/export-analysis/')
           .replace(queryParameters: params);
@@ -329,15 +357,19 @@ class ApiService {
   }) async {
     try {
       final params = <String, String>{'format': format};
-      if (warehouse != null && warehouse.isNotEmpty)
+      if (warehouse != null && warehouse.isNotEmpty) {
         params['warehouse'] = warehouse;
-      if (category != null && category.isNotEmpty)
+      }
+      if (category != null && category.isNotEmpty) {
         params['category'] = category;
+      }
       if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null)
+      if (dateFrom != null) {
         params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      if (dateTo != null)
+      }
+      if (dateTo != null) {
         params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      }
 
       final uri = Uri.parse('$baseUrl/export-movements/')
           .replace(queryParameters: params);
