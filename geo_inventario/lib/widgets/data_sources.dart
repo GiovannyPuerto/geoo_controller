@@ -1,50 +1,169 @@
 import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
+
+// ─── Helpers compartidos ────────────────────────────────────────────────────
+
+/// Fila alterna: filas pares blancas, impares gris muy suave.
+Color _rowColor(int index) =>
+    index.isEven ? AppColors.surface : AppColors.surfaceVariant;
+
+/// Badge de estado con color de fondo y texto.
+Widget _StatusBadge({
+  required String label,
+  required Color bg,
+  required Color fg,
+  IconData? icon,
+}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(AppRadius.full),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, color: fg, size: 11),
+          const SizedBox(width: 3),
+        ],
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: fg,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─── MovementsDataSource ────────────────────────────────────────────────────
 
 class MovementsDataSource extends DataTableSource {
   final List<Map<String, dynamic>> movements;
 
   MovementsDataSource(this.movements);
 
+  Color _typeColor(String? type) {
+    if (type == null) return AppColors.textMuted;
+    final t = type.toUpperCase();
+    if (t.contains('ENTRADA') || t.contains('COMPRA') || t.contains('IN')) {
+      return AppColors.success;
+    }
+    if (t.contains('SALIDA') || t.contains('VENTA') || t.contains('OUT')) {
+      return AppColors.error;
+    }
+    return AppColors.textMuted;
+  }
+
   @override
   DataRow getRow(int index) {
     final item = movements[index];
+    final docType = item['document_type']?.toString() ?? '';
+    final qty = item['quantity'];
+    final qtyNum = qty is num ? qty.toDouble() : double.tryParse(qty?.toString() ?? '') ?? 0.0;
+    final isNegative = qtyNum < 0;
+
     return DataRow(
+      color: WidgetStateProperty.resolveWith((_) => _rowColor(index)),
       cells: [
+        // Fecha
         DataCell(
           Text(
-            DateFormat('dd/MM/yyyy').format(
-              DateTime.parse(item['date'] ?? ''),
+            _formatDate(item['date']),
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
             ),
           ),
         ),
+        // Producto
         DataCell(
-          Text(item['product_description'] ?? ''),
-        ),
-        DataCell(Text(item['warehouse'] ?? '')),
-        DataCell(Text(item['document_type'] ?? '')),
-        DataCell(Text(item['document_number'] ?? '')),
-        DataCell(
-          Text(item['quantity']?.toString() ?? '0'),
-        ),
-        DataCell(
-          Text(
-            CurrencyFormatter.format(
-              item['unit_cost'] ?? 0,
+          Tooltip(
+            message: item['product_description'] ?? '',
+            child: Text(
+              item['product_description'] ?? '',
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),
+        // Almacén
         DataCell(
           Text(
-            CurrencyFormatter.format(
-              item['total'] ?? 0,
+            item['warehouse'] ?? '',
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ),
+        // Tipo Doc — con badge de color
+        DataCell(
+          _StatusBadge(
+            label: docType.isEmpty ? '—' : docType,
+            bg: _typeColor(docType).withValues(alpha: 0.12),
+            fg: _typeColor(docType),
+          ),
+        ),
+        // Documento
+        DataCell(
+          Text(
+            item['document_number'] ?? '',
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textMuted,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+        // Cantidad — rojo si negativa
+        DataCell(
+          Text(
+            qtyNum.toStringAsFixed(0),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isNegative ? AppColors.error : AppColors.textPrimary,
+            ),
+          ),
+        ),
+        // Costo unitario
+        DataCell(
+          Text(
+            CurrencyFormatter.format(item['unit_cost'] ?? 0),
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ),
+        // Total
+        DataCell(
+          Text(
+            CurrencyFormatter.format(item['total'] ?? 0),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary,
             ),
           ),
         ),
       ],
     );
+  }
+
+  String _formatDate(dynamic raw) {
+    if (raw == null) return '—';
+    try {
+      return DateFormat('dd/MM/yyyy').format(DateTime.parse(raw.toString()));
+    } catch (_) {
+      return raw.toString();
+    }
   }
 
   @override
@@ -57,97 +176,153 @@ class MovementsDataSource extends DataTableSource {
   int get selectedRowCount => 0;
 }
 
+// ─── AnalysisDataSource ─────────────────────────────────────────────────────
+
 class AnalysisDataSource extends DataTableSource {
   final List<Map<String, dynamic>> analysis;
 
   AnalysisDataSource(this.analysis);
 
-  Color _getRotationColor(String rotation) {
+  Widget _rotationBadge(String rotation) {
     switch (rotation) {
       case 'Activo':
-        return Colors.green;
+        return _StatusBadge(
+          label: 'Activo',
+          bg: AppColors.successLight,
+          fg: AppColors.successDark,
+          icon: Icons.check_circle_rounded,
+        );
       case 'Estancado':
-        return Colors.orange;
+        return _StatusBadge(
+          label: 'Estancado',
+          bg: AppColors.warningLight,
+          fg: AppColors.warningDark,
+          icon: Icons.hourglass_bottom_rounded,
+        );
       case 'Obsoleto':
-        return Colors.red;
+        return _StatusBadge(
+          label: 'Obsoleto',
+          bg: AppColors.errorLight,
+          fg: AppColors.errorDark,
+          icon: Icons.cancel_rounded,
+        );
       default:
-        return Colors.black;
+        return _StatusBadge(
+          label: rotation,
+          bg: AppColors.surfaceVariant,
+          fg: AppColors.textMuted,
+        );
     }
   }
 
-  Color _getStagnantColor(String stagnant) {
-    return stagnant == 'Sí' ? Colors.red : Colors.green;
-  }
-
-  Color _getHighRotationColor(String highRotation) {
-    return highRotation == 'Sí' ? Colors.green : Colors.grey;
+  Widget _boolBadge(String value, {required bool positiveIsGood}) {
+    final isYes = value == 'Sí';
+    final isGood = positiveIsGood ? isYes : !isYes;
+    return _StatusBadge(
+      label: value,
+      bg: isGood
+          ? AppColors.successLight
+          : AppColors.surfaceVariant,
+      fg: isGood
+          ? AppColors.successDark
+          : AppColors.textMuted,
+      icon: isGood ? Icons.check_rounded : null,
+    );
   }
 
   @override
   DataRow getRow(int index) {
     final item = analysis[index];
+    final qty = item['cantidad_saldo_actual'];
+    final qtyNum = qty is num ? qty.toDouble() : double.tryParse(qty?.toString() ?? '') ?? 0.0;
+    final isNegative = qtyNum < 0;
+
     return DataRow(
+      color: WidgetStateProperty.resolveWith((_) => _rowColor(index)),
       cells: [
-        DataCell(Text(item['codigo'] ?? '')),
-        DataCell(
-          Text(item['nombre_producto'] ?? ''),
-        ),
-        DataCell(Text(item['grupo'] ?? '')),
+        // Código
         DataCell(
           Text(
-            item['cantidad_saldo_actual']?.toString() ?? '0',
-            style: TextStyle(
-              color: (item['cantidad_saldo_actual'] is num &&
-                      item['cantidad_saldo_actual'] < 0)
-                  ? Colors.red
-                  : Colors.black,
-              fontWeight: (item['cantidad_saldo_actual'] is num &&
-                      item['cantidad_saldo_actual'] < 0)
-                  ? FontWeight.bold
-                  : FontWeight.normal,
+            item['codigo'] ?? '',
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textMuted,
+              fontFamily: 'monospace',
             ),
           ),
         ),
+        // Nombre producto
         DataCell(
-          Text(
-            CurrencyFormatter.format(
-              item['valor_saldo_actual'] ?? 0,
+          Tooltip(
+            message: item['nombre_producto'] ?? '',
+            child: Text(
+              item['nombre_producto'] ?? '',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textPrimary,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),
+        // Grupo
         DataCell(
           Text(
-            CurrencyFormatter.format(
-              item['costo_unitario'] ?? 0,
+            item['grupo'] ?? '',
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        // Cantidad saldo — rojo si negativa
+        DataCell(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: isNegative
+                ? BoxDecoration(
+                    color: AppColors.errorLight,
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  )
+                : null,
+            child: Text(
+              qtyNum.toStringAsFixed(0),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isNegative ? FontWeight.bold : FontWeight.normal,
+                color: isNegative ? AppColors.error : AppColors.textPrimary,
+              ),
             ),
           ),
         ),
+        // Valor saldo
         DataCell(
           Text(
-            item['estancado'] ?? 'No',
-            style: TextStyle(
-              color: _getStagnantColor(item['estancado'] ?? 'No'),
-              fontWeight: FontWeight.bold,
+            CurrencyFormatter.format(item['valor_saldo_actual'] ?? 0),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
             ),
           ),
         ),
+        // Costo unitario
         DataCell(
           Text(
-            item['rotacion'] ?? 'Activo',
-            style: TextStyle(
-              color: _getRotationColor(item['rotacion'] ?? 'Activo'),
-              fontWeight: FontWeight.bold,
-            ),
+            CurrencyFormatter.format(item['costo_unitario'] ?? 0),
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ),
+        // Estancado — badge amarillo/gris
         DataCell(
-          Text(
-            item['alta_rotacion'] ?? 'No',
-            style: TextStyle(
-              color: _getHighRotationColor(item['alta_rotacion'] ?? 'No'),
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          _boolBadge(item['estancado'] ?? 'No', positiveIsGood: false),
+        ),
+        // Rotación — badge con color semántico
+        DataCell(
+          _rotationBadge(item['rotacion'] ?? 'Activo'),
+        ),
+        // Alta rotación — badge verde/gris
+        DataCell(
+          _boolBadge(item['alta_rotacion'] ?? 'No', positiveIsGood: true),
         ),
       ],
     );

@@ -10,6 +10,8 @@ import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:geo_inventario/services/api_service.dart';
+import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
@@ -39,6 +41,28 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   @override
   void initState() {
     super.initState();
+    inventoryRefreshNotifier.addListener(_onExternalRefresh);
+    _loadAnalysisData();
+  }
+
+  @override
+  void dispose() {
+    inventoryRefreshNotifier.removeListener(_onExternalRefresh);
+    super.dispose();
+  }
+
+  /// Se llama cuando el Dashboard sube un Excel exitosamente.
+  /// Resetea los filtros para mostrar todos los datos actualizados.
+  void _onExternalRefresh() {
+    setState(() {
+      selectedDateRange = null;
+      searchQuery = null;
+      selectedGroup = null;
+      selectedRotation = null;
+      selectedStagnant = null;
+      selectedHighRotation = null;
+      selectedWarehouse = null;
+    });
     _loadAnalysisData();
   }
 
@@ -83,58 +107,81 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (filteredAnalysis.isEmpty) {
-      return Center(
+      return const Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.analytics_sharp, size: 80, color: Colors.grey[400]),
-            const SizedBox(height: 20),
-            const Text(
-              'No hay datos de análisis disponibles',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Carga archivos de inventario para ver el análisis',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-              textAlign: TextAlign.center,
+            CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
+            SizedBox(height: AppSpacing.md),
+            Text(
+              'Cargando análisis…',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 14),
             ),
           ],
         ),
       );
     }
 
+    if (filteredAnalysis.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxxl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.xl),
+                ),
+                child: const Icon(Icons.analytics_outlined,
+                    size: 44, color: AppColors.textDisabled),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              const Text(
+                'Sin datos de análisis',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              const Text(
+                'Carga archivos de inventario para ver el análisis de productos.',
+                style: TextStyle(
+                    fontSize: 14, color: AppColors.textMuted, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return RefreshIndicator(
+      color: AppColors.primary,
       onRefresh: _loadAnalysisData,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Análisis de Productos',
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 22,
                 fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 16),
-            // Charts
+            const SizedBox(height: AppSpacing.lg),
             _buildAnalysisCharts(),
-            const SizedBox(height: 24),
-            // Negative Stock Alerts
+            const SizedBox(height: AppSpacing.lg),
             _buildNegativeStockAlerts(),
-            const SizedBox(height: 24),
-            // Table
+            const SizedBox(height: AppSpacing.lg),
             _buildAnalysisTable(),
           ],
         ),
@@ -256,7 +303,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                 final valueFormatted =
                                     data.value.toStringAsFixed(0);
                                 final shortName = _getShortGroupName(data.key);
-                                return '$shortName\n$valueFormatted (${percentage}%)';
+                                return '$shortName\n$valueFormatted ($percentage%)';
                               },
                               dataLabelSettings: DataLabelSettings(
                                 isVisible: true,
@@ -361,7 +408,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                     rotationData.values.reduce((a, b) => a + b);
                                 final percentage = (data.value / total * 100)
                                     .toStringAsFixed(1);
-                                return '${data.key}\n${data.value} (${percentage}%)';
+                                return '${data.key}\n${data.value} ($percentage%)';
                               },
                               dataLabelSettings: DataLabelSettings(
                                 isVisible: true,
@@ -509,49 +556,108 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         .where((item) => item['negative_stock_alert'] == true)
         .toList();
 
-    if (negativeStockItems.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (negativeStockItems.isEmpty) return const SizedBox.shrink();
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.report_problem_rounded,
+                  size: 18, color: AppColors.error),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'Alertas de stock negativo (${negativeStockItems.length})',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.error,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1, color: AppColors.border),
+          const SizedBox(height: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            margin: const EdgeInsets.only(bottom: AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.errorLight,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: const Row(
               children: [
-                Icon(Icons.warning, color: Colors.red),
-                const SizedBox(width: 8),
-                Text(
-                  'Alertas de Stock Negativo (${negativeStockItems.length})',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red,
+                Icon(Icons.info_outline_rounded,
+                    color: AppColors.errorDark, size: 15),
+                SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Los siguientes productos tienen saldo negativo y requieren revisión.',
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.errorDark, height: 1.4),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 200,
-              child: ListView.builder(
-                itemCount: negativeStockItems.length,
-                itemBuilder: (context, index) {
-                  final item = negativeStockItems[index];
-                  return ListTile(
-                    leading: Icon(Icons.error, color: Colors.red),
-                    title: Text(item['nombre_producto'] ?? ''),
-                    subtitle: Text(
-                        'Código: ${item['codigo']} - Justificación: ${item['justification'] ?? 'N/A'}'),
-                    dense: true,
-                  );
-                },
-              ),
+          ),
+          SizedBox(
+            height: 200,
+            child: ListView.builder(
+              itemCount: negativeStockItems.length,
+              itemBuilder: (context, index) {
+                final item = negativeStockItems[index];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: AppColors.errorLight,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                    border: Border.all(
+                        color: AppColors.error.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.arrow_downward_rounded,
+                          color: AppColors.error, size: 15),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item['nombre_producto'] ?? '',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.errorDark,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              'Código: ${item['codigo'] ?? ''} · ${item['justification'] ?? ''}',
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -662,7 +768,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
             }
 
             final groups =
-                ['Todos', ..._getUniqueValues('grupo')].toSet().toList();
+                {'Todos', ..._getUniqueValues('grupo')}.toList();
 
             return AlertDialog(
               title: const Text('Filtros - Análisis de Productos'),
@@ -671,7 +777,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<String>(
-                      value: selectedGroup == null ||
+                      initialValue: selectedGroup == null ||
                               !groups.contains(selectedGroup)
                           ? 'Todos'
                           : selectedGroup,
@@ -683,12 +789,12 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                         );
                       }).toList(),
                       onChanged: (value) {
-                        setState(() => this.selectedGroup =
-                            value == 'Todos' ? null : value);
+                        setState(() =>
+                            selectedGroup = value == 'Todos' ? null : value);
                       },
                     ),
                     DropdownButtonFormField<String>(
-                      value: (selectedRotation != null &&
+                      initialValue: (selectedRotation != null &&
                               selectedRotation!.isNotEmpty)
                           ? selectedRotation
                           : 'Todos',
@@ -706,7 +812,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       },
                     ),
                     DropdownButtonFormField<String>(
-                      value: (selectedStagnant != null &&
+                      initialValue: (selectedStagnant != null &&
                               selectedStagnant!.isNotEmpty)
                           ? selectedStagnant
                           : 'Todos',
@@ -723,7 +829,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       },
                     ),
                     DropdownButtonFormField<String>(
-                      value: (selectedHighRotation != null &&
+                      initialValue: (selectedHighRotation != null &&
                               selectedHighRotation!.isNotEmpty)
                           ? selectedHighRotation
                           : 'Todos',
@@ -914,7 +1020,6 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   }
 
   Future<void> _exportAnalysis(String format) async {
-    final localContext = context;
     try {
       final response = await _apiService.exportAnalysis(
         format: format,
@@ -937,7 +1042,6 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         final String extension = format == 'excel' ? 'xlsx' : format;
         final String filename = 'analysis_export_$timestamp.$extension';
 
-        // Use file picker to save file on all platforms
         String? path = await FilePicker.platform.saveFile(
           dialogTitle: 'Guardar archivo de análisis',
           fileName: filename,
@@ -947,36 +1051,33 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           final file = File(path);
           await file.writeAsBytes(fileBytes);
 
-          if (mounted) {
-            ScaffoldMessenger.of(localContext).showSnackBar(
-              SnackBar(
-                content: Text('Archivo guardado en: ${file.path}'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Archivo guardado en: ${file.path}'),
+              backgroundColor: Colors.green,
+            ),
+          );
         } else {
-          if (mounted) {
-            ScaffoldMessenger.of(localContext).showSnackBar(
-              const SnackBar(
-                content: Text('Guardado cancelado'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Guardado cancelado'),
+              backgroundColor: Colors.orange,
+            ),
+          );
         }
       } else {
         throw Exception('Failed to export analysis');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(localContext).showSnackBar(
-          SnackBar(
-            content: Text('Error al exportar análisis: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al exportar análisis: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 }

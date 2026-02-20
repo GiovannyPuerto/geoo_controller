@@ -1,6 +1,5 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart';
-import 'dart:io';
 import 'package:geo_inventario/preview_page.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +9,7 @@ import 'package:data_table_2/data_table_2.dart';
 import 'dart:typed_data';
 import 'package:file_saver/file_saver.dart';
 import 'package:geo_inventario/services/api_service.dart';
+import 'package:geo_inventario/services/excel_upload_service.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -29,6 +29,7 @@ class _DashboardPageState extends State<DashboardPage>
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   final ApiService _apiService = ApiService();
+  final ExcelUploadService _excelUploadService = ExcelUploadService();
   DateTime? selectedDate;
 
   @override
@@ -714,50 +715,33 @@ class _DashboardPageState extends State<DashboardPage>
   Future<void> _uploadFile() async {
     final localContext = context;
 
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-    );
+    FilePickerResult? result = await _excelUploadService.pickBaseFile();
 
     if (result != null && result.files.isNotEmpty) {
       final file = result.files.single;
-      if (file != null) {
-        var request = http.MultipartRequest(
-          'POST',
-          Uri.parse('http://127.0.0.1:8000/api/inventory/upload-base/'),
-        );
-        if (file.path != null) {
-          var bytes = File(file.path!).readAsBytesSync();
-          request.files.add(http.MultipartFile.fromBytes('base_file', bytes,
-              filename: file.name));
-        } else if (file.bytes != null) {
-          request.files.add(http.MultipartFile.fromBytes(
-              'base_file', file.bytes!,
-              filename: file.name));
+      final uploadResult = await _excelUploadService.uploadBaseFile(file);
+      if (uploadResult.ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(localContext).showSnackBar(
+            SnackBar(
+              content: Text(
+                uploadResult.message.isNotEmpty
+                    ? uploadResult.message
+                    : 'Archivo subido correctamente.',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
         }
-        var response = await request.send();
-        var responseBody = await response.stream.bytesToString();
-        var data = json.decode(responseBody);
-
-        if (data['ok'] == true) {
-          if (mounted) {
-            ScaffoldMessenger.of(localContext).showSnackBar(
-              const SnackBar(
-                content: Text('Archivo subido correctamente.'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-          _loadData();
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(localContext).showSnackBar(
-              SnackBar(
-                content: Text(data['error'] ?? 'Error al subir el archivo'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
+        _loadData();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(localContext).showSnackBar(
+            SnackBar(
+              content: Text(uploadResult.error ?? 'Error al subir el archivo'),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
       }
     }

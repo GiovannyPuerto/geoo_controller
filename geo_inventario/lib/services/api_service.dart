@@ -207,6 +207,7 @@ class ApiService {
             'ok': jsonResponse['ok'] ?? false,
             'message': jsonResponse['message'] ?? '',
             'error': jsonResponse['error'] ?? '',
+            'summary': jsonResponse['summary'],
           };
         } catch (e) {
           // If response is not JSON, return raw response
@@ -227,6 +228,7 @@ class ApiService {
             'ok': jsonResponse['ok'] ?? false,
             'message': jsonResponse['message'] ?? '',
             'error': jsonResponse['error'] ?? 'Error del servidor',
+            'summary': jsonResponse['summary'],
           };
         } catch (e) {
           return {

@@ -1,821 +1,42 @@
 import logging
-import io
-import re
 import json
-from decimal import Decimal, InvalidOperation
 from datetime import datetime
-from zipfile import BadZipFile
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from io import BytesIO
 import pandas as pd
 
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.db import transaction, IntegrityError
-from django.utils import timezone
-from django.utils.dateparse import parse_date
-from django.db.models import Sum, F, Q, Case, When, DecimalField, Value, Subquery, OuterRef, Exists, Min
-from django.db.models.functions import Coalesce, TruncMonth
-from django.contrib.postgres.aggregates import StringAgg as GroupConcat
-from django.utils.timezone import now
-from dateutil.relativedelta import relativedelta
+from django.db.models import Q
 
-from .models import ImportBatch, Product, InventoryRecord, WarehouseDetail
-from .utils import (
-    clean_number, parse_date, map_localizacion, map_categoria,
-    calculate_file_checksum, parse_document, validate_row_data, clean_text
+from .models import ImportBatch, Product, InventoryRecord
+from .services.analytics_service import (
+    get_inventory_at_date_data,
+    get_monthly_movements_data,
+    get_product_analysis_data,
 )
-
-from django.db.models import Max
+from .services.import_service import procesar_importacion_inventario
+from .services.summary_service import get_inventory_summary_data
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_update_df_columns(df):
-    """
-    Normalizes column names of an update-file DataFrame using a synonym map.
-    Returns the normalized DataFrame and a list of missing required columns.
-    """
-    if df is None:
-        return None, []
-    
-    df.columns = df.columns.str.lower().str.strip()
-    column_mapping = {}
-    synonyms = {
-        'item': ['item', 'codigo', 'code', 'producto', 'cod', 'código'],
-        'desc_item': ['desc_item', 'descripcion', 'description', 'desc', 'producto_desc', 'descripción'],
-        'localizacion': ['localizacion', 'local', 'almacen', 'warehouse', 'location', 'localización'],
-        'categoria': ['categoria', 'category', 'grupo', 'group', 'tipo', 'categoría'],
-        'fecha': ['fecha', 'date', 'fecha_mov', 'fecha_documento', 'fecha_registro'],
-        'documento': ['documento', 'doc', 'document', 'numero_documento', 'número_documento'],
-        'entradas': ['entradas', 'entrada', 'in', 'input', 'ingreso'],
-        'salidas': ['salidas', 'salida', 'out', 'output', 'egreso'],
-        'unitario': ['unitario', 'unit_cost', 'costo_unitario', 'precio_unitario', 'unit', 'costo_unit'],
-        'total': ['total', 'total_cost', 'valor_total', 'monto'],
-        'cantidad': ['cantidad', 'quantity', 'qty', 'cant', 'amount'],
-        'cost_center': ['cost_center', 'centro_costo', 'cc', 'costcenter', 'centro_costo']
-    }
-    
-    for expected, syn_list in synonyms.items():
-        if expected in df.columns:
-            continue
-        for syn in syn_list:
-            if syn in df.columns:
-                column_mapping[syn] = expected
-                break
-    df.rename(columns=column_mapping, inplace=True)
-    
-    required_columns = ['item', 'desc_item', 'localizacion', 'categoria', 'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad']
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    return df, missing_columns
 
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_inventory(request, inventory_name='default'):
     """
-    Updates inventory by processing base files and/or update files.
+    Endpoint HTTP para importación de inventario.
 
-    This function handles the upload and processing of Excel files (.xls or .xlsx) for inventory management.
-    It supports both initial inventory setup (base files) and subsequent updates (update files).
-    The function validates file formats, processes the data, and creates appropriate database records.
-
-    Args:
-        request: Django HttpRequest object containing uploaded files
-        inventory_name (str): Name of the inventory to update (default: 'default')
-
-    Returns:
-        JsonResponse: Success response with batch information and summary, or error response
-
-    Raises:
-        JsonResponse with error details on validation failures or processing errors
+    La lógica de negocio y procesamiento de archivos se delega al
+    servicio `inventory.services.import_service`.
     """
-    #Manejo de error en caso de que el usuario no envie el .xlsx
-    try:
-        inventory_name = str(inventory_name).strip().lower() or 'default'
-
-        # Validate request - base file is required for initial setup, update file for subsequent updates
-        base_file = request.FILES.get('base_file')
-        base_content = b''
-        if base_file:
-            # Validate file format and size
-            if not base_file.name.lower().endswith(('.xls', '.xlsx')):
-                return JsonResponse({'ok': False, 'error': 'Formato de archivo base no válido. Solo se permiten archivos .xls o .xlsx'}, status=400)
-            if base_file.size == 0:
-                return JsonResponse({'ok': False, 'error': 'El archivo base está vacío'}, status=400)
-            base_content = base_file.read()
-
-        update_files = request.FILES.getlist('update_files')
-        update_files_data = []
-        update_content = b''
-        for update_file in update_files:
-            # Validate file format and size
-            if not update_file.name.lower().endswith(('.xls', '.xlsx')):
-                return JsonResponse({'ok': False, 'error': f'Formato de archivo de actualización "{update_file.name}" no válido. Solo se permiten archivos .xls o .xlsx'}, status=400)
-            if update_file.size == 0:
-                return JsonResponse({'ok': False, 'error': f'El archivo de actualización "{update_file.name}" está vacío'}, status=400)
-            file_content = update_file.read()
-            update_files_data.append((update_file.name, file_content))
-            update_content += file_content
-
-        # Check if base file has been uploaded before
-        has_base_data = Product.objects.filter(inventory_name=inventory_name).exists()
-
-        # If base file already exists and user is trying to upload base file again, reject
-        if has_base_data and base_file:
-            return JsonResponse(
-                {'ok': False, 'error': 'El archivo base ya ha sido cargado. Solo puede cargar archivos de actualización.'},
-                status=400
-            )
-
-        if not has_base_data and not base_file:
-            return JsonResponse(
-                {'ok': False, 'error': 'Debe cargar primero el archivo base para inicializar el inventario'},
-                status=400
-            )
-
-        # For update files, ensure we have base data
-        if update_files and not has_base_data:
-            return JsonResponse(
-                {'ok': False, 'error': 'Debe cargar el archivo base antes de cargar archivos de actualización'},
-                status=400
-            )
-
-        if not base_file and not update_files:
-            return JsonResponse(
-                {'ok': False, 'error': 'Debe proporcionar un archivo (base para inicialización o actualización)'},
-                status=400
-            )
-        # Leemos el contenido del archivo
-        try:
-            # contenido_base is already read above if base_file exists
-            # contenido_actulizacion = update_file.read()  # Already read above
-            
-            # Leemos el archivo base con nombres de columnas específicos
-            base_df = None
-            if base_file is not None:
-                # Support both .xlsx and .xls formats
-                if base_file.name.endswith('.xls'):
-                    base_df = pd.read_excel(
-                        io.BytesIO(base_content),
-                        engine='xlrd',
-                        header=0,  # Row 1 contains headers
-                        usecols='A:J',  # Columns A to J (0-9)
-                        names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
-                        dtype={
-                            'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
-                            'codigo': str, 'descripcion': str, 'cantidad': float,
-                            'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
-                        }
-                    )
-                else:
-                    base_df = pd.read_excel(
-                        io.BytesIO(base_content),
-                        header=0,  # Row 1 contains headers
-                        usecols='A:J',  # Columns A to J (0-9)
-                        names=['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total'],
-                        dtype={
-                            'fecha_corte': str, 'mes': str, 'almacen': str, 'grupo': str,
-                            'codigo': str, 'descripcion': str, 'cantidad': float,
-                            'unidad_medida': str, 'costo_unitario': float, 'valor_total': float
-                        }
-                    )
-
-            # datamanejamos los datos para que no sean nulos
-            if base_df is not None:
-                base_df = base_df.dropna(subset=['codigo'])
-                base_df['codigo'] = base_df['codigo'].astype(str).str.strip()
-                # Eliminar ceros a la izquierda de los códigos de producto en archivo base
-                base_df['codigo'] = base_df['codigo'].str.lstrip('0')
-
-
-
-        except BadZipFile as e:
-            logger.error(f"Archivo no es un archivo Excel válido: {str(e)}", exc_info=True)
-            return JsonResponse(
-                {'ok': False, 'error': 'Uno o más archivos no son archivos Excel válidos (.xls o .xlsx). Verifique que los archivos no estén corruptos.'},
-                status=400
-            )
-        except Exception as e:
-            logger.error(f"Error al leer archivos: {str(e)}", exc_info=True)
-            return JsonResponse(
-                {'ok': False, 'error': 'Error al procesar los archivos. Asegúrese de que sean archivos Excel válidos.'},
-                status=400
-            )
-
-        # Calculate checksum based on provided files (order-independent)
-        file_hashes = []
-        if base_content:
-            file_hashes.append(calculate_file_checksum(base_content))
-        for update_content in update_files_data:
-            file_hashes.append(calculate_file_checksum(update_content[1]))  # update_content[1] is the file content
-
-        if file_hashes:
-            # Sort hashes to make checksum order-independent
-            file_hashes.sort()
-            combined_hash_input = ''.join(file_hashes).encode('utf-8')
-            checksum = calculate_file_checksum(combined_hash_input)
-        else:
-            checksum = 'no-files'
-
-        # Create a new import batch
-        batch_file_names = []
-        if base_file:
-            batch_file_names.append(base_file.name)
-        if update_files:
-            batch_file_names.extend([f.name for f in update_files])
-
-        # Check if batch with same checksum already exists and delete it to allow re-import
-        existing_batch = ImportBatch.objects.filter(
-            checksum=checksum,
-            inventory_name=inventory_name
-        ).first()
-        if existing_batch:
-            logger.info(f"Deleting existing batch {existing_batch.id} and its records for re-import")
-            # Delete associated inventory records first
-            InventoryRecord.objects.filter(batch=existing_batch).delete()
-            existing_batch.delete()
-
-        batch = ImportBatch.objects.create(
-            file_name=' + '.join(batch_file_names) if batch_file_names else 'no-files',
-            inventory_name=inventory_name,
-            checksum=checksum
-        )
-
-        base_records_count = 0
-        if base_df is not None:
-            # Limpiamos productos existentes para este inventario solo si estamos cargando un nuevo base
-            # Primero eliminamos registros de inventario para evitar violación de llave foránea
-            InventoryRecord.objects.filter(product__inventory_name=inventory_name).delete()
-            Product.objects.filter(inventory_name=inventory_name).delete()
-            # procesamos el archivo base
-            base_records_count = _process_base_file(base_df, inventory_name)
-
-        # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
-        update_records_count = 0
-        total_duplicates = 0
-        if update_files_data:
-            for file_name, update_content in update_files_data:
-                # Support both .xlsx and .xls formats for update files
-                # Try flexible reading first, then specific column positions
-                update_df = None
-                read_success = False
-
-                # If file appears to be HTML, try parsing it first
-                if file_name.lower().endswith('.xls') and b'<html' in update_content.lower():
-                    logger.info(f"File '{file_name}' appears to be an HTML table, attempting to parse.")
-                    try:
-                        dfs = pd.read_html(io.BytesIO(update_content), encoding='utf-8', header=3)
-                        if dfs:
-                            update_df = dfs[0]
-                            update_df, missing_cols = _normalize_update_df_columns(update_df)
-                            if not missing_cols:
-                                read_success = True
-                                logger.info(f"Successfully parsed HTML file '{file_name}'.")
-                            else:
-                                logger.warning(f"HTML parse missing columns for '{file_name}': {missing_cols}")
-                                update_df = None  # Invalidate df if columns are wrong
-                        else:
-                            logger.warning(f"No tables found in HTML file '{file_name}'.")
-                    except Exception as e:
-                        logger.warning(f"Could not parse file '{file_name}' as HTML: {e}")
-
-                # If not successfully read as HTML, try as Excel (flexible read)
-                if not read_success:
-                    try:
-                        update_df = pd.read_excel(io.BytesIO(update_content), header=3)
-                        update_df, missing_cols = _normalize_update_df_columns(update_df)
-                        if not missing_cols:
-                            read_success = True
-                            logger.info(f"Flexible Excel read successful for '{file_name}'.")
-                        else:
-                            logger.warning(f"Flexible Excel read missing columns for '{file_name}': {missing_cols}")
-                            update_df = None # Invalidate df
-                    except Exception as e:
-                        logger.warning(f"Flexible Excel read failed for '{file_name}': {str(e)}")
-
-                # If flexible read failed, try specific column positions with different headers
-                if not read_success:
-                    header_positions = [0, 1, 2, 3, 4]  # Try row 1 to 5 (indices 0 to 4)
-                    engines = ['xlrd', 'openpyxl', None]  # None lets pandas choose
-
-                    for header_idx in header_positions:
-                        for engine in engines:
-                            try:
-                                kwargs = {
-                                    'header': header_idx,
-                                    'usecols': [0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21, 22],
-                                    'names': [
-                                        'item', 'desc_item', 'localizacion', 'categoria',
-                                        'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total', 'cantidad', 'cost_center'
-                                    ],
-                                    'dtype': {
-                                        'item': str, 'desc_item': str, 'localizacion': str, 'categoria': str,
-                                        'fecha': str, 'documento': str, 'entradas': float, 'salidas': float,
-                                        'unitario': float, 'total': float, 'cantidad': float, 'cost_center': str
-                                    }
-                                }
-                                if engine is not None:
-                                    kwargs['engine'] = engine
-
-                                update_df = pd.read_excel(io.BytesIO(update_content), **kwargs)
-                                read_success = True
-                                logger.info(f"Successfully read update file '{file_name}' with specific columns, engine '{engine}' and header row {header_idx + 1}")
-                                break
-                            except Exception as e:
-                                logger.warning(f"Failed specific read with engine '{engine}' and header {header_idx + 1}: {str(e)}")
-                                continue
-                        if read_success:
-                            break
-
-                if not read_success or update_df is None:
-                    return JsonResponse(
-                        {'ok': False, 'error': f"El archivo de actualización '{file_name}' no se pudo leer. Verifique que sea un archivo Excel válido con la estructura esperada."},
-                        status=400
-                    )
-
-                # Convertir fecha de YYYYMMDD a formato legible
-                update_df['fecha'] = update_df['fecha'].astype(str).str.strip()
-                update_df['fecha'] = update_df['fecha'].apply(lambda x: f"{x[:4]}-{x[4:6]}-{x[6:]}" if len(x) == 8 and x.isdigit() else x)
-
-                # Limpiar documento: extraer solo SA/EA y número
-                update_df['documento'] = update_df['documento'].astype(str).str.strip()
-                update_df['documento'] = update_df['documento'].apply(lambda x: re.sub(r'^[^SAEA]*?(SA|EA)', r'\1', x.upper()) if x else x)
-
-                # Limpiamos datos basura como celdas vacías o nulos
-                update_df = update_df.dropna(subset=['item'])  # Remove rows with no code
-                update_df['item'] = update_df['item'].astype(str).str.strip()
-
-                # Limpiar las columnas 'entradas' y 'salidas' para manejar valores decimales
-                update_df['entradas'] = update_df['entradas'].astype(str).str.strip()
-                update_df['entradas'] = update_df['entradas'].str.replace(',', '.', regex=False)
-                update_df['entradas'] = update_df['entradas'].str.replace('[^0-9.-]', '', regex=True)
-                update_df['entradas'] = pd.to_numeric(update_df['entradas'], errors='coerce').fillna(0)
-
-                update_df['salidas'] = update_df['salidas'].astype(str).str.strip()
-                update_df['salidas'] = update_df['salidas'].str.replace(',', '.', regex=False)
-                update_df['salidas'] = update_df['salidas'].str.replace('[^0-9.-]', '', regex=True)
-                update_df['salidas'] = pd.to_numeric(update_df['salidas'], errors='coerce').fillna(0)
-
-                # Limpiar la columna 'cantidad' para manejar valores no numéricos
-                update_df['cantidad'] = update_df['cantidad'].astype(str).str.strip()
-                update_df['cantidad'] = update_df['cantidad'].str.replace(',', '.', regex=False)
-                update_df['cantidad'] = update_df['cantidad'].str.replace('[^0-9.-]', '', regex=True)
-                update_df['cantidad'] = pd.to_numeric(update_df['cantidad'], errors='coerce').fillna(0)
-
-                records_count, duplicates_count = _process_update_file(batch, update_df, inventory_name)
-                update_records_count += records_count
-                total_duplicates += duplicates_count
-
-        total_imported = base_records_count + update_records_count
-
-        if total_imported == 0:
-            # Si no se importaron los registros mandamos alerta
-            raise ValueError('No se importaron registros válidos')
-
-        # Cargamos la informacion del lote
-        base_rows = len(base_df) if base_df is not None else 0
-        update_rows = 0
-        batch.rows_imported = total_imported
-        batch.rows_total = base_rows + update_rows
-        batch.processed_at = timezone.now()
-        batch.save()
-
-        logger.info(f"Importación exitosa. Lote: {batch.id}, Registros: {total_imported}")
-
-        return JsonResponse({
-            'ok': True,
-            'inventory_name': inventory_name,
-            'batch_id': batch.id,
-            'summary': {
-                'base_records': base_records_count,
-                'update_records': update_records_count,
-                'total_processed': total_imported
-            }
-        })
-
-    except Exception as e:
-        logger.error(f"Error en update_inventory: {str(e)}", exc_info=True)
-        return JsonResponse(
-            {'ok': False, 'error': f"Error al procesar la solicitud: {str(e)}"}, 
-            status=500
-        )
-
-
-def _process_base_file(df, inventory_name):
-    """
-    Processes the base inventory file to create initial product records.
-
-    This function takes a pandas DataFrame from the base Excel file, validates and cleans the data,
-    groups products by code, and creates Product objects in the database. It handles duplicate products
-    across different warehouses by aggregating quantities and values.
-
-    Args:
-        df (pd.DataFrame): DataFrame containing base file data with columns like 'codigo', 'descripcion', etc.
-        inventory_name (str): Name of the inventory to associate products with
-
-    Returns:
-        int: Number of product records processed and created
-
-    Raises:
-        Logs errors for invalid data but continues processing other records
-    """
-    #Creamos la base de datos para los productos
-    products_to_create = []
-    processed_codes = set()
-    records_processed = 0
-    errors = 0
-
-    # Requiere columnas para el archivo base
-    required_columns = ['fecha_corte', 'mes', 'almacen', 'grupo', 'codigo', 'descripcion', 'cantidad', 'unidad_medida', 'costo_unitario', 'valor_total']
-    if not all(col in df.columns for col in required_columns):
-        logger.error(f"Faltan columnas requeridas en el archivo base: {required_columns}")
-        return 0
-
-    # LIMPIAMOS Y VALIDAMOS EL DATAFRAME
-    df = df.dropna(subset=['codigo'])
-    df['codigo'] = df['codigo'].astype(str).str.strip()
-    df['descripcion'] = df['descripcion'].astype(str).str.strip()
-
-    # Filtrar productos sin descripción válida
-    df = df[df['descripcion'].notna() & (df['descripcion'].str.strip() != '')]
-
-    # Agrupar por código de producto para sumar cantidades y valores de productos repetidos en diferentes almacenes
-    # Calcular costo unitario ponderado cuando hay productos en múltiples almacenes
-    def process_group(group):
-        total_quantity = group['cantidad'].sum()
-        total_value = group['valor_total'].sum()
-        if total_quantity != 0:
-            weighted_cost = total_value / total_quantity
-        else:
-            weighted_cost = group['costo_unitario'].iloc[0] if not group.empty else 0
-        
-        return pd.Series({
-            'cantidad': total_quantity,
-            'valor_total': total_value,
-            'costo_unitario': weighted_cost,
-            'almacen': ', '.join(sorted(set(group['almacen']))),
-            'fecha_corte': group['fecha_corte'].iloc[0],
-            'mes': group['mes'].iloc[0],
-            'unidad_medida': group['unidad_medida'].iloc[0]
-        })
-
-    df_grouped = df.groupby(['codigo', 'descripcion', 'grupo']).apply(process_group).reset_index()
-
-
-    # Crear un DataFrame con información detallada por almacén para productos agrupados
-    # Esto permitirá filtrar por almacén en el frontend
-    warehouse_details = []
-    for _, group in df.groupby(['codigo']):
-        for _, row in group.iterrows():
-            warehouse_details.append({
-                'codigo': row['codigo'],
-                'almacen': row['almacen'],
-                'cantidad': row['cantidad'],
-                'valor_total': row['valor_total']
-            })
-
-    # Convertir a DataFrame para facilitar consultas posteriores
-    warehouse_df = pd.DataFrame(warehouse_details)
-
-    # traer todos los codigos de productos existentes de una vez para reducir consultas a la base de datos
-    existing_codes = set(Product.objects.filter(
-        inventory_name=inventory_name
-    ).values_list('code', flat=True))
-
-    # Preparar cada fila agrupada
-    for _, row in df_grouped.iterrows():
-        try:
-            codigo = row['codigo']
-            if not codigo or codigo in processed_codes or codigo in existing_codes:
-                continue
-
-            # traer valores de la fila agrupada
-            cantidad_total = clean_number(row.get('cantidad'))
-            valor_total = clean_number(row.get('valor_total'))
-            costo_unitario = clean_number(row.get('costo_unitario'))
-            descripcion = row.get('descripcion', '').strip()
-
-            # Si cantidad es 0 pero hay valor_total, ajustar para preservar el valor
-            if cantidad_total == 0 and valor_total > 0:
-                if costo_unitario > 0:
-                    cantidad_total = valor_total / costo_unitario
-                else:
-                    # Si no hay costo unitario, asumir costo 1 para preservar valor
-                    costo_unitario = Decimal('1')
-                    cantidad_total = valor_total
-
-            if not descripcion:
-                logger.warning(f"Producto con código {codigo} sin descripción, se omitirá")
-                continue
-
-            products_to_create.append(Product(
-                code=codigo,
-                description=descripcion,
-                group=map_categoria(str(row.get('grupo', '')).strip()),
-                inventory_name=inventory_name,
-                initial_balance=cantidad_total,
-                initial_unit_cost=costo_unitario
-            ))
-
-            processed_codes.add(codigo)
-            records_processed += 1
-
-            # INSERTAMOS EN BLOQUE DE 500
-            if len(products_to_create) >= 500:
-                Product.objects.bulk_create(products_to_create, ignore_conflicts=True)
-                products_to_create = []
-
-        except Exception as e:
-            errors += 1
-            logger.error(f"Error procesando producto {row.get('codigo', '')}: {str(e)}")
-            continue
-
-    # Insertamos los productos restantes
-    if products_to_create:
-        try:
-            Product.objects.bulk_create(products_to_create, ignore_conflicts=True)
-        except Exception as e:
-            logger.error(f"Error en bulk_create: {str(e)}")
-            # individual insertamos los productos restantes
-            for product in products_to_create:
-                try:
-                    product.save(force_insert=True)
-                    records_processed += 1
-                except:
-                    continue
-
-    # Crear detalles por almacén para productos del archivo base
-    warehouse_details_to_create = []
-    for _, row in warehouse_df.iterrows():
-        try:
-            codigo = row['codigo']
-            almacen = row['almacen']
-            cantidad = clean_number(row['cantidad'])
-            valor_total = clean_number(row['valor_total'])
-
-            # Buscar el producto creado
-            try:
-                product = Product.objects.get(code=codigo, inventory_name=inventory_name)
-                warehouse_details_to_create.append(WarehouseDetail(
-                    product=product,
-                    warehouse=almacen,
-                    initial_quantity=cantidad,
-                    initial_value=valor_total
-                ))
-            except Product.DoesNotExist:
-                logger.warning(f"Producto {codigo} no encontrado para crear detalle de almacén")
-                continue
-
-        except Exception as e:
-            logger.error(f"Error creando detalle de almacén para {row.get('codigo', '')}: {str(e)}")
-            continue
-
-    # Insertar detalles de almacén en bloques
-    if warehouse_details_to_create:
-        try:
-            WarehouseDetail.objects.bulk_create(warehouse_details_to_create, ignore_conflicts=True)
-        except Exception as e:
-            logger.error(f"Error en bulk_create de warehouse_details: {str(e)}")
-            # Insertar individualmente en caso de falla
-            for wd in warehouse_details_to_create:
-                try:
-                    wd.save(force_insert=True)
-                except Exception as e2:
-                    logger.error(f"Error saving warehouse detail: {str(e2)}")
-                    continue
-
-    logger.info(f"Procesados {records_processed} productos del archivo base ({errors} errores)")
-    return records_processed
-
-
-def _process_update_file(batch, df, inventory_name):
-    """
-    Processes update files to create inventory movement records.
-
-    This function takes a pandas DataFrame from update Excel files, validates and cleans the data,
-    and creates InventoryRecord objects for each movement. It handles missing products by creating
-    them with zero initial balance if needed. It also detects and counts duplicate records based on
-    the unique_together constraint.
-
-    Args:
-        batch (ImportBatch): The import batch to associate records with
-        df (pd.DataFrame): DataFrame containing update file data
-        inventory_name (str): Name of the inventory
-
-    Returns:
-        tuple: (int, int) Number of inventory records processed and created, number of duplicates found
-
-    Raises:
-        Logs errors for invalid data but continues processing other records
-    """
-    # Creamos la base de datos para movimientos de inventario
-    records_to_create = []
-    records_processed = 0
-    duplicates_count = 0
-    errors = 0
-
-    # Columnas requeridas para el archivo de actualización
-    required_columns = ['item', 'desc_item', 'localizacion', 'categoria', 'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total']
-    if not all(col in df.columns for col in required_columns):
-        logger.error(f"Faltan columnas requeridas en el archivo de actualización: {required_columns}")
-        return 0
-
-    # Limpiamos y validamos los datos del dataframe
-    df = df.dropna(subset=['item', 'fecha', 'documento'])
-    df['item'] = df['item'].astype(str).str.strip()
-
-    # Eliminar ceros a la izquierda de los códigos de producto
-    df['item'] = df['item'].str.lstrip('0')
-
-    # Traemos todos los códigos de los productos existentes para reducir consultas en la base de datos
-    # Solo productos que ya existen del archivo base
-    product_codes = df['item'].unique()
-    products = {p.code: p for p in Product.objects.filter(
-        code__in=product_codes,
-        inventory_name=inventory_name
-    )}
-
-    # Verificar que todos los productos del archivo de actualización existan en el base
-    missing_products = set(product_codes) - set(products.keys())
-    new_products_count = 0
-    if missing_products:
-        print(f"Productos incorporados o agregados al inventario: {sorted(missing_products)}")
-        logger.info(f"Productos incorporados o agregados al inventario: {sorted(missing_products)}")
-        # Para archivos de actualización, permitimos productos que no existen en base
-        # pero los creamos con saldo inicial 0 (solo para movimientos históricos)
-        # Usamos una transacción separada para asegurar que los productos se guarden incluso si falla el procesamiento de registros
-        for missing_code in missing_products:
-            try:
-                # Buscar la primera fila de este producto para obtener descripción y categoría
-                product_row = df[df['item'] == missing_code].iloc[0] if len(df[df['item'] == missing_code]) > 0 else None
-                if product_row is not None:
-                    Product.objects.create(
-                        code=missing_code,
-                        description=product_row.get('desc_item', f'Producto {missing_code}').strip(),
-                        group=map_categoria(str(product_row.get('categoria', '')).strip()),
-                        inventory_name=inventory_name,
-                        initial_balance=0,
-                        initial_unit_cost=0
-                    )
-                    products[missing_code] = Product.objects.get(code=missing_code, inventory_name=inventory_name)
-                    new_products_count += 1
-                    print(f"Creado producto faltante: {missing_code}")
-                    logger.info(f"Creado producto faltante: {missing_code}")
-            except Exception as e:
-                logger.error(f"Error creando producto faltante {missing_code}: {str(e)}")
-                # Filtrar filas de productos que no se pudieron crear
-                df = df[df['item'] != missing_code]
-
-    # Procesamos cada una de las filas
-    for idx, row in df.iterrows():
-        try:
-            codigo = row['item']
-            if not codigo:
-                continue
-
-            # El producto debe existir (ya sea del base o creado arriba)
-            if codigo not in products:
-                logger.warning(f"Producto {codigo} no encontrado en base de datos, omitiendo")
-                errors += 1
-                continue
-
-            product = products[codigo]
-
-            # Documento information - usar el documento ya limpiado
-            doc_info = str(row.get('documento', ''))
-            if doc_info and len(doc_info) >= 2:
-                doc_type = doc_info[:2]  # SA o EA
-                doc_number = doc_info[2:]  # número restante
-            else:
-                doc_type, doc_number = None, None
-
-            # Get quantities - usar la columna 'cantidad' como cantidad final después del movimiento
-            try:
-                final_quantity = clean_number(row.get('cantidad'))
-                # Para calcular el movimiento neto, necesitamos el saldo anterior
-                # Pero como no tenemos el saldo anterior aquí, calculamos el movimiento basado en entradas y salidas
-                entradas = clean_number(row.get('entradas'))
-                salidas = clean_number(row.get('salidas'))
-                quantity = entradas - salidas
-
-                if quantity == 0:
-                    logger.info(f"Skipping row {idx}: quantity is 0 (entradas={entradas}, salidas={salidas})")
-                    continue  # Saltamos registros sin movimiento
-
-                # Traemos costos y totales
-                unit_cost = clean_number(row.get('unitario'))
-                total = clean_number(row.get('total')) or (quantity * unit_cost)
-
-                # Calculate unit_cost from total if missing
-                if unit_cost == 0 and total != 0 and quantity != 0:
-                    unit_cost = total / abs(quantity)
-
-                # FECHA de movimiento - usar la fecha ya convertida
-                date_str = str(row.get('fecha', ''))
-                try:
-                    # Intentar parsear fecha en formato YYYY-MM-DD
-                    date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                except ValueError:
-                    logger.warning(f"Fecha inválida en fila {idx}: {date_str}")
-                    errors += 1
-                    continue
-
-                # Create inventory record - check for duplicates across all batches
-                warehouse = map_localizacion(str(row.get('localizacion', '')).strip())
-                category = map_categoria(str(row.get('categoria', '')).strip())
-                cost_center = str(row.get('cost_center', '')).strip() if pd.notna(row.get('cost_center')) else None
-
-                # Check if record already exists across all batches
-                existing_record = InventoryRecord.objects.filter(
-                    document_type=doc_type,
-                    document_number=doc_number,
-                    product=product,
-                    cost_center=cost_center,
-                    date=date,
-                    warehouse=warehouse
-                ).first()
-
-                if existing_record:
-                    duplicates_count += 1
-                    logger.info(f"Duplicate record skipped: {doc_type}-{doc_number} for product {product.code} on {date}")
-                    continue
-
-                # Creamos el registro de inventario
-                records_to_create.append(InventoryRecord(
-                    batch=batch,
-                    product=product,
-                    warehouse=warehouse,
-                    date=date,
-                    document_type=doc_type,
-                    document_number=doc_number,
-                    quantity=quantity,
-                    unit_cost=unit_cost,
-                    total=total,
-                    category=category,
-                    final_quantity=final_quantity,
-                    cost_center=cost_center
-                ))
-
-                # No actualizamos información del producto desde archivo de actualización
-                # Solo registramos los movimientos
-
-                records_processed += 1
-
-                # INSERTAMOS EN BLOQUES DE 500
-                if len(records_to_create) >= 500:
-                    try:
-                        InventoryRecord.objects.bulk_create(records_to_create, ignore_conflicts=True)
-                        records_to_create = []
-                    except Exception as e:
-                        logger.error(f"Error en bulk_create: {str(e)}")
-                        # INSERTAMOS INDIVIDUALMENTE EN CASO DE FALLA
-                        for rec in records_to_create:
-                            try:
-                                rec.save(force_insert=True)
-                            except Exception as e2:
-                                logger.error(f"Error saving individual record: {str(e2)}")
-                                continue
-                        records_to_create = []
-
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Error en valores numéricos en fila {idx}: {str(e)}")
-                errors += 1
-                continue
-
-        except Exception as e:
-            logger.error(f"Error inesperado al procesar fila {idx}: {str(e)}")
-            errors += 1
-            continue
-
-    # INSERTAMOS LOS REGISTROS RESTANTES
-    if records_to_create:
-        try:
-            InventoryRecord.objects.bulk_create(records_to_create, ignore_conflicts=True)
-        except Exception as e:
-            logger.error(f"Error en bulk_create final: {str(e)}")
-            # INSERTAMOS INDIVIDUALMENTE EN CASO DE FALLA
-            for rec in records_to_create:
-                try:
-                    rec.save(force_insert=True)
-                except Exception as e2:
-                    logger.error(f"Error saving final individual record: {str(e2)}")
-                    continue
-
-    logger.info(f"Procesados {records_processed} registros de movimientos ({duplicates_count} duplicados, {errors} errores)")
-    return records_processed, duplicates_count
-
+    return procesar_importacion_inventario(request, inventory_name)
 
 @require_http_methods(["GET"])
 def get_monthly_movements(request):
     """
-    Retornamos las entradas y salidas por mes y el saldo final de cada mes en inventario
+    Retorna entradas, salidas y saldo de cierre de los últimos 12 meses.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     warehouse_filter = request.GET.get('warehouse', '')
@@ -823,97 +44,13 @@ def get_monthly_movements(request):
     search_filter = request.GET.get('search', '')
 
     try:
-        # Determinamos un periodos de 12 meses de movimientos
-        today = now().date()
-        twelve_months_ago = today - relativedelta(months=11)
-        start_of_period = twelve_months_ago.replace(day=1)
-
-        # Base queryset for filtering
-        base_queryset = InventoryRecord.objects.filter(product__inventory_name=inventory_name)
-
-        # Apply filters
-        if warehouse_filter:
-            base_queryset = base_queryset.filter(warehouse__icontains=warehouse_filter)
-        if category_filter:
-            base_queryset = base_queryset.filter(category__icontains=category_filter)
-        if search_filter:
-            base_queryset = base_queryset.filter(
-                Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
-            )
-
-        # 1. Obtenemos el total inicial de todos los productos (filtered if applicable)
-        if warehouse_filter:
-            # When filtering by warehouse, use WarehouseDetail for accurate initial values per warehouse
-            initial_stock_query = WarehouseDetail.objects.filter(
-                product__inventory_name=inventory_name,
-                warehouse__icontains=warehouse_filter
-            )
-            if category_filter:
-                initial_stock_query = initial_stock_query.filter(product__group__icontains=category_filter)
-            initial_stock_value = initial_stock_query.aggregate(
-                total_initial_value=Sum('initial_value')
-            )['total_initial_value'] or Decimal('0')
-        else:
-            # No warehouse filter, use Product initial balances
-            initial_stock_query = Product.objects.filter(inventory_name=inventory_name)
-            if category_filter:
-                initial_stock_query = initial_stock_query.filter(group__icontains=category_filter)
-            initial_stock_value = initial_stock_query.aggregate(
-                total_initial_value=Sum(F('initial_balance') * F('initial_unit_cost'))
-            )['total_initial_value'] or Decimal('0')
-
-        # 2. Obtenemos el valor total de los movimientos antes de los 12 meses (filtered)
-        past_movements_value = base_queryset.filter(
-            date__lt=start_of_period
-        ).aggregate(
-            total_value=Sum('total')
-        )['total_value'] or Decimal('0')
-
-        # 3. Calcular el saldo inicial para el período
-        # Incluye el stock inicial del archivo base (filtrado por almacén si aplica) más los movimientos pasados
-        starting_balance = initial_stock_value + past_movements_value
-
-        # 4. Obtenga movimientos agregados mensuales de los últimos 12 meses (filtered)
-        monthly_movements = base_queryset.filter(
-            date__gte=start_of_period
-        ).annotate(
-            month=TruncMonth('date')
-        ).values('month').annotate(
-            total_entries=Sum('total', filter=Q(quantity__gt=0)),
-            total_exits=Sum('total', filter=Q(quantity__lt=0))
-        ).order_by('month')
-
-        # 5. Procesar datos y calcular el saldo de cierre de cada mes
-        result_data = []
-        monthly_data = {
-            item['month'].strftime('%Y-%m'): {
-                'entries': item['total_entries'] or Decimal('0'),
-                'exits': abs(item['total_exits'] or Decimal('0'))
-            }
-            for item in monthly_movements
-        }
-
-        current_balance = starting_balance
-        for i in range(12):
-            current_month_date = (twelve_months_ago + relativedelta(months=i))
-            month_key = current_month_date.strftime('%Y-%m')
-
-            month_data = monthly_data.get(month_key, {'entries': Decimal('0'), 'exits': Decimal('0')})
-
-            entries = month_data['entries']
-            exits = month_data['exits']
-
-            current_balance += entries - exits
-
-            result_data.append({
-                'month': month_key,
-                'total_entries': float(entries),
-                'total_exits': float(exits),
-                'closing_balance': float(current_balance)
-            })
-
+        result_data = get_monthly_movements_data(
+            inventory_name=inventory_name,
+            warehouse_filter=warehouse_filter,
+            category_filter=category_filter,
+            search_filter=search_filter,
+        )
         return JsonResponse(result_data, safe=False)
-
     except Exception as e:
         logger.error(f"Error in get_monthly_movements: {str(e)}", exc_info=True)
         return JsonResponse({'error': str(e)}, status=500)
@@ -921,6 +58,9 @@ def get_monthly_movements(request):
 
 @require_http_methods(["GET"])
 def get_product_analysis(request):
+    """
+    Retorna el análisis de productos con filtros de rotación y estancamiento.
+    """
     inventory_name = request.GET.get('inventory_name', 'default')
     category_filter = request.GET.get('category', '')
     warehouse_filter = request.GET.get('warehouse', '')
@@ -933,248 +73,19 @@ def get_product_analysis(request):
     limit = request.GET.get('limit', '')
 
     try:
-        # Parse dates if provided
-        target_date = None
-        if date_to:
-            try:
-                target_date = datetime.strptime(date_to, '%Y-%m-%d').date()
-            except ValueError:
-                pass  # Ignore invalid date
-
-        # Base product query with filters
-        products_query = Product.objects.filter(inventory_name=inventory_name)
-
-        # Apply limit if specified (for exports)
-        if limit:
-            try:
-                limit_int = int(limit)
-                products_query = products_query[:limit_int]
-            except ValueError:
-                pass  # Ignore invalid limit
-
-        if category_filter:
-            products_query = products_query.filter(group__icontains=category_filter)
-
-        # Apply warehouse filter at product level using WarehouseDetail
-        if warehouse_filter:
-            products_query = products_query.filter(
-                warehousedetail__warehouse__icontains=warehouse_filter
-            ).distinct()
-
-        # Get product IDs for bulk queries
-        product_ids = list(products_query.values_list('id', flat=True))
-        if not product_ids:
-            return JsonResponse([], safe=False)
-
-        # BULK QUERY 1: Get last records for all products per warehouse (for current stock calculation)
-        # Note: Warehouse filter is NOT applied here because current stock is total across all warehouses
-        # If target_date is provided, filter records up to that date
-
-        # Get latest record per product per warehouse by date, not by id
-        latest_records_query = InventoryRecord.objects.filter(
-            product_id=OuterRef('product_id'),
-            warehouse=OuterRef('warehouse')
-        ).order_by('-date')
-        if target_date:
-            latest_records_query = latest_records_query.filter(date__lte=target_date)
-
-        last_records_per_warehouse = InventoryRecord.objects.filter(
-            id__in=InventoryRecord.objects.values('product_id', 'warehouse').annotate(
-                latest_id=Subquery(latest_records_query.values('id')[:1])
-            ).values('latest_id')
-        ).select_related('product')
-
-        # Group by product
-        last_records_dict = {}
-        for record in last_records_per_warehouse:
-            product_id = record.product_id
-            if product_id not in last_records_dict:
-                last_records_dict[product_id] = []
-            last_records_dict[product_id].append(record)
-
-        # BULK QUERY 2: Get pre-year sums for all products
-        # If target_date is provided, filter up to target_date
-        pre_year_query = InventoryRecord.objects.filter(
-            product_id__in=product_ids
+        analysis_data = get_product_analysis_data(
+            inventory_name=inventory_name,
+            category_filter=category_filter,
+            warehouse_filter=warehouse_filter,
+            rotation_filter=rotation_filter,
+            stagnant_filter=stagnant_filter,
+            high_rotation_filter=high_rotation_filter,
+            date_from=date_from,
+            date_to=date_to,
+            search_filter=search_filter,
+            limit=limit,
         )
-        if target_date:
-            pre_year_query = pre_year_query.filter(date__lt=target_date.replace(day=1, month=1))
-        else:
-            pre_year_query = pre_year_query.filter(date__year__lt=datetime.now().year)
-
-        pre_year_sums = pre_year_query.values('product_id').annotate(
-            total_quantity=Sum('quantity')
-        )
-
-        pre_year_dict = {item['product_id']: item['total_quantity'] or Decimal('0')
-                        for item in pre_year_sums}
-
-        # BULK QUERY 3: Get monthly movements for current year for all products
-        # If target_date is provided, use that year instead of current year
-        rotation_year = target_date.year if target_date else datetime.now().year
-        monthly_movements = InventoryRecord.objects.filter(
-            product_id__in=product_ids,
-            date__year=rotation_year
-        )
-        if target_date:
-            monthly_movements = monthly_movements.filter(date__lte=target_date)
-
-        monthly_movements = monthly_movements.annotate(month=TruncMonth('date')).values('product_id', 'month').annotate(
-            monthly_total=Sum('quantity')
-        ).order_by('product_id', 'month')
-
-        # Group monthly movements by product
-        monthly_dict = {}
-        for movement in monthly_movements:
-            product_id = movement['product_id']
-            if product_id not in monthly_dict:
-                monthly_dict[product_id] = {}
-            monthly_dict[product_id][movement['month'].month] = movement['monthly_total']
-
-        # BULK QUERY 4: Get warehouses for all products
-        warehouse_details = WarehouseDetail.objects.filter(
-            product_id__in=product_ids
-        ).values('product_id').annotate(
-            warehouses=GroupConcat('warehouse', delimiter=', ', distinct=True)
-        )
-
-        warehouses_dict = {item['product_id']: item['warehouses'] or 'Todos'
-                          for item in warehouse_details}
-
-
-        # BULK QUERY 5: Get warehouse details for current stock calculation
-        warehouse_detail_records = WarehouseDetail.objects.filter(
-            product_id__in=product_ids
-        ).select_related('product')
-
-        warehouse_detail_dict = {}
-        for wd in warehouse_detail_records:
-            product_id = wd.product_id
-            if product_id not in warehouse_detail_dict:
-                warehouse_detail_dict[product_id] = {}
-            warehouse_detail_dict[product_id][wd.warehouse] = wd
-
-        # Process all products in memory
-        analysis_data = []
-        current_year = datetime.now().year
-
-        for product in products_query:
-            try:
-                # Get current stock and cost from last records per warehouse or initial values
-                last_records = last_records_dict.get(product.id, [])
-                warehouse_details = warehouse_detail_dict.get(product.id, {})
-
-                # Calculate current stock by summing final_quantity from last records per warehouse
-                current_stock = Decimal('0')
-                negative_stock_alert = False
-                justification = None
-
-                if last_records:
-                    # Sum final_quantity from the last record per warehouse
-                    for r in last_records:
-                        final_qty = Decimal(r.final_quantity or 0)
-                        current_stock += final_qty
-                        if final_qty < 0:
-                            negative_stock_alert = True
-                            justification = "Stock actual negativo en al menos un almacén."
-                else:
-                    # If no records, use initial quantities from warehouse details
-                    for wd in warehouse_detail_dict.get(product.id, {}).values():
-                        initial_qty = Decimal(wd.initial_quantity or 0)
-                        current_stock += initial_qty
-                        if initial_qty < 0:
-                            negative_stock_alert = True
-                            justification = "Stock inicial negativo en al menos un almacén."
-
-                # Get unit cost from the most recent record across warehouses
-                if last_records:
-                    latest_record = max(last_records, key=lambda r: r.date)
-                    current_unit_cost = Decimal(latest_record.unit_cost or product.initial_unit_cost or 0)
-                else:
-                    current_unit_cost = Decimal(product.initial_unit_cost or 0)
-
-                # Producto consumido
-                is_consumed = (current_stock <= 0)
-
-                # ------------------------------------------#
-                #        ROTACIÓN / ESTANCAMIENTO
-                # ------------------------------------------#
-                pre_year_sum = pre_year_dict.get(product.id, Decimal('0'))
-                balance_pre_year = Decimal(product.initial_balance or 0) + pre_year_sum
-
-                movements_by_month = monthly_dict.get(product.id, {})
-
-                monthly_balances = []
-                running_balance = balance_pre_year
-                for m in range(1, 13):
-                    running_balance += movements_by_month.get(m, Decimal('0'))
-                    monthly_balances.append(running_balance)
-
-                all_zero_balance = all(b == 0 for b in monthly_balances)
-                unique_balances = set(monthly_balances)
-
-                # Rotación logic
-                if all_zero_balance and balance_pre_year == 0:
-                    rotation = "Activo"
-                elif all_zero_balance and balance_pre_year > 0:
-                    rotation = "Obsoleto"
-                elif len(unique_balances) == 1 and monthly_balances[0] > 0:
-                    rotation = "Obsoleto"
-                elif len(monthly_balances) >= 3 and len(set(monthly_balances[-3:])) == 1 and monthly_balances[-1] > 0:
-                    rotation = "Estancado"
-                else:
-                    rotation = "Activo"
-
-                is_stagnant = rotation in ["Estancado", "Obsoleto"]
-
-                consecutive_changes = sum(
-                    1 for i in range(len(monthly_balances)-1)
-                    if monthly_balances[i] != monthly_balances[i+1]
-                )
-                high_rotation = 'Sí' if consecutive_changes >= 2 else 'No'
-
-                # Apply filters
-                if rotation_filter and rotation != rotation_filter:
-                    continue
-                if stagnant_filter:
-                    if stagnant_filter == 'Sí' and not is_stagnant:
-                        continue
-                    elif stagnant_filter == 'No' and is_stagnant:
-                        continue
-                if high_rotation_filter:
-                    if high_rotation_filter == 'Sí' and high_rotation != 'Sí':
-                        continue
-                    elif high_rotation_filter == 'No' and high_rotation == 'Sí':
-                        continue
-                if search_filter:
-                    search_lower = search_filter.lower()
-                    if not (search_lower in product.code.lower() or search_lower in product.description.lower()):
-                        continue
-
-                # Get warehouses for this product
-                product_warehouses = warehouses_dict.get(product.id, 'Todos')
-
-                analysis_data.append({
-                    'codigo': product.code,
-                    'nombre_producto': product.description,
-                    'grupo': product.group,
-                    'cantidad_saldo_actual': float(current_stock),
-                    'valor_saldo_actual': float(current_stock * current_unit_cost),
-                    'costo_unitario': float(current_unit_cost),
-                    'consumed': 'Sí' if is_consumed else 'No',
-                    'estancado': 'Sí' if is_stagnant else 'No',
-                    'rotacion': rotation,
-                    'alta_rotacion': high_rotation,
-                    'almacen': product_warehouses,
-                    'has_negative_stock_alert': negative_stock_alert,
-                })
-
-            except Exception as e:
-                logger.error(f"Error processing product {product.code}: {str(e)}", exc_info=True)
-                continue
-
         return JsonResponse(analysis_data, safe=False)
-
     except Exception as e:
         logger.error(f"Error in product analysis: {str(e)}", exc_info=True)
         return JsonResponse([], safe=False)
@@ -1256,7 +167,13 @@ def get_records(request):
     search_filter = request.GET.get('search', '')
 
     try:
-        records_query = InventoryRecord.objects.filter(product__inventory_name=inventory_name).select_related('product', 'batch')
+        records_query = InventoryRecord.objects.filter(
+            product__inventory_name=inventory_name
+        ).select_related('product', 'batch').only(
+            'id', 'warehouse', 'date', 'document_type', 'document_number',
+            'quantity', 'unit_cost', 'total', 'category',
+            'product__code', 'product__description', 'batch__id'
+        )
 
         # Aplicar filtros
         if warehouse_filter:
@@ -1372,58 +289,8 @@ def get_summary(request):
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     try:
-        total_products = Product.objects.filter(inventory_name=inventory_name).count()
-        total_records = InventoryRecord.objects.filter(product__inventory_name=inventory_name).count()
-        total_batches = ImportBatch.objects.filter(inventory_name=inventory_name).count()
-
-        # Calculate total_value and total_quantity as sum of current stock values from product analysis
-        total_value = Decimal('0')
-        total_quantity = Decimal('0')
-        negative_stock_alerts = []
-        products = Product.objects.filter(inventory_name=inventory_name)
-        for product in products:
-            # Calculate current stock by summing initial balance + all movements per warehouse, then sum across warehouses
-            warehouse_details = WarehouseDetail.objects.filter(product=product)
-            current_stock = Decimal('0')
-            for wd in warehouse_details:
-                warehouse_stock = Decimal(wd.initial_quantity or 0)
-                movements_sum = InventoryRecord.objects.filter(
-                    product=product, warehouse=wd.warehouse
-                ).aggregate(sum=Sum('quantity'))['sum'] or Decimal('0')
-                warehouse_stock += movements_sum
-                current_stock += warehouse_stock
-
-            # Accumulate total_quantity
-            total_quantity += current_stock
-
-            # Get unit cost from the most recent record across warehouses
-            last_records = InventoryRecord.objects.filter(product=product).order_by('-date')[:1]
-            if last_records:
-                current_unit_cost = Decimal(last_records[0].unit_cost or product.initial_unit_cost or 0)
-            else:
-                current_unit_cost = Decimal(product.initial_unit_cost or 0)
-
-            # Add to total value
-            total_value += current_stock * current_unit_cost
-
-            # Check for negative stock alerts
-            if current_stock < 0:
-                negative_stock_alerts.append({
-                    'codigo': product.code,
-                    'nombre_producto': product.description,
-                    'cantidad_saldo_actual': float(current_stock),
-                    'justification': f"Stock actual negativo: {current_stock} unidades."
-                })
-
-        return JsonResponse({
-            'inventory_name': inventory_name,
-            'total_products': total_products,
-            'total_records': total_records,
-            'total_batches': total_batches,
-            'total_quantity': float(total_quantity),
-            'total_value': float(total_value),
-            'negative_stock_alerts': negative_stock_alerts,
-        })
+        summary_data = get_inventory_summary_data(inventory_name=inventory_name)
+        return JsonResponse(summary_data)
     except Exception as e:
         logger.error(f"Error retrieving summary: {str(e)}", exc_info=True)
         return JsonResponse({'error': str(e)}, status=500)
@@ -1479,6 +346,29 @@ def export_analysis(request, inventory_name='default'):
             response['Content-Disposition'] = f'attachment; filename="inventory_analysis_{inventory_name}.xlsx"'
             return response
         elif format_type == 'pdf':
+            try:
+                from reportlab.lib import colors
+                from reportlab.lib.pagesizes import A4, landscape
+                from reportlab.platypus import (
+                    Paragraph,
+                    SimpleDocTemplate,
+                    Spacer,
+                    Table,
+                    TableStyle,
+                )
+                from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            except ImportError:
+                return JsonResponse(
+                    {
+                        'error': (
+                            'Exportación PDF no disponible: falta la librería '
+                            '"reportlab". Instala dependencias con '
+                            '`pip install -r backend_inventario/requirements.txt`.'
+                        )
+                    },
+                    status=503
+                )
+
             # Create PDF file in landscape orientation
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
@@ -1653,6 +543,29 @@ def export_movements(request, inventory_name='default'):
             df.to_excel(response, index=False)
             return response
         elif format_type == 'pdf':
+            try:
+                from reportlab.lib import colors
+                from reportlab.lib.pagesizes import A4, landscape
+                from reportlab.platypus import (
+                    Paragraph,
+                    SimpleDocTemplate,
+                    Spacer,
+                    Table,
+                    TableStyle,
+                )
+                from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            except ImportError:
+                return JsonResponse(
+                    {
+                        'error': (
+                            'Exportación PDF no disponible: falta la librería '
+                            '"reportlab". Instala dependencias con '
+                            '`pip install -r backend_inventario/requirements.txt`.'
+                        )
+                    },
+                    status=503
+                )
+
             # Create PDF file in landscape orientation
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
@@ -1824,19 +737,7 @@ def upload_base_file(request, inventory_name='default'):
 @require_http_methods(["GET"])
 def get_inventory_at_date(request):
     """
-    Calculates the inventory state (quantity and value) at a specific date.
-
-    Args:
-        request: Django HttpRequest with query parameters
-
-    Query Parameters:
-        inventory_name (str): Name of the inventory (default: 'default')
-        date (str): Date in YYYY-MM-DD format (required)
-        warehouse (str): Filter by warehouse (optional)
-        category (str): Filter by category (optional)
-
-    Returns:
-        JsonResponse: Inventory summary at the specified date
+    Calcula el estado del inventario (cantidad y valor) para una fecha.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     date_str = request.GET.get('date', '')
@@ -1852,117 +753,14 @@ def get_inventory_at_date(request):
         return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
 
     try:
-        # Base product query with filters
-        products_query = Product.objects.filter(inventory_name=inventory_name)
-
-        if category_filter:
-            products_query = products_query.filter(group__icontains=category_filter)
-
-        # Apply warehouse filter at product level using WarehouseDetail
-        if warehouse_filter:
-            products_query = products_query.filter(
-                warehousedetail__warehouse__icontains=warehouse_filter
-            ).distinct()
-
-        product_ids = list(products_query.values_list('id', flat=True))
-        if not product_ids:
-            return JsonResponse({
-                'date': date_str,
-                'total_quantity': 0.0,
-                'total_value': 0.0,
-                'products': []
-            })
-
-        # Get warehouse details for initial quantities
-        warehouse_details = WarehouseDetail.objects.filter(
-            product_id__in=product_ids
-        ).select_related('product')
-
-        warehouse_detail_dict = {}
-        for wd in warehouse_details:
-            product_id = wd.product_id
-            if product_id not in warehouse_detail_dict:
-                warehouse_detail_dict[product_id] = {}
-            warehouse_detail_dict[product_id][wd.warehouse] = wd
-
-        # Get movements up to the target date
-        movements_up_to_date = InventoryRecord.objects.filter(
-            product_id__in=product_ids,
-            date__lte=target_date
-        ).select_related('product')
-
-        # Group movements by product and warehouse
-        movements_dict = {}
-        for record in movements_up_to_date:
-            product_id = record.product_id
-            warehouse = record.warehouse
-            if product_id not in movements_dict:
-                movements_dict[product_id] = {}
-            if warehouse not in movements_dict[product_id]:
-                movements_dict[product_id][warehouse] = []
-            movements_dict[product_id][warehouse].append(record)
-
-        # Get latest unit cost up to target date for each product
-        latest_costs = InventoryRecord.objects.filter(
-            product_id__in=product_ids,
-            date__lte=target_date
-        ).values('product_id').annotate(
-            latest_cost=Max('unit_cost')
+        data = get_inventory_at_date_data(
+            inventory_name=inventory_name,
+            date_str=date_str,
+            target_date=target_date,
+            warehouse_filter=warehouse_filter,
+            category_filter=category_filter,
         )
-
-        latest_cost_dict = {item['product_id']: item['latest_cost'] or Decimal('0')
-                           for item in latest_costs}
-
-        # Calculate inventory at date
-        total_quantity = Decimal('0')
-        total_value = Decimal('0')
-        products_data = []
-
-        for product in products_query:
-            product_quantity = Decimal('0')
-            product_value = Decimal('0')
-
-            # Get warehouses for this product (filtered if warehouse_filter is set)
-            product_warehouses = warehouse_detail_dict.get(product.id, {})
-
-            # If warehouse filter is applied, only consider those warehouses
-            if warehouse_filter:
-                product_warehouses = {k: v for k, v in product_warehouses.items()
-                                    if warehouse_filter.lower() in k.lower()}
-
-            for warehouse, wd in product_warehouses.items():
-                # Start with initial quantity
-                warehouse_quantity = Decimal(wd.initial_quantity or 0)
-
-                # Add movements up to target date
-                warehouse_movements = movements_dict.get(product.id, {}).get(warehouse, [])
-                for record in warehouse_movements:
-                    warehouse_quantity += Decimal(record.quantity or 0)
-
-                product_quantity += warehouse_quantity
-
-            # Get unit cost (latest before or on target date, or initial)
-            unit_cost = latest_cost_dict.get(product.id, Decimal(product.initial_unit_cost or 0))
-
-            product_value = product_quantity * unit_cost
-            total_quantity += product_quantity
-            total_value += product_value
-
-            products_data.append({
-                'codigo': product.code,
-                'nombre_producto': product.description,
-                'grupo': product.group,
-                'cantidad': float(product_quantity),
-                'valor': float(product_value),
-                'costo_unitario': float(unit_cost),
-            })
-
-        return JsonResponse({
-            'date': date_str,
-            'total_quantity': float(total_quantity),
-            'total_value': float(total_value),
-            'products': products_data
-        })
+        return JsonResponse(data)
 
     except Exception as e:
         logger.error(f"Error calculating inventory at date: {str(e)}", exc_info=True)

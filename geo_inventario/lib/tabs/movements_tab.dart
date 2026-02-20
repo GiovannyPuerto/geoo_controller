@@ -10,6 +10,8 @@ import 'package:intl/intl.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:geo_inventario/models/monthly_movement.dart';
 import 'package:geo_inventario/services/api_service.dart';
+import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
 
@@ -41,6 +43,25 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   @override
   void initState() {
     super.initState();
+    inventoryRefreshNotifier.addListener(_onExternalRefresh);
+    _loadAllMovementsData();
+  }
+
+  @override
+  void dispose() {
+    inventoryRefreshNotifier.removeListener(_onExternalRefresh);
+    super.dispose();
+  }
+
+  /// Se llama cuando el Dashboard sube un Excel exitosamente.
+  /// Resetea los filtros para mostrar todos los datos actualizados.
+  void _onExternalRefresh() {
+    setState(() {
+      selectedDateRange = null;
+      selectedWarehouse = null;
+      selectedGroup = null;
+      searchQuery = null;
+    });
     _loadAllMovementsData();
   }
 
@@ -52,11 +73,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     });
 
     try {
-      // Load all movements for filter options
-      final allMovementsData = await _apiService.getMovements();
-
-      // Load monthly movements for chart
-      final monthlyMovementsData = await _apiService.getMonthlyMovements();
+      final results = await Future.wait([
+        _apiService.getMovements(),
+        _apiService.getMonthlyMovements(),
+      ]);
+      final allMovementsData = results[0] as List<Map<String, dynamic>>;
+      final monthlyMovementsData = results[1] as List<MonthlyMovement>;
 
       if (mounted) {
         setState(() {
@@ -72,12 +94,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         setState(() {
           isLoading = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al cargar movimientos: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        context.showErrorSnackBar('Error al cargar movimientos: ${e.toString()}');
       }
     }
   }
@@ -87,22 +104,24 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     if (!mounted) return;
 
     try {
-      final filteredMovementsData = await _apiService.getMovements(
-        warehouse: selectedWarehouse,
-        category: selectedGroup,
-        search: searchQuery,
-        dateFrom: selectedDateRange?.start,
-        dateTo: selectedDateRange?.end,
-      );
-
-      final filteredMonthlyMovementsData =
-          await _apiService.getMonthlyMovements(
-        warehouse: selectedWarehouse,
-        category: selectedGroup,
-        search: searchQuery,
-        dateFrom: selectedDateRange?.start,
-        dateTo: selectedDateRange?.end,
-      );
+      final results = await Future.wait([
+        _apiService.getMovements(
+          warehouse: selectedWarehouse,
+          category: selectedGroup,
+          search: searchQuery,
+          dateFrom: selectedDateRange?.start,
+          dateTo: selectedDateRange?.end,
+        ),
+        _apiService.getMonthlyMovements(
+          warehouse: selectedWarehouse,
+          category: selectedGroup,
+          search: searchQuery,
+          dateFrom: selectedDateRange?.start,
+          dateTo: selectedDateRange?.end,
+        ),
+      ]);
+      final filteredMovementsData = results[0] as List<Map<String, dynamic>>;
+      final filteredMonthlyMovementsData = results[1] as List<MonthlyMovement>;
 
       if (mounted) {
         setState(() {
@@ -113,286 +132,419 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(localContext).showSnackBar(
-          SnackBar(
-            content: Text('Error al cargar movimientos: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        localContext.showErrorSnackBar('Error al cargar movimientos: ${e.toString()}');
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
+            SizedBox(height: AppSpacing.md),
+            Text(
+              'Cargando movimientos…',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadAllMovementsData,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Historial de Movimientos',
-                      style:
-                          TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Vista detallada de todas las entradas y salidas de inventario',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 24),
-                    _buildMovementsChart(),
-                    const SizedBox(height: 24),
-                    _buildChartDataTable(),
-                    const SizedBox(height: 24),
-                    _buildMovementsTable(),
-                  ],
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: _loadAllMovementsData,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Encabezado de sección ──────────────────────────────────
+              Text(
+                'Historial de Movimientos',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
                 ),
               ),
-            ),
+              const SizedBox(height: AppSpacing.xs),
+              const Text(
+                'Vista detallada de todas las entradas y salidas de inventario',
+                style: TextStyle(fontSize: 14, color: AppColors.textMuted),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              _buildMovementsChart(),
+              const SizedBox(height: AppSpacing.lg),
+              _buildChartDataTable(),
+              const SizedBox(height: AppSpacing.lg),
+              _buildMovementsTable(),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildMovementsChart() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Movimientos por Mes',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 300,
-              child: SfCartesianChart(
-                primaryXAxis: const CategoryAxis(
-                  labelStyle: TextStyle(
-                    color: Colors.black,
-                    fontSize: 12,
-                  ),
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.bar_chart_rounded, size: 18, color: AppColors.primary),
+              SizedBox(width: AppSpacing.sm),
+              Text(
+                'Movimientos por Mes',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
                 ),
-                primaryYAxis: NumericAxis(
-                  numberFormat: NumberFormat.currency(
-                    locale: 'es_CO',
-                    symbol: '\$',
-                  ),
-                  labelStyle: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 12,
-                  ),
-                  title: const AxisTitle(text: 'Valor (\$)'),
-                ),
-                legend: const Legend(
-                  isVisible: true,
-                  textStyle: TextStyle(color: Colors.black, fontSize: 12),
-                ),
-                tooltipBehavior: TooltipBehavior(enable: true),
-                series: <CartesianSeries>[
-                  ColumnSeries<MonthlyMovement, String>(
-                    dataSource: monthlyMovements,
-                    xValueMapper: (MonthlyMovement data, _) =>
-                        DateFormat('MMM yyyy')
-                            .format(DateTime.parse('${data.month}-01')),
-                    yValueMapper: (MonthlyMovement data, _) =>
-                        data.totalEntries,
-                    name: 'Entradas',
-                    color: Colors.green,
-                  ),
-                  ColumnSeries<MonthlyMovement, String>(
-                    dataSource: monthlyMovements,
-                    xValueMapper: (MonthlyMovement data, _) =>
-                        DateFormat('MMM yyyy')
-                            .format(DateTime.parse('${data.month}-01')),
-                    yValueMapper: (MonthlyMovement data, _) => data.totalExits,
-                    name: 'Salidas',
-                    color: Colors.red,
-                  ),
-                  LineSeries<MonthlyMovement, String>(
-                    dataSource: monthlyMovements,
-                    xValueMapper: (MonthlyMovement data, _) =>
-                        DateFormat('MMM yyyy')
-                            .format(DateTime.parse('${data.month}-01')),
-                    yValueMapper: (MonthlyMovement data, _) =>
-                        data.closingBalance,
-                    name: 'Saldo',
-                    color: Colors.blue,
-                    markerSettings: const MarkerSettings(isVisible: true),
-                  ),
-                ],
               ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            height: 300,
+            child: SfCartesianChart(
+              primaryXAxis: const CategoryAxis(
+                labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                axisLine: AxisLine(width: 1, color: AppColors.border),
+                majorTickLines: MajorTickLines(size: 0),
+                majorGridLines: MajorGridLines(width: 0),
+              ),
+              primaryYAxis: NumericAxis(
+                numberFormat: NumberFormat.currency(locale: 'es_CO', symbol: '\$'),
+                labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                axisLine: const AxisLine(width: 1, color: AppColors.border),
+                majorTickLines: const MajorTickLines(size: 0),
+                majorGridLines: MajorGridLines(
+                  width: 0.5,
+                  color: AppColors.border,
+                  dashArray: const [5, 5],
+                ),
+                title: const AxisTitle(
+                  text: 'Valor (\$)',
+                  textStyle: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              plotAreaBorderWidth: 0,
+              legend: const Legend(
+                isVisible: true,
+                textStyle: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+              tooltipBehavior: TooltipBehavior(
+                enable: true,
+                color: AppColors.dark,
+                textStyle: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+              series: <CartesianSeries>[
+                ColumnSeries<MonthlyMovement, String>(
+                  dataSource: monthlyMovements,
+                  xValueMapper: (MonthlyMovement data, _) =>
+                      DateFormat('MMM yy').format(DateTime.parse('${data.month}-01')),
+                  yValueMapper: (MonthlyMovement data, _) => data.totalEntries,
+                  name: 'Entradas',
+                  color: AppColors.success,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(3),
+                    topRight: Radius.circular(3),
+                  ),
+                  width: 0.6,
+                ),
+                ColumnSeries<MonthlyMovement, String>(
+                  dataSource: monthlyMovements,
+                  xValueMapper: (MonthlyMovement data, _) =>
+                      DateFormat('MMM yy').format(DateTime.parse('${data.month}-01')),
+                  yValueMapper: (MonthlyMovement data, _) => data.totalExits,
+                  name: 'Salidas',
+                  color: AppColors.error,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(3),
+                    topRight: Radius.circular(3),
+                  ),
+                  width: 0.6,
+                ),
+                LineSeries<MonthlyMovement, String>(
+                  dataSource: monthlyMovements,
+                  xValueMapper: (MonthlyMovement data, _) =>
+                      DateFormat('MMM yy').format(DateTime.parse('${data.month}-01')),
+                  yValueMapper: (MonthlyMovement data, _) => data.closingBalance,
+                  name: 'Saldo',
+                  color: AppColors.info,
+                  width: 2,
+                  markerSettings: const MarkerSettings(
+                    isVisible: true,
+                    height: 6,
+                    width: 6,
+                    color: AppColors.info,
+                    borderColor: Colors.white,
+                    borderWidth: 2,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildChartDataTable() {
-    if (monthlyMovements.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (monthlyMovements.isEmpty) return const SizedBox.shrink();
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Resumen de Movimientos por Mes',
-              style: TextStyle(
-                fontSize: 16,
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.calendar_month_rounded, size: 18, color: AppColors.primary),
+              SizedBox(width: AppSpacing.sm),
+              Text(
+                'Resumen mensual',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            height: 300,
+            child: DataTable2(
+              columnSpacing: 12,
+              horizontalMargin: 12,
+              minWidth: 600,
+              headingRowColor: WidgetStateProperty.all(AppColors.surfaceVariant),
+              headingTextStyle: const TextStyle(
+                fontSize: 12,
                 fontWeight: FontWeight.bold,
+                color: AppColors.textSecondary,
               ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 300,
-              child: DataTable2(
-                columnSpacing: 12,
-                horizontalMargin: 12,
-                minWidth: 600,
-                columns: const [
-                  DataColumn2(
-                    label: Text('Mes'),
-                    size: ColumnSize.M,
+              dataTextStyle: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textPrimary,
+              ),
+              dividerThickness: 1,
+              columns: const [
+                DataColumn2(label: Text('Mes'), size: ColumnSize.M),
+                DataColumn2(label: Text('Entradas'), size: ColumnSize.M, numeric: true),
+                DataColumn2(label: Text('Salidas'), size: ColumnSize.M, numeric: true),
+                DataColumn2(label: Text('Saldo Final'), size: ColumnSize.M, numeric: true),
+              ],
+              rows: monthlyMovements.asMap().entries.map((e) {
+                final i = e.key;
+                final movement = e.value;
+                final monthName = DateFormat('MMMM yyyy')
+                    .format(DateTime.parse('${movement.month}-01'));
+                return DataRow(
+                  color: WidgetStateProperty.all(
+                    i.isEven ? AppColors.surface : AppColors.surfaceVariant,
                   ),
-                  DataColumn2(
-                    label: Text('Entradas'),
-                    size: ColumnSize.M,
-                    numeric: true,
-                  ),
-                  DataColumn2(
-                    label: Text('Salidas'),
-                    size: ColumnSize.M,
-                    numeric: true,
-                  ),
-                  DataColumn2(
-                    label: Text('Saldo Final del mes'),
-                    size: ColumnSize.M,
-                    numeric: true,
-                  ),
-                ],
-                rows: monthlyMovements.map((movement) {
-                  final monthName = DateFormat('MMMM yyyy')
-                      .format(DateTime.parse('${movement.month}-01'));
-                  return DataRow(cells: [
-                    DataCell(Text(monthName)),
-                    DataCell(
-                        Text(CurrencyFormatter.format(movement.totalEntries))),
-                    DataCell(
-                        Text(CurrencyFormatter.format(movement.totalExits))),
+                  cells: [
                     DataCell(Text(
-                        CurrencyFormatter.format(movement.closingBalance))),
-                  ]);
-                }).toList(),
-              ),
+                      monthName,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    )),
+                    DataCell(Text(
+                      CurrencyFormatter.format(movement.totalEntries),
+                      style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.w600),
+                    )),
+                    DataCell(Text(
+                      CurrencyFormatter.format(movement.totalExits),
+                      style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.w600),
+                    )),
+                    DataCell(Text(
+                      CurrencyFormatter.format(movement.closingBalance),
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    )),
+                  ],
+                );
+              }).toList(),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildMovementsTable() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Todos los Movimientos',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Encabezado ───────────────────────────────────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.swap_horiz_rounded,
+                      size: 18, color: AppColors.primary),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    'Todos los movimientos',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
-                ),
-                Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: _showExportDialog,
-                      icon: const Icon(Icons.download_outlined),
-                      label: const Text('Exportar'),
+                  const SizedBox(width: AppSpacing.sm),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLight,
+                      borderRadius: BorderRadius.circular(AppRadius.full),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.filter_list),
-                      onPressed: showFiltersDialog,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (filteredMovements.isEmpty)
-              const SizedBox(
-                height: 400,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.history_rounded, size: 64, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text(
-                        'No hay movimientos para mostrar',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
+                    child: Text(
+                      '${filteredMovements.length}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryDarker,
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              )
-            else
-              ConstrainedBox(
-                constraints: const BoxConstraints(
-                  minWidth: 800,
-                  maxWidth: double.infinity,
-                  minHeight: 400,
-                  maxHeight: 600,
-                ),
-                child: PaginatedDataTable2(
-                  columnSpacing: 12,
-                  horizontalMargin: 12,
-                  minWidth: 800,
-                  scrollController: ScrollController(),
-                  isHorizontalScrollBarVisible: true,
-                  columns: [
-                    DataColumn2(label: Text('Fecha'), size: ColumnSize.S),
-                    DataColumn2(label: Text('Producto'), size: ColumnSize.M),
-                    DataColumn2(label: Text('Almacén'), size: ColumnSize.S),
-                    DataColumn2(label: Text('Tipo Doc.'), size: ColumnSize.S),
-                    DataColumn2(label: Text('Documento'), size: ColumnSize.S),
-                    DataColumn2(
-                        label: Text('Cantidad'),
-                        size: ColumnSize.S,
-                        numeric: true),
-                    DataColumn2(
-                        label: Text('Costo Unit.'),
-                        size: ColumnSize.S,
-                        numeric: true),
-                    DataColumn2(
-                        label: Text('Total'),
-                        size: ColumnSize.S,
-                        numeric: true),
+                ],
+              ),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _showExportDialog,
+                    icon: const Icon(Icons.download_outlined, size: 16),
+                    label: const Text('Exportar'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.filter_list_rounded,
+                        color: AppColors.textMuted),
+                    tooltip: 'Filtros',
+                    onPressed: showFiltersDialog,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.md),
+
+          // ── Tabla / Estado vacío ─────────────────────────────────────
+          if (filteredMovements.isEmpty)
+            SizedBox(
+              height: 300,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceVariant,
+                        borderRadius: BorderRadius.circular(AppRadius.xl),
+                      ),
+                      child: const Icon(Icons.history_rounded,
+                          size: 36, color: AppColors.textDisabled),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    const Text(
+                      'Sin movimientos para mostrar',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    const Text(
+                      'Prueba ajustando los filtros activos.',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                    ),
                   ],
-                  source: MovementsDataSource(filteredMovements),
                 ),
               ),
-          ],
-        ),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: 400,
+                maxHeight: 600,
+              ),
+              child: PaginatedDataTable2(
+                columnSpacing: 12,
+                horizontalMargin: 12,
+                minWidth: 800,
+                scrollController: ScrollController(),
+                isHorizontalScrollBarVisible: true,
+                headingRowColor: WidgetStateProperty.all(AppColors.surfaceVariant),
+                headingTextStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textSecondary,
+                ),
+                dataTextStyle: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textPrimary,
+                ),
+                dividerThickness: 1,
+                columns: const [
+                  DataColumn2(label: Text('Fecha'), size: ColumnSize.S),
+                  DataColumn2(label: Text('Producto'), size: ColumnSize.M),
+                  DataColumn2(label: Text('Almacén'), size: ColumnSize.S),
+                  DataColumn2(label: Text('Tipo Doc.'), size: ColumnSize.S),
+                  DataColumn2(label: Text('Documento'), size: ColumnSize.S),
+                  DataColumn2(label: Text('Cantidad'), size: ColumnSize.S, numeric: true),
+                  DataColumn2(label: Text('Costo Unit.'), size: ColumnSize.S, numeric: true),
+                  DataColumn2(label: Text('Total'), size: ColumnSize.S, numeric: true),
+                ],
+                source: MovementsDataSource(filteredMovements),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -462,12 +614,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           html.Url.revokeObjectUrl(url);
 
           if (mounted) {
-            ScaffoldMessenger.of(localContext).showSnackBar(
-              const SnackBar(
-                content: Text('Movimientos exportados correctamente'),
-                backgroundColor: Colors.green,
-              ),
-            );
+            localContext.showSuccessSnackBar('Movimientos exportados correctamente');
           }
         } else {
           // For desktop, use FilePicker to get save path and write file
@@ -483,22 +630,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             await file.writeAsBytes(fileBytes);
 
             if (mounted) {
-              ScaffoldMessenger.of(localContext).showSnackBar(
-                SnackBar(
-                  content: Text('Movimientos exportados a $path'),
-                  backgroundColor: Colors.green,
-                ),
-              );
+              localContext.showSuccessSnackBar('Movimientos exportados a $path');
             }
           } else {
             // User cancelled the save dialog
             if (mounted) {
-              ScaffoldMessenger.of(localContext).showSnackBar(
-                const SnackBar(
-                  content: Text('Exportación cancelada'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
+              localContext.showErrorSnackBar('Exportación cancelada');
             }
           }
         }
@@ -507,12 +644,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(localContext).showSnackBar(
-          SnackBar(
-            content: Text('Error al exportar movimientos: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        localContext.showErrorSnackBar('Error al exportar movimientos: ${e.toString()}');
       }
     }
   }
