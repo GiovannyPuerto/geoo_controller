@@ -43,8 +43,7 @@ Widget _StatusBadge({
   );
 }
 
-// ─── MovementsDataSource ────────────────────────────────────────────────────
-
+// MovementsDataSource 
 class MovementsDataSource extends DataTableSource {
   final List<Map<String, dynamic>> movements;
 

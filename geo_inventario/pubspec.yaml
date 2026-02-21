@@ -36,26 +36,26 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   http: ^1.2.2
-  file_picker: ^10.3.6
+  file_picker: ^10.3.10
 
 
-  data_table_2: ^2.5.16
+  data_table_2: ^2.7.2
   excel: ^4.0.6
   intl: ^0.20.2
   pdf: ^3.11.3
   printing: ^5.14.2
   fl_chart: ^1.1.1
-  syncfusion_flutter_charts: ^31.1.19
+  syncfusion_flutter_charts: ^32.2.5
   path_provider: ^2.1.4
   share_plus: ^12.0.1
-  shared_preferences: ^2.3.2
+  shared_preferences: ^2.5.4
   universal_html: ^2.2.4
-  file_saver: ^0.2.12
-  flutter_svg: ^2.2.2
+  file_saver: ^0.3.1
+  flutter_svg: ^2.2.3
   dtd: ^4.0.0
   flutter_lints: ^6.0.0
-  google_fonts: ^6.3.2
-  json_rpc_2: ^4.0.0
+  google_fonts: ^8.0.2
+  json_rpc_2: ^4.1.0
   path: ^1.9.1
   stack_trace: ^1.12.1
   url_launcher: ^6.3.2

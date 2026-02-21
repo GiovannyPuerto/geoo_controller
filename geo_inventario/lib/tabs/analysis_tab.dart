@@ -45,6 +45,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     _loadAnalysisData();
   }
 
+
   @override
   void dispose() {
     inventoryRefreshNotifier.removeListener(_onExternalRefresh);

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io' as io;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -608,7 +607,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           // For web, use html.AnchorElement to trigger download
           final blob = html.Blob([fileBytes]);
           final url = html.Url.createObjectUrlFromBlob(blob);
-          final anchor = html.AnchorElement(href: url)
+          html.AnchorElement(href: url)
             ..setAttribute('download', fileName)
             ..click();
           html.Url.revokeObjectUrl(url);
@@ -696,12 +695,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                         );
                       }).toList(),
                       onChanged: (value) {
-                        setState(() => this.selectedWarehouse =
+                        setState(() => selectedWarehouse =
                             value == 'Todos' ? null : value);
                       },
                     ),
                     DropdownButtonFormField<String>(
-                      value: selectedGroup == null ||
+                      initialValue: selectedGroup == null ||
                               !groups.contains(selectedGroup)
                           ? 'Todos'
                           : selectedGroup,
@@ -789,55 +788,5 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         .where((value) => value.isNotEmpty);
 
     return values.toSet().toList()..sort();
-  }
-
-  List<MonthlyMovement> _computeMonthlyMovements(
-      List<Map<String, dynamic>> movements) {
-    final Map<String, Map<String, double>> monthlyData = {};
-
-    for (var movement in movements) {
-      final dateStr = movement['fecha']?.toString();
-      if (dateStr == null) continue;
-
-      final date = DateTime.tryParse(dateStr);
-      if (date == null) continue;
-
-      final monthKey = '${date.year}-${date.month.toString().padLeft(2, '0')}';
-      final cantidad = (movement['cantidad'] as num?)?.toDouble() ?? 0.0;
-      final total = (movement['total'] as num?)?.toDouble() ?? 0.0;
-
-      monthlyData.putIfAbsent(
-          monthKey,
-          () => {
-                'totalEntries': 0.0,
-                'totalExits': 0.0,
-                'closingBalance': 0.0,
-              });
-
-      // Positive quantity = entry, negative = exit
-      if (cantidad > 0) {
-        monthlyData[monthKey]!['totalEntries'] =
-            (monthlyData[monthKey]!['totalEntries'] ?? 0) + total;
-      } else if (cantidad < 0) {
-        monthlyData[monthKey]!['totalExits'] =
-            (monthlyData[monthKey]!['totalExits'] ?? 0) + total.abs();
-      }
-
-      // Calcula el ciere de el valance sumando todos lo totales
-      monthlyData[monthKey]!['closingBalance'] =
-          (monthlyData[monthKey]!['closingBalance'] ?? 0) + total;
-    }
-
-    final sortedMonths = monthlyData.keys.toList()..sort();
-
-    return sortedMonths.map((month) {
-      final data = monthlyData[month]!;
-      return MonthlyMovement(
-        month: month,
-        totalEntries: data['totalEntries'] ?? 0.0,
-        totalExits: data['totalExits'] ?? 0.0,
-        closingBalance: data['closingBalance'] ?? 0.0,
-      );
-    }).toList();
   }
 }

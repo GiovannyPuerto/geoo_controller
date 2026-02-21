@@ -18,7 +18,6 @@ from .services.summary_service import get_inventory_summary_data
 
 logger = logging.getLogger(__name__)
 
-
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_inventory(request, inventory_name='default'):
@@ -92,7 +91,7 @@ def get_product_analysis(request):
 @require_http_methods(["GET"])
 def get_batches(request):
     """
-    ENdpoint para obtener información de las importaciones realizadas.
+    Endpoint para obtener información de las importaciones realizadas.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     batches = ImportBatch.objects.filter(inventory_name=inventory_name).order_by('-started_at')
@@ -382,7 +381,7 @@ def export_analysis(request, inventory_name='default'):
                     formatted_data.append(formatted_item)
                 data = [headers] + formatted_data
 
-                # Define column widths to fit landscape A4 page (842 points total)
+                # Define column widths to fit landscape A4 page 
                 colWidths = [57, 130, 71, 71, 78, 71, 57, 57, 64, 64, 105]
 
                 # Create table with column widths
@@ -429,20 +428,13 @@ def export_analysis(request, inventory_name='default'):
 @require_http_methods(["GET"])
 def export_movements(request, inventory_name='default'):
     """
-    Exports inventory movements data.
-
-    Args:
-        request: Django HttpRequest
-        inventory_name (str): Inventory name
-
-    Returns:
-        HttpResponse: File response
+    Exportar movimientos
     """
     try:
-        # Get format from query params
+        # query para obtener formato de el excel
         format_type = request.GET.get('format', 'excel')
 
-        # Get movements data using the same filtering as get_records
+        # query para consultar datos de movimientos por filtros
         inventory_name_param = request.GET.get('inventory_name', inventory_name)
         warehouse_filter = request.GET.get('warehouse', '')
         category_filter = request.GET.get('category', '')
@@ -452,7 +444,7 @@ def export_movements(request, inventory_name='default'):
 
         records_query = InventoryRecord.objects.filter(product__inventory_name=inventory_name_param).select_related('product', 'batch')
 
-        # Apply filters
+        # Aplicacion de filtros
         if warehouse_filter:
             records_query = records_query.filter(warehouse__icontains=warehouse_filter)
         if category_filter:
@@ -466,7 +458,7 @@ def export_movements(request, inventory_name='default'):
                 Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
             )
 
-        # Limit records for performance - export up to 5000 records
+        # Limite de exportacion de hasta  5000 de record(Historial)
         records = records_query.order_by('-date')[:5000]
         movements_data = [{
             'fecha': r.date.isoformat(),
@@ -512,12 +504,12 @@ def export_movements(request, inventory_name='default'):
                     status=503
                 )
 
-            # Create PDF file in landscape orientation
+            # Crear archivo pdf
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
             elements = []
 
-            # Use Times fonts which support Unicode/Latin characters
+            # Customixacion de el formato de letra y demas de el archivo
             styles = getSampleStyleSheet()
             title_style = ParagraphStyle(
                 'CustomTitle',
@@ -529,9 +521,9 @@ def export_movements(request, inventory_name='default'):
             elements.append(title)
             elements.append(Spacer(1, 12))
 
-            # Prepare data for table
+            # Preparcion de datos para la tabla
             if movements_data:
-                # Create styles for text wrapping
+                # Crea estilos para datos de la tabla
                 normal_style = ParagraphStyle(
                     'Normal',
                     parent=styles['Normal'],
@@ -539,16 +531,17 @@ def export_movements(request, inventory_name='default'):
                     fontSize=7,
                     wordWrap='LTR',
                     splitLongWords=True,
-                    leading=9,  # Line spacing
+                    leading=9,  # espacio entre lineas
                 )
                 header_style = ParagraphStyle(
                     'Header',
                     parent=styles['Normal'],
                     fontName='Times-Bold',
                     fontSize=9,
-                    alignment=1,  # Center
+                    alignment=1,  # alineacion al centro
                 )
 
+                #Se definen la columnas de titulo
                 headers = [
                     Paragraph('Fecha', header_style),
                     Paragraph('Código', header_style),
@@ -561,7 +554,9 @@ def export_movements(request, inventory_name='default'):
                     Paragraph('Total', header_style),
                     Paragraph('Categoría', header_style)
                 ]
+                #Creamos una lista vacía en donde se va a añadir los datos formateados
                 formatted_data = []
+                #Recorremos los movimientos que son datos provenientes de el excel cargado
                 for item in movements_data:
                     formatted_item = [
                         Paragraph(str(item['fecha']), normal_style),
@@ -575,14 +570,16 @@ def export_movements(request, inventory_name='default'):
                         Paragraph(f"${item['costo_total']:,.2f}", normal_style),
                         Paragraph(str(item['categoria']), normal_style),
                     ]
+                    #Una vez se recorra toda la lista se añaden los datos a la lista formated_data
                     formatted_data.append(formatted_item)
+                # A cada datos se le asigna su respectivo header
                 data = [headers] + formatted_data
 
-                # Define column widths to fit landscape A4 page (842 points total)
+                # definimos el ancho de las columnas dependiendo de la cantidad maxima de caracteres que puede llegar a tener su contenido
                 colWidths = [70, 60, 150, 80, 60, 60, 80, 90, 90, 70]
 
-                # Create table with column widths
-                table = Table(data, colWidths=colWidths, repeatRows=1)  # Repeat headers on each page
+                # Creamos las columnas con ancho
+                table = Table(data, colWidths=colWidths, repeatRows=1)  # Repetimos los headers en cada pagina
                 style = TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.green),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -625,13 +622,7 @@ def export_movements(request, inventory_name='default'):
 @require_http_methods(["GET"])
 def list_inventories(request):
     """
-    Lists all available inventories.
-
-    Args:
-        request: Django HttpRequest
-
-    Returns:
-        JsonResponse: List of inventory names
+    Lista todos los inventarios
     """
     try:
         inventories = Product.objects.values_list('inventory_name', flat=True).distinct()
@@ -645,7 +636,7 @@ def list_inventories(request):
 @require_http_methods(["GET"])
 def get_last_update_time(request):
     """
-    Retrieves the timestamp of the last inventory update.
+    Recupera la marca de tiempo de la última actualización del inventario.
     """
     inventory_name = request.GET.get('inventory_name', 'default')
     try:
@@ -667,14 +658,7 @@ def get_last_update_time(request):
 @require_http_methods(["POST"])
 def upload_base_file(request, inventory_name='default'):
     """
-    Uploads a base file for inventory initialization.
-
-    Args:
-        request: Django HttpRequest with uploaded file
-        inventory_name (str): Inventory name
-
-    Returns:
-        JsonResponse: Success or error response
+    Actualiza la base de inventarios
     """
     # This is similar to update_inventory but only for base files
     return update_inventory(request, inventory_name)
@@ -716,13 +700,7 @@ def get_inventory_at_date(request):
 @require_http_methods(["GET"])
 def welcome(request):
     """
-    Returns a welcome message for the API.
-
-    Args:
-        request: Django HttpRequest
-
-    Returns:
-        JsonResponse: Welcome message
+    Retorna bienvenido para pruebas de respuesta de la api
     """
     logger.info(f"Request received: {request.method} {request.path}")
     return JsonResponse({'message': 'Bienvenido a el sistema de analisis de inventarios'})

@@ -1380,6 +1380,3 @@ def _process_update_file(
 
     logger.info(f"Procesados {records_processed} registros de movimientos ({duplicates_count} duplicados, {errors} errores)")
     return records_processed, duplicates_count
-
-
-

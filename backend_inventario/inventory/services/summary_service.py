@@ -30,8 +30,7 @@ def get_inventory_summary_data(inventory_name="default"):
             "negative_stock_alerts": [],
         }
 
-    # ── Stock inicial agregado por (producto, almacén) ────────────────────────
-    # initial_qty[product_id][warehouse] = qty
+    # Stock inicial agregado por (producto, almacén) 
     initial_map: dict[int, dict[str, Decimal]] = {}
     for row in WarehouseDetail.objects.filter(product_id__in=product_ids).values(
         "product_id", "warehouse", "initial_quantity"
@@ -40,7 +39,7 @@ def get_inventory_summary_data(inventory_name="default"):
             row["initial_quantity"] or 0
         )
 
-    # ── Movimientos acumulados por (producto, almacén) ────────────────────────
+    # Movimientos acumulados por (producto, almacén)
     movement_map: dict[tuple, Decimal] = {
         (row["product_id"], row["warehouse"]): row["qty"] or Decimal("0")
         for row in InventoryRecord.objects.filter(product_id__in=product_ids)
@@ -48,7 +47,7 @@ def get_inventory_summary_data(inventory_name="default"):
         .annotate(qty=Sum("quantity"))
     }
 
-    # ── Último unit_cost por producto (MAX id = registro más reciente) ────────
+    #  Último unit_cost por producto (MAX id = registro más reciente) 
     latest_ids = {
         row["product_id"]: row["lid"]
         for row in InventoryRecord.objects.filter(product_id__in=product_ids)
@@ -62,7 +61,7 @@ def get_inventory_summary_data(inventory_name="default"):
         )
     }
 
-    # ── Datos de producto (code, description, initial_unit_cost) ─────────────
+    # Datos de producto (code, description, initial_unit_cost)
     product_meta = {
         p["id"]: p
         for p in Product.objects.filter(id__in=product_ids).values(
@@ -70,7 +69,7 @@ def get_inventory_summary_data(inventory_name="default"):
         )
     }
 
-    # ── Calcular totales en Python (una sola pasada) ──────────────────────────
+    #  Calcular totales en Python (una sola pasada) 
     total_quantity = Decimal("0")
     total_value = Decimal("0")
     negative_stock_alerts = []

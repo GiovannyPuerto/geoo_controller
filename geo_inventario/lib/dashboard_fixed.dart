@@ -613,7 +613,7 @@ class _DashboardPageState extends State<DashboardPage>
         final String? path = await FileSaver.instance.saveAs(
             name: 'analysis_export_$timestamp.$extension',
             bytes: fileBytes,
-            ext: extension,
+            fileExtension: extension,
             mimeType:
                 format == 'excel' ? MimeType.microsoftExcel : MimeType.pdf);
 
@@ -655,7 +655,7 @@ class _DashboardPageState extends State<DashboardPage>
         final String? path = await FileSaver.instance.saveAs(
             name: 'movements_export_$timestamp.$extension',
             bytes: fileBytes,
-            ext: extension,
+            fileExtension: extension,
             mimeType:
                 format == 'excel' ? MimeType.microsoftExcel : MimeType.pdf);
 

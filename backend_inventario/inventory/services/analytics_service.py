@@ -212,7 +212,7 @@ def get_product_analysis_data(
                 stock_dict[pid][2] = Decimal(rec["unit_cost"] or 0)
 
     # ── 3. Stock inicial por almacén (para productos sin movimientos) ─────────
-    wd_initial: dict[int, tuple] = {}  # product_id -> (sum_qty, has_negative)
+    wd_initial: dict[int, tuple] = {}  
     for row in WarehouseDetail.objects.filter(product_id__in=product_ids).values(
         "product_id", "warehouse", "initial_quantity"
     ):
@@ -224,7 +224,7 @@ def get_product_analysis_data(
         if qty < 0:
             wd_initial[pid][1] = True
 
-    # ── 4. Nombres de almacenes por producto ─────────────────────────────────
+    #  4. Nombres de almacenes por producto
     warehouses_dict: dict[int, set] = {}
     for row in WarehouseDetail.objects.filter(product_id__in=product_ids).values(
         "product_id", "warehouse"
@@ -235,7 +235,7 @@ def get_product_analysis_data(
         for pid, ws in warehouses_dict.items()
     }
 
-    # ── 5. Movimientos acumulados antes del año de rotación (balance_pre_year) ─
+    #  5. Movimientos acumulados antes del año de rotación (balance_pre_year) 
     rotation_year = target_date.year if target_date else datetime.now().year
     pre_year_filter = Q(product_id__in=product_ids)
     if target_date:
@@ -250,7 +250,7 @@ def get_product_analysis_data(
         .annotate(total=Sum("quantity"))
     }
 
-    # ── 6. Movimientos mensuales del año de rotación ─────────────────────────
+    #  6. Movimientos mensuales del año de rotación 
     monthly_filter = Q(product_id__in=product_ids, date__year=rotation_year)
     if target_date:
         monthly_filter &= Q(date__lte=target_date)
@@ -265,7 +265,7 @@ def get_product_analysis_data(
         pid = row["product_id"]
         monthly_dict.setdefault(pid, {})[row["month"].month] = row["monthly_total"] or Decimal("0")
 
-    # ── 7. Construir resultado ────────────────────────────────────────────────
+    #  7. Construir resultado 
     analysis_data = []
     for product in products_list:
         try:

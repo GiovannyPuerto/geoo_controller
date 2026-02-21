@@ -71,7 +71,7 @@ def parse_date(value):
 
     s = str(value).strip()
 
-    # Handle scientific notation
+    # Manejar notación científica
     if 'E' in s or 'e' in s:
         try:
             num = int(float(s))
@@ -79,14 +79,14 @@ def parse_date(value):
         except (ValueError, TypeError):
             return None
 
-    # Handle YYYYMMDD format
+    # Manejar formato YYYYMMDD
     if re.match(r'^\d{8}$', s):
         try:
             return datetime.strptime(s, '%Y%m%d').date()
         except ValueError:
             return None
 
-    # Handle other formats if needed (DD/MM/YYYY, MM/DD/YYYY, etc.)
+    # Manejar otros formatos si es necesario (DD/MM/YYYY, MM/DD/YYYY, etc.)
     try:
         return pd.to_datetime(s).date()
     except (ValueError, TypeError):
@@ -132,16 +132,16 @@ def map_categoria(code):
         return ''
     code_str = str(code).strip().upper()
 
-    # First check if it's already a standard name
+    # Primero verifica si ya es un nombre estándar
     for k, v in CATEGORIA_MAP.items():
         if code_str == v:
             return v
 
-    # Then check if it's a code
+    # Luego verifica si es un código
     if code_str in CATEGORIA_MAP:
         return CATEGORIA_MAP[code_str]
 
-    # Then check if it contains keywords
+    # Luego verifica si contiene palabras clave
     if 'AGROQUIMICOS' in code_str or 'FERTILIZANTES' in code_str or 'ABONOS' in code_str:
         return 'AGROQUIMICOS-FERTILIZANTES Y ABONOS'
     if 'DOTACION' in code_str or 'SEGURIDAD' in code_str:
@@ -153,7 +153,7 @@ def map_categoria(code):
     if 'PAPELERIA' in code_str or 'ASEO' in code_str:
         return 'PAPELERIA Y ASEO'
 
-    # Otherwise return the original
+    # De lo contrario, devuelve el original
     return str(code).strip()
 
 def calculate_file_checksum(file_content):
@@ -175,7 +175,7 @@ def validate_row_data(row_data, format_type='movements'):
             return False, "Falta SALIDA o ENTRADA"
         if not row_data.get('UNITARIO') and not row_data.get('TOTAL'):
             return False, "Falta UNITARIO o TOTAL"
-    else: # detailed
+    else: 
         required_fields = ['ITEM', 'FECHA', 'LOCALIZACION']
         if not row_data.get('CANTIDAD') and not (row_data.get('ENTRADA') or row_data.get('SALIDA')):
             return False, "Falta CANTIDAD, ENTRADA o SALIDA"
@@ -186,7 +186,7 @@ def validate_row_data(row_data, format_type='movements'):
         if field not in row_data or not row_data[field]:
             return False, f"Falta {field}"
 
-    # Validate amounts
+    # Valida cantidades
     salida = clean_number(row_data.get('SALIDA', '0'))
     entrada = clean_number(row_data.get('ENTRADA', '0'))
     cantidad = clean_number(row_data.get('CANTIDAD', '0'))
@@ -205,7 +205,7 @@ def validate_row_data(row_data, format_type='movements'):
     if unitario < 0:
         return False, "Costo unitario no puede ser negativo"
 
-    # Validate total
+    # Valida total
     if total != 0 and unitario != 0 and abs(total - (abs(quantity) * unitario)) > 0.1:
         return False, f"El total no coincide con la cantidad y el costo unitario (Total: {total}, Calculado: {abs(quantity) * unitario})"
 
@@ -213,7 +213,7 @@ def validate_row_data(row_data, format_type='movements'):
 
 def clean_text(value):
     """
-    Clean and normalize text fields.
+    Limpia y normaliza valores
     """
     if not value:
         return ''
