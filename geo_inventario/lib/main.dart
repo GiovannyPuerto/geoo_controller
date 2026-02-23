@@ -257,29 +257,37 @@ class _WelcomePageState extends State<WelcomePage>
   // ─── Hero section ──────────────────────────────────────────────────────────
 
   Widget _buildHeroSection() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+    final heroIconSize = isMobile ? 72.0 : 96.0;
+    final heroIconInner = isMobile ? 36.0 : 48.0;
+    final heroTitleSize = isMobile ? 26.0 : 40.0;
+    final heroSubtitleSize = isMobile ? 14.0 : 17.0;
+    final heroPaddingV = isMobile ? AppSpacing.xl : AppSpacing.xxxl;
+    final heroPaddingH = isMobile ? AppSpacing.md : AppSpacing.xxl;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.xxxl, horizontal: AppSpacing.xxl),
+      padding: EdgeInsets.symmetric(vertical: heroPaddingV, horizontal: heroPaddingH),
       child: Column(
         children: [
           // Ícono principal con fondo degradado
           Container(
-            width: 96,
-            height: 96,
+            width: heroIconSize,
+            height: heroIconSize,
             decoration: BoxDecoration(
               gradient: AppGradients.primary,
               borderRadius: BorderRadius.circular(AppRadius.xl),
               boxShadow: AppShadows.colored(AppColors.primary),
             ),
-            child: const Icon(Icons.inventory_2_rounded,
-                size: 48, color: Colors.white),
+            child: Icon(Icons.inventory_2_rounded,
+                size: heroIconInner, color: Colors.white),
           ),
           const SizedBox(height: AppSpacing.lg),
-          const Text(
+          Text(
             'Gestión de Inventario',
             style: TextStyle(
-              fontSize: 40,
+              fontSize: heroTitleSize,
               fontWeight: FontWeight.bold,
               color: AppColors.textPrimary,
               height: 1.1,
@@ -287,10 +295,12 @@ class _WelcomePageState extends State<WelcomePage>
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppSpacing.sm),
-          const Text(
-            'Procesa archivos Excel, analiza movimientos\ny visualiza el estado de tu inventario en tiempo real.',
+          Text(
+            isMobile
+                ? 'Procesa Excel, analiza movimientos y visualiza tu inventario.'
+                : 'Procesa archivos Excel, analiza movimientos\ny visualiza el estado de tu inventario en tiempo real.',
             style: TextStyle(
-              fontSize: 17,
+              fontSize: heroSubtitleSize,
               color: AppColors.textMuted,
               height: 1.6,
             ),
@@ -323,10 +333,12 @@ class _WelcomePageState extends State<WelcomePage>
   // ─── Sección de carga de archivo ───────────────────────────────────────────
 
   Widget _buildUploadSection() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.xl, horizontal: AppSpacing.xxl),
+      padding: EdgeInsets.symmetric(
+          vertical: AppSpacing.xl,
+          horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
       color: AppColors.surface,
       child: Center(
         child: ConstrainedBox(
@@ -481,6 +493,7 @@ class _WelcomePageState extends State<WelcomePage>
   // ─── Sección de características ────────────────────────────────────────────
 
   Widget _buildFeaturesSection() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     const features = [
       (Icons.upload_file_rounded, 'Carga rápida',
           'Selecciona archivos Excel y procésalos en segundos de forma automática.'),
@@ -492,8 +505,9 @@ class _WelcomePageState extends State<WelcomePage>
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.xxxl, horizontal: AppSpacing.xxl),
+      padding: EdgeInsets.symmetric(
+          vertical: isMobile ? AppSpacing.xl : AppSpacing.xxxl,
+          horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
       color: AppColors.surface,
       child: Column(
         children: [
@@ -519,6 +533,7 @@ class _WelcomePageState extends State<WelcomePage>
   // ─── Sección "Cómo funciona" ───────────────────────────────────────────────
 
   Widget _buildHowItWorksSection() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     const steps = [
       ('1', 'Prepara tu Excel',
           'Asegúrate de incluir las columnas: CODIGO, DESCRIPCION, LOCALIZACION, CATEGORIA, FECHA, DOCUMENTO, SALIDA, UNITARIO, TOTAL.'),
@@ -530,8 +545,9 @@ class _WelcomePageState extends State<WelcomePage>
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.xxxl, horizontal: AppSpacing.xxl),
+      padding: EdgeInsets.symmetric(
+          vertical: isMobile ? AppSpacing.xl : AppSpacing.xxxl,
+          horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
       child: Column(
         children: [
           const _SectionHeader(
@@ -555,10 +571,12 @@ class _WelcomePageState extends State<WelcomePage>
   // ─── Historial reciente ────────────────────────────────────────────────────
 
   Widget _buildHistorialSection() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.xxxl, horizontal: AppSpacing.xxl),
+      padding: EdgeInsets.symmetric(
+          vertical: isMobile ? AppSpacing.xl : AppSpacing.xxxl,
+          horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
       color: AppColors.surface,
       child: Column(
         children: [
@@ -578,7 +596,9 @@ class _WelcomePageState extends State<WelcomePage>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadius.lg),
-                child: DataTable(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
                   headingRowColor: WidgetStateProperty.all(
                       AppColors.surfaceVariant),
                   headingTextStyle: const TextStyle(
@@ -614,6 +634,7 @@ class _WelcomePageState extends State<WelcomePage>
                     ]);
                   }).toList(),
                 ),
+                ), // SingleChildScrollView horizontal
               ),
             ),
           ),
@@ -625,10 +646,12 @@ class _WelcomePageState extends State<WelcomePage>
   // ─── Footer ────────────────────────────────────────────────────────────────
 
   Widget _buildFooter() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.xl, horizontal: AppSpacing.xxl),
+      padding: EdgeInsets.symmetric(
+          vertical: AppSpacing.xl,
+          horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
       color: AppColors.dark,
       child: Column(
         children: [
@@ -736,12 +759,13 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Column(
       children: [
         Text(
           title,
-          style: const TextStyle(
-            fontSize: 28,
+          style: TextStyle(
+            fontSize: isMobile ? 22.0 : 28.0,
             fontWeight: FontWeight.bold,
             color: AppColors.textPrimary,
           ),
@@ -750,7 +774,7 @@ class _SectionHeader extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         Text(
           subtitle,
-          style: const TextStyle(fontSize: 16, color: AppColors.textMuted),
+          style: TextStyle(fontSize: isMobile ? 14.0 : 16.0, color: AppColors.textMuted),
           textAlign: TextAlign.center,
         ),
       ],
@@ -772,8 +796,12 @@ class _FeatureCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+    final cardWidth = isMobile ? screenWidth - AppSpacing.md * 2 : 280.0;
+
     return SizedBox(
-      width: 280,
+      width: cardWidth,
       child: Container(
         padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
@@ -829,8 +857,12 @@ class _StepCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 600;
+    final cardWidth = isMobile ? screenWidth - AppSpacing.md * 2 : 260.0;
+
     return SizedBox(
-      width: 260,
+      width: cardWidth,
       child: Column(
         children: [
           Container(

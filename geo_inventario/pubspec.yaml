@@ -112,3 +112,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
+
+#CONFIGURACIÓN DEL ICONO 
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "geo_inventario/statics/images/icono.png"
+  adaptive_icon_background: "#FFFFFF" # Opcional: Color de fondo para Android
+  adaptive_icon_foreground: "geo_inventario/statics/images/icono.png" # Opcional: Logo para Android adaptativo

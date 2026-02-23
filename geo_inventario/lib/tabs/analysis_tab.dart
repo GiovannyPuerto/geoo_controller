@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:universal_html/html.dart' as html;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:data_table_2/data_table_2.dart';
@@ -229,238 +228,197 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     final sortedGroupData = groupData.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IntrinsicHeight(
-         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return LayoutBuilder(builder: (context, constraints) {
+      final isMobile = constraints.maxWidth < 600;
+      final chartHeight = isMobile ? 280.0 : 500.0;
+
+    // Gráfico de distribución por Grupo
+    Widget groupCard = Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Distribución por Grupo',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Image.asset(
-                            'statics/images/logo_geoflora.png',
-                            height: 30,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Total productos: $totalProducts | Valor total: ${CurrencyFormatter.format(totalValue)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 500,
-                        child: SfCircularChart(
-                          margin: EdgeInsets.zero,
-                          legend: const Legend(
-                            isVisible: true,
-                            position: LegendPosition.bottom,
-                            textStyle: TextStyle(
-                              color: Colors.black87,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflowMode: LegendItemOverflowMode.wrap,
-                            iconHeight: 12,
-                            iconWidth: 12,
-                          ),
-                          series: <CircularSeries>[
-                            PieSeries<MapEntry<String, double>, String>(
-                              dataSource: sortedGroupData,
-                              xValueMapper:
-                                  (MapEntry<String, double> data, _) =>
-                                      data.key,
-                              yValueMapper:
-                                  (MapEntry<String, double> data, _) =>
-                                      data.value,
-                              pointColorMapper:
-                                  (MapEntry<String, double> data, int index) =>
-                                      groupColors[index % groupColors.length],
-                              dataLabelMapper:
-                                  (MapEntry<String, double> data, _) {
-                                final total =
-                                    groupData.values.reduce((a, b) => a + b);
-                                final percentage = (data.value / total * 100)
-                                    .toStringAsFixed(1);
-                                final shortName = _getShortGroupName(data.key);
-                                return '$shortName\n$percentage%';
-                              },
-                              radius: '60%',
-                              dataLabelSettings: DataLabelSettings(
-                                isVisible: true,
-                                textStyle: const TextStyle(
-                                  color: Colors.black87,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                labelPosition: ChartDataLabelPosition.outside,
-                                connectorLineSettings: ConnectorLineSettings(
-                                  type: ConnectorType.line,
-                                  length: '10%',
-                                  color: Colors.grey.shade500,
-                                  width: 1.2,
-                                ),
-                                useSeriesColor: false,
-                                color: Colors.white,
-                                borderRadius: 4,
-                                borderWidth: 1,
-                                borderColor: Colors.grey.shade300,
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 4, vertical: 2),
-                                labelIntersectAction:
-                                    LabelIntersectAction.shift,
-                              ),
-                              explode: true,
-                              explodeGesture: ActivationMode.singleTap,
-                              explodeOffset: '8%',
-                              explodeAll: false,
-                              animationDuration: 1200,
-                              enableTooltip: true,
-                              strokeColor: Colors.white,
-                              strokeWidth: 2,
-                              selectionBehavior: SelectionBehavior(
-                                enable: true,
-                                selectedOpacity: 1.0,
-                                unselectedOpacity: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    ],
-                  ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Distribución por Grupo',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-              ),
+                Image.asset('statics/images/logo_geoflora.png', height: 30),
+              ],
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Distribución por Rotación',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Image.asset(
-                            'statics/images/logo_geoflora.png',
-                            height: 30,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Total productos: $totalProducts',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 500,
-                        child: SfCircularChart(
-                          legend: const Legend(
-                            isVisible: true,
-                            position: LegendPosition.bottom,
-                            textStyle: TextStyle(
-                              color: Colors.black87,
-                              fontSize: 8,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflowMode: LegendItemOverflowMode.wrap,
-                            iconHeight: 12,
-                            iconWidth: 12,
-                          ),
-                          series: <CircularSeries>[
-                            PieSeries<MapEntry<String, int>, String>(
-                              dataSource: rotationData.entries.toList(),
-                              xValueMapper: (MapEntry<String, int> data, _) =>
-                                  data.key,
-                              yValueMapper: (MapEntry<String, int> data, _) =>
-                                  data.value,
-                              pointColorMapper:
-                                  (MapEntry<String, int> data, int index) =>
-                                      _getRotationColor(data.key),
-                              dataLabelMapper: (MapEntry<String, int> data, _) {
-                                final total =
-                                    rotationData.values.reduce((a, b) => a + b);
-                                final percentage = (data.value / total * 100)
-                                    .toStringAsFixed(1);
-                                return '${data.key}\n${data.value} ($percentage%)';
-                              },
-                              dataLabelSettings: DataLabelSettings(
-                                isVisible: true,
-                                textStyle: TextStyle(
-                                  color: Colors.black87,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                labelPosition: ChartDataLabelPosition.outside,
-                                useSeriesColor: false,
-                                color: Colors.white,
-                                borderRadius: 6,
-                                borderWidth: 1,
-                                borderColor: Colors.grey.shade300,
-                                margin: const EdgeInsets.all(3),
-                                labelIntersectAction:
-                                    LabelIntersectAction.shift,
-                              ),
-                              explode: true,
-                              explodeGesture: ActivationMode.singleTap,
-                              explodeOffset: '8%',
-                              explodeAll: false,
-                              animationDuration: 1500,
-                              enableTooltip: true,
-                              strokeColor: Colors.white,
-                              strokeWidth: 2,
-                              selectionBehavior: SelectionBehavior(
-                                enable: true,
-                                selectedOpacity: 1.0,
-                                unselectedOpacity: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+            const SizedBox(height: 8),
+            Text(
+              'Total productos: $totalProducts | Valor total: ${CurrencyFormatter.format(totalValue)}',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: chartHeight,
+              child: SfCircularChart(
+                margin: EdgeInsets.zero,
+                legend: const Legend(
+                  isVisible: true,
+                  position: LegendPosition.bottom,
+                  textStyle: TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.w500),
+                  overflowMode: LegendItemOverflowMode.wrap,
+                  iconHeight: 12,
+                  iconWidth: 12,
                 ),
+                series: <CircularSeries>[
+                  PieSeries<MapEntry<String, double>, String>(
+                    dataSource: sortedGroupData,
+                    xValueMapper: (MapEntry<String, double> data, _) => data.key,
+                    yValueMapper: (MapEntry<String, double> data, _) => data.value,
+                    pointColorMapper: (MapEntry<String, double> data, int index) =>
+                        groupColors[index % groupColors.length],
+                    dataLabelMapper: (MapEntry<String, double> data, _) {
+                      final total = groupData.values.reduce((a, b) => a + b);
+                      final percentage = (data.value / total * 100).toStringAsFixed(1);
+                      final shortName = _getShortGroupName(data.key);
+                      return '$shortName\n$percentage%';
+                    },
+                    radius: '60%',
+                    dataLabelSettings: DataLabelSettings(
+                      isVisible: true,
+                      textStyle: const TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.w600),
+                      labelPosition: ChartDataLabelPosition.outside,
+                      connectorLineSettings: ConnectorLineSettings(
+                        type: ConnectorType.line,
+                        length: '10%',
+                        color: Colors.grey.shade500,
+                        width: 1.2,
+                      ),
+                      useSeriesColor: false,
+                      color: Colors.white,
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: Colors.grey.shade300,
+                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      labelIntersectAction: LabelIntersectAction.shift,
+                    ),
+                    explode: true,
+                    explodeGesture: ActivationMode.singleTap,
+                    explodeOffset: '8%',
+                    explodeAll: false,
+                    animationDuration: 1200,
+                    enableTooltip: true,
+                    strokeColor: Colors.white,
+                    strokeWidth: 2,
+                    selectionBehavior: SelectionBehavior(
+                      enable: true,
+                      selectedOpacity: 1.0,
+                      unselectedOpacity: 0.5,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-       ),
+      ),
+    );
+
+    // Gráfico de distribución por Rotación
+    Widget rotationCard = Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Distribución por Rotación',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                Image.asset('statics/images/logo_geoflora.png', height: 30),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Total productos: $totalProducts',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: chartHeight,
+              child: SfCircularChart(
+                legend: const Legend(
+                  isVisible: true,
+                  position: LegendPosition.bottom,
+                  textStyle: TextStyle(color: Colors.black87, fontSize: 8, fontWeight: FontWeight.w500),
+                  overflowMode: LegendItemOverflowMode.wrap,
+                  iconHeight: 12,
+                  iconWidth: 12,
+                ),
+                series: <CircularSeries>[
+                  PieSeries<MapEntry<String, int>, String>(
+                    dataSource: rotationData.entries.toList(),
+                    xValueMapper: (MapEntry<String, int> data, _) => data.key,
+                    yValueMapper: (MapEntry<String, int> data, _) => data.value,
+                    pointColorMapper: (MapEntry<String, int> data, int index) =>
+                        _getRotationColor(data.key),
+                    dataLabelMapper: (MapEntry<String, int> data, _) {
+                      final total = rotationData.values.reduce((a, b) => a + b);
+                      final percentage = (data.value / total * 100).toStringAsFixed(1);
+                      return '${data.key}\n${data.value} ($percentage%)';
+                    },
+                    dataLabelSettings: DataLabelSettings(
+                      isVisible: true,
+                      textStyle: const TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.w600),
+                      labelPosition: ChartDataLabelPosition.outside,
+                      useSeriesColor: false,
+                      color: Colors.white,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: Colors.grey.shade300,
+                      margin: const EdgeInsets.all(3),
+                      labelIntersectAction: LabelIntersectAction.shift,
+                    ),
+                    explode: true,
+                    explodeGesture: ActivationMode.singleTap,
+                    explodeOffset: '8%',
+                    explodeAll: false,
+                    animationDuration: 1500,
+                    enableTooltip: true,
+                    strokeColor: Colors.white,
+                    strokeWidth: 2,
+                    selectionBehavior: SelectionBehavior(
+                      enable: true,
+                      selectedOpacity: 1.0,
+                      unselectedOpacity: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // En mobile: apilados; en desktop: lado a lado
+    Widget chartsRow = isMobile
+        ? Column(children: [groupCard, const SizedBox(height: 16), rotationCard])
+        : IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: groupCard),
+                const SizedBox(width: 16),
+                Expanded(child: rotationCard),
+              ],
+            ),
+          );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        chartsRow,
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -473,8 +431,10 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  height: 380,
+                LayoutBuilder(builder: (ctx3, cons3) {
+                  final h3 = cons3.maxWidth < 480 ? 260.0 : 380.0;
+                  return SizedBox(
+                  height: h3,
                   child: SfCartesianChart(
                     primaryXAxis: const CategoryAxis(
                       labelStyle: TextStyle(
@@ -588,13 +548,15 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       ),
                     ],
                   ),
-                ),
+                );
+                }),
               ],
             ),
           ),
         ),
       ],
     );
+    }); // LayoutBuilder
   }
 
   Widget _buildNegativeStockAlerts() {

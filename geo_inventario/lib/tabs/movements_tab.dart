@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:universal_html/html.dart' as html;
+// ignore: avoid_web_libraries_in_flutter
+import 'package:universal_html/html.dart' as html
+    if (dart.library.io) 'package:geo_inventario/stubs/html_stub.dart';
 import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -219,8 +221,10 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           const SizedBox(height: AppSpacing.sm),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.md),
-          SizedBox(
-            height: 300,
+          LayoutBuilder(builder: (ctx, cons) {
+            final chartH = cons.maxWidth < 480 ? 220.0 : 300.0;
+            return SizedBox(
+            height: chartH,
             child: SfCartesianChart(
               primaryXAxis: const CategoryAxis(
                 labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
@@ -303,7 +307,8 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 ),
               ],
             ),
-          ),
+          );
+          }),
         ],
       ),
     );

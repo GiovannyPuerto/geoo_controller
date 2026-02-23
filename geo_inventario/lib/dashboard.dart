@@ -233,8 +233,9 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   PreferredSizeWidget _buildAppBar() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return PreferredSize(
-      preferredSize: const Size.fromHeight(112),
+      preferredSize: Size.fromHeight(isMobile ? 96 : 112),
       child: Container(
         decoration: const BoxDecoration(
           gradient: AppGradients.primary,
@@ -250,7 +251,7 @@ class _DashboardPageState extends State<DashboardPage>
           ),
           title: Row(
             children: [
-              Image.asset('statics/images/logo_geoflora.png', height: 36),
+              Image.asset('statics/images/logo_geoflora.png', height: isMobile ? 28 : 36),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(

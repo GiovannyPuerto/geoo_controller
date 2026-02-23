@@ -6,15 +6,15 @@ plugins {
 
 android {
 
-    namespace = "com.example.geo_inventario"
-    compileSdk = flutter.compileSdkVersion
+    namespace = "co.geoflora.geo_inventario"
+    compileSdk = 36
 
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.example.geo_inventario"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        applicationId = "co.geoflora.geo_inventario"
+        minSdk = 24
+        targetSdk = 35
     }
 
     compileOptions {

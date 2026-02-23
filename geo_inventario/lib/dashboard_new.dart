@@ -78,7 +78,7 @@ class _DashboardPageState extends State<DashboardPage>
           isLoading = false;
         });
       } else {
-        throw Exception('Failed to load data');
+        throw Exception('Fallo al cargar los datos.');
       }
     } catch (e) {
       setState(() {
