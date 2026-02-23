@@ -4,7 +4,6 @@ import 'package:geo_inventario/models/monthly_movement.dart';
 
 class ApiService {
   static const String baseUrl = 'http://127.0.0.1:8000/api/inventory';
-
   // Suamtoria endpoints
   Future<Map<String, dynamic>?> getSummary() async {
     try {
@@ -346,7 +345,7 @@ class ApiService {
     }
   }
 
-  // Esportar movimientos
+  // Exportar movimientos
   Future<http.Response> exportMovements({
     String format = 'excel',
     String? warehouse,
