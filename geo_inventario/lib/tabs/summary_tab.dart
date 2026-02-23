@@ -303,13 +303,15 @@ class _SummaryTabPageState extends State<SummaryTabPage>
         );
       }
 
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 3, child: statusCard),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(flex: 3, child: rotCard),
-        ],
+      return IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(flex: 3, child: statusCard),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(flex: 3, child: rotCard),
+          ],
+        ),
       );
     });
   }

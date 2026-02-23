@@ -18,11 +18,11 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      throw Exception('Error loading summary: $e');
+      throw Exception('Error al cargar el resumen: $e');
     }
   }
 
-  // Enpoints de analisis y movimientos
+  // Endpoints de análisis y movimientos
   Future<List<Map<String, dynamic>>> getAnalysis({
     String? warehouse,
     String? category,
@@ -73,11 +73,11 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading analysis: $e');
+      throw Exception('Error al obtener análisis: $e');
     }
   }
 
-  // Movements endpoints
+  // Endpoints de movimientos de inventario
   Future<List<Map<String, dynamic>>> getMovements({
     String? inventoryName,
     String? warehouse,
@@ -119,11 +119,11 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading movements: $e');
+      throw Exception('Error al obtener movimientos: $e');
     }
   }
 
-  // Monthly movements
+  // Movimientos mensuales para gráfica
   Future<List<MonthlyMovement>> getMonthlyMovements({
     String? warehouse,
     String? category,
@@ -160,11 +160,11 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading monthly movements: $e');
+      throw Exception('Error al obtener movimientos mensuales: $e');
     }
   }
 
-  // Last update time
+  // Última actualización
   Future<String?> getLastUpdateTime() async {
     try {
       final response = await http.get(
@@ -185,7 +185,7 @@ class ApiService {
     }
   }
 
-  // Get welcome message
+  // Mensaje de bienvenida para pruebas de conexion
   Future<String?> getWelcomeMessage() async {
     try {
       final response = await http.get(
@@ -195,15 +195,15 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['message'] ?? 'Welcome to the Inventory Dashboard!';
+        return data['message'] ?? 'Bienvenido al dashboard de inventario!';
       }
-      return 'Welcome to the Inventory Dashboard!';
+      return 'Bienvenido al dashboard de inventario!';
     } catch (e) {
-      return 'Welcome to the Inventory Dashboard!';
+      return 'Bienvenido al dashboard de inventario!';
     }
   }
 
-  // File upload endpoints
+  // Endpoint de importacion de archivos de actualizacion y base, exportacion de analisis y movimientos
   Future<Map<String, dynamic>> uploadBaseFile(
       List<int> fileBytes, String fileName) async {
     try {
@@ -229,13 +229,13 @@ class ApiService {
             'summary': jsonResponse['summary'],
           };
         } catch (e) {
-          // If response is not JSON, return raw response
+          // Si la respuesta no es en json o no tiene el formato esperado, devolvemos un error genérico
           return {
             'statusCode': streamedResponse.statusCode,
             'body': responseData,
             'ok': false,
             'message': responseData,
-            'error': 'Invalid response format',
+            'error': 'Formato de respuesta inválido',
           };
         }
       } else {
@@ -265,7 +265,7 @@ class ApiService {
         'body': '',
         'ok': false,
         'message': '',
-        'error': 'Connection error: $e',
+        'error': 'Error de conexión: $e',
       };
     }
   }
@@ -290,11 +290,11 @@ class ApiService {
         'body': responseData,
       };
     } catch (e) {
-      throw Exception('Error uploading update files: $e');
+      throw Exception('Error al subir archivos de actualización: $e');
     }
   }
 
-  // Export analysis data
+  // Exportar análisis
   Future<http.Response> exportAnalysis({
     String format = 'excel',
     String? warehouse,
@@ -342,11 +342,11 @@ class ApiService {
 
       return response;
     } catch (e) {
-      throw Exception('Error exporting analysis: $e');
+      throw Exception('Error al exportar análisis: $e');
     }
   }
 
-  // Export movements data
+  // Esportar movimientos
   Future<http.Response> exportMovements({
     String format = 'excel',
     String? warehouse,
@@ -380,11 +380,11 @@ class ApiService {
 
       return response;
     } catch (e) {
-      throw Exception('Error exporting movements: $e');
+      throw Exception('Error al exportar movimientos: $e');
     }
   }
 
-  // Get import batches
+  // Obtener lotes de importación
   Future<List<Map<String, dynamic>>> getBatches() async {
     try {
       final response = await http.get(
@@ -398,11 +398,11 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading batches: $e');
+      throw Exception('Error al obtener lotes de importación: $e');
     }
   }
 
-  // Get products
+  // Obtenemos productos
   Future<List<Map<String, dynamic>>> getProducts() async {
     try {
       final response = await http.get(
@@ -420,7 +420,7 @@ class ApiService {
     }
   }
 
-  // Create inventory
+  // Crear inventario
   Future<Map<String, dynamic>> createInventory(String inventoryName) async {
     try {
       final response = await http
@@ -440,7 +440,7 @@ class ApiService {
     }
   }
 
-  // Get product history
+  // Obtener historial de producto
   Future<List<Map<String, dynamic>>> getProductHistory(
       String productCode) async {
     try {
@@ -455,11 +455,11 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading product history: $e');
+      throw Exception('Error al obtener historial de producto: $e');
     }
   }
 
-  // List inventories
+  // Listar inventarios
   Future<List<String>> listInventories() async {
     try {
       final response = await http.get(
@@ -473,11 +473,11 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading inventories: $e');
+      throw Exception('Error al listar inventarios de base de datos: $e');
     }
   }
 
-  // Get inventory at date
+  // Obtener inventario en una fecha específica
   Future<List<Map<String, dynamic>>> getInventoryAtDate(DateTime date) async {
     try {
       final params = <String, String>{
@@ -498,7 +498,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error loading inventory at date: $e');
+      throw Exception('Error al obtener inventario en una fecha específica: $e');
     }
   }
 }

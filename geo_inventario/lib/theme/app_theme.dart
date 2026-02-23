@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  // Verde primario (marca Geoflora)
+  // Verde primario
   static const Color primary = Color(0xFF10B981);
   static const Color primaryDark = Color(0xFF059669);
   static const Color primaryDarker = Color(0xFF047857);

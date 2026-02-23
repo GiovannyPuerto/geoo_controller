@@ -4,8 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 
-// ─── Helpers compartidos ────────────────────────────────────────────────────
-
 /// Fila alterna: filas pares blancas, impares gris muy suave.
 Color _rowColor(int index) =>
     index.isEven ? AppColors.surface : AppColors.surfaceVariant;

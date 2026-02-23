@@ -232,8 +232,9 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        IntrinsicHeight(
+         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
               child: Card(
@@ -330,11 +331,19 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                 labelIntersectAction:
                                     LabelIntersectAction.shift,
                               ),
-                              explode: false,
+                              explode: true,
+                              explodeGesture: ActivationMode.singleTap,
+                              explodeOffset: '8%',
+                              explodeAll: false,
                               animationDuration: 1200,
                               enableTooltip: true,
                               strokeColor: Colors.white,
                               strokeWidth: 2,
+                              selectionBehavior: SelectionBehavior(
+                                enable: true,
+                                selectedOpacity: 1.0,
+                                unselectedOpacity: 0.5,
+                              ),
                             ),
                           ],
                         ),
@@ -379,7 +388,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       ),
                       const SizedBox(height: 16),
                       SizedBox(
-                        height: 400,
+                        height: 500,
                         child: SfCircularChart(
                           legend: const Legend(
                             isVisible: true,
@@ -428,12 +437,18 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                     LabelIntersectAction.shift,
                               ),
                               explode: true,
-                              explodeOffset: '3%',
+                              explodeGesture: ActivationMode.singleTap,
+                              explodeOffset: '8%',
                               explodeAll: false,
                               animationDuration: 1500,
                               enableTooltip: true,
                               strokeColor: Colors.white,
                               strokeWidth: 2,
+                              selectionBehavior: SelectionBehavior(
+                                enable: true,
+                                selectedOpacity: 1.0,
+                                unselectedOpacity: 0.5,
+                              ),
                             ),
                           ],
                         ),
@@ -445,6 +460,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
             ),
           ],
         ),
+       ),
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -458,21 +474,21 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
-                  height: 300,
+                  height: 380,
                   child: SfCartesianChart(
                     primaryXAxis: const CategoryAxis(
                       labelStyle: TextStyle(
                         color: Colors.black87,
-                        fontSize: 8,
+                        fontSize: 9,
                         fontWeight: FontWeight.w500,
                       ),
                       axisLine: AxisLine(width: 1, color: Colors.grey),
                       majorTickLines: MajorTickLines(size: 0),
                       majorGridLines: MajorGridLines(width: 0),
-                      labelRotation: 30,
+                      labelRotation: 20,
                     ),
                     primaryYAxis: NumericAxis(
-                      numberFormat: NumberFormat.currency(
+                      numberFormat: NumberFormat.compactCurrency(
                         locale: 'es_CO',
                         symbol: '\$',
                       ),
@@ -502,7 +518,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                     tooltipBehavior: TooltipBehavior(
                       enable: true,
                       header: '',
-                      format: 'point.x: point.y',
+                      format: 'point.x\nTotal: \$point.y',
                       textStyle: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -513,7 +529,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                     ),
                     series: <CartesianSeries>[
                       ColumnSeries<MapEntry<String, double>, String>(
-                        dataSource: groupData.entries.toList(),
+                        dataSource: sortedGroupData,
                         xValueMapper: (MapEntry<String, double> data, _) =>
                             _getShortGroupName(data.key),
                         yValueMapper: (MapEntry<String, double> data, _) =>
@@ -521,21 +537,51 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                         pointColorMapper:
                             (MapEntry<String, double> data, int index) =>
                                 groupColors[index % groupColors.length],
-                        dataLabelSettings: const DataLabelSettings(
+                        dataLabelSettings: DataLabelSettings(
                           isVisible: true,
-                          textStyle: TextStyle(
-                            color: Colors.black87,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          builder: (dynamic dataPoint,
+                              dynamic point,
+                              dynamic series,
+                              int pointIndex,
+                              int seriesIndex) {
+                            final entry =
+                                dataPoint as MapEntry<String, double>;
+                            final formatted =
+                                CurrencyFormatter.format(entry.value);
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                    color: Colors.grey.shade300, width: 1),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.08),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                formatted,
+                                style: const TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            );
+                          },
                           labelAlignment: ChartDataLabelAlignment.top,
                           useSeriesColor: false,
                         ),
-                        width: 0.7,
+                        width: 0.65,
                         spacing: 0.1,
                         borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(4),
-                          topRight: Radius.circular(4),
+                          topLeft: Radius.circular(5),
+                          topRight: Radius.circular(5),
                         ),
                         animationDuration: 1500,
                         enableTooltip: true,

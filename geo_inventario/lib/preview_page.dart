@@ -22,8 +22,8 @@ class PreviewPage extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.upload_file),
             onPressed: () {
-              // TODO: Implement the actual upload
-              Navigator.pop(context, true); // Return true to indicate upload confirmation
+              // Aquí iría la lógica para exportar el archivo a la base de datos
+              Navigator.pop(context, true); // Retorna true para indicar que el archivo se exporto con exito
             },
           ),
         ],
