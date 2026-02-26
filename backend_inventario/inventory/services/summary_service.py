@@ -30,7 +30,7 @@ def get_inventory_summary_data(inventory_name="default"):
             "negative_stock_alerts": [],
         }
 
-    # Stock inicial agregado por (producto, almacén) 
+    # Stock inicial agregado por (producto, almacén)
     initial_map: dict[int, dict[str, Decimal]] = {}
     for row in WarehouseDetail.objects.filter(product_id__in=product_ids).values(
         "product_id", "warehouse", "initial_quantity"
@@ -46,6 +46,29 @@ def get_inventory_summary_data(inventory_name="default"):
         .values("product_id", "warehouse")
         .annotate(qty=Sum("quantity"))
     }
+    latest_final_record_ids = [
+        row["latest_id"]
+        for row in InventoryRecord.objects.filter(
+            product_id__in=product_ids,
+            final_quantity__isnull=False,
+        )
+        .values("product_id", "warehouse")
+        .annotate(latest_id=Max("id"))
+        if row["latest_id"]
+    ]
+    latest_final_map: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"]): Decimal(row["final_quantity"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=latest_final_record_ids).values(
+            "product_id", "warehouse", "final_quantity"
+        )
+    }
+
+    # Unificamos almacenes presentes en base y en movimientos para evitar descuadres.
+    warehouses_by_product: dict[int, set[str]] = {}
+    for pid, warehouses in initial_map.items():
+        warehouses_by_product.setdefault(pid, set()).update(warehouses.keys())
+    for pid, warehouse in movement_map.keys():
+        warehouses_by_product.setdefault(pid, set()).add(warehouse)
 
     #  Último unit_cost por producto (MAX id = registro más reciente) 
     latest_ids = {
@@ -65,7 +88,7 @@ def get_inventory_summary_data(inventory_name="default"):
     product_meta = {
         p["id"]: p
         for p in Product.objects.filter(id__in=product_ids).values(
-            "id", "code", "description", "initial_unit_cost"
+            "id", "code", "description", "initial_balance", "initial_unit_cost"
         )
     }
 
@@ -76,9 +99,19 @@ def get_inventory_summary_data(inventory_name="default"):
 
     for pid in product_ids:
         current_stock = Decimal("0")
-        warehouses = initial_map.get(pid, {})
-        for warehouse, init_qty in warehouses.items():
-            current_stock += init_qty + movement_map.get((pid, warehouse), Decimal("0"))
+        warehouses = warehouses_by_product.get(pid, set())
+        if warehouses:
+            for warehouse in warehouses:
+                key = (pid, warehouse)
+                if key in latest_final_map:
+                    current_stock += latest_final_map[key]
+                else:
+                    init_qty = initial_map.get(pid, {}).get(warehouse, Decimal("0"))
+                    mov_qty = movement_map.get(key, Decimal("0"))
+                    current_stock += init_qty + mov_qty
+        else:
+            meta = product_meta.get(pid, {})
+            current_stock = Decimal(meta.get("initial_balance") or 0)
 
         total_quantity += current_stock
 

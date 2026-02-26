@@ -35,8 +35,8 @@ class ExcelUploadService {
         ? jsonResponse['summary'] as Map<String, dynamic>
         : <String, dynamic>{};
 
-    final registered = (summary['base_records'] ?? summary['total_processed'] ?? 0)
-        .toString();
+    final registered =
+        (summary['base_records'] ?? summary['total_processed'] ?? 0).toString();
     final repeated = (summary['duplicates_base'] ?? 0).toString();
 
     return 'Carga base completada: $registered registrados, '
@@ -51,9 +51,10 @@ class ExcelUploadService {
     final registered =
         (summary['update_registered_records'] ?? summary['update_records'] ?? 0)
             .toString();
-    final repeated =
-        (summary['update_repeated_records'] ?? summary['duplicates_update'] ?? 0)
-            .toString();
+    final repeated = (summary['update_repeated_records'] ??
+            summary['duplicates_update'] ??
+            0)
+        .toString();
 
     final files = (summary['update_files'] is List)
         ? summary['update_files'] as List
@@ -78,7 +79,7 @@ class ExcelUploadService {
   Future<FilePickerResult?> pickUpdateFiles() {
     return _picker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['xlsx', 'xls'],
+      allowedExtensions: ['xlsx', 'xls', 'csv'],
       allowMultiple: true,
     );
   }
@@ -109,7 +110,8 @@ class ExcelUploadService {
 
       return UploadOperationResult(
         ok: ok,
-        message: rawMessage.isNotEmpty ? rawMessage : (ok ? fallbackMessage : ''),
+        message:
+            rawMessage.isNotEmpty ? rawMessage : (ok ? fallbackMessage : ''),
         error: ok
             ? null
             : (response['error'] ?? 'Error al cargar el archivo').toString(),

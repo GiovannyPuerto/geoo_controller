@@ -8,15 +8,16 @@ de inventario para mantener las vistas HTTP delgadas.
 
 import io
 import importlib.util
+import hashlib
 import logging
 import os
 import re
 import tempfile
+import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 from functools import lru_cache
 from zipfile import BadZipFile
-
 import pandas as pd
 from django.http import JsonResponse
 from django.utils import timezone
@@ -35,8 +36,9 @@ BASE_FILE_COLUMNS = [
 
 UPDATE_FILE_COLUMNS = [
     'item', 'desc_item', 'localizacion', 'categoria',
-    'fecha', 'documento', 'entradas', 'salidas',
-    'unitario', 'total', 'cantidad', 'cost_center'
+    'fecha', 'documento', 'registro', 'cp',
+    'entradas', 'salidas', 'unitario', 'total',
+    'cantidad', 'cost_center', 'lote'
 ]
 
 UPDATE_REQUIRED_COLUMNS = [
@@ -46,9 +48,33 @@ UPDATE_REQUIRED_COLUMNS = [
 ]
 
 UPDATE_NUMERIC_COLUMNS = ['entradas', 'salidas', 'cantidad', 'unitario', 'total']
+UPDATE_FALLBACK_COLUMNS = [
+    'item', 'desc_item', 'localizacion', 'categoria',
+    'fecha', 'documento', 'entradas', 'salidas',
+    'unitario', 'total', 'cantidad', 'cost_center'
+]
+BASE_REQUIRED_COLUMNS = ['codigo', 'descripcion', 'cantidad', 'costo_unitario', 'valor_total']
 CSV_CHUNK_SIZE = 15000
 MOVEMENT_BULK_SIZE = 2000
 SIMPLE_NUMERIC_RE = re.compile(r'^-?\d+(?:\.\d+)?$')
+NON_ALNUM_RE = re.compile(r'[^a-z0-9]+')
+
+BASE_COLUMN_SYNONYMS = {
+    'fecha_corte': ['fecha_corte', 'fecha corte', 'fecha de corte', 'fecha'],
+    'mes': ['mes', 'periodo', 'periodo_mes', 'month'],
+    'almacen': ['almacen', 'almacén', 'bodega', 'warehouse', 'localizacion', 'localización'],
+    'grupo': ['grupo', 'categoria', 'categoría', 'group', 'tipo'],
+    'codigo': ['codigo', 'código', 'cod', 'code', 'item', 'producto', 'codigo_producto'],
+    'descripcion': [
+        'descripcion', 'descripción', 'description', 'desc_item', 'desc',
+        'nombre', 'nombre_producto', 'producto_desc'
+    ],
+    'cantidad': ['cantidad', 'saldo_inicial', 'saldo inicial', 'qty', 'quantity', 'saldo'],
+    'unidad_medida': ['unidad_medida', 'unidad medida', 'unidad', 'u_m', 'um'],
+    'costo_unitario': ['costo_unitario', 'costo unitario', 'unitario', 'unit_cost', 'costo'],
+    'valor_total': ['valor_total', 'valor total', 'total', 'monto', 'total_cost'],
+}
+
 UPDATE_COLUMN_SYNONYMS = {
     'item': ['item', 'codigo', 'code', 'producto', 'cod', 'código'],
     'desc_item': ['desc_item', 'descripcion', 'description', 'desc', 'producto_desc', 'descripción'],
@@ -56,17 +82,71 @@ UPDATE_COLUMN_SYNONYMS = {
     'categoria': ['categoria', 'category', 'grupo', 'group', 'tipo', 'categoría'],
     'fecha': ['fecha', 'date', 'fecha_mov', 'fecha_documento', 'fecha_registro'],
     'documento': ['documento', 'doc', 'document', 'numero_documento', 'número_documento'],
+    'registro': ['registro', 'linea_registro', 'n_registro', 'registro_doc'],
+    'cp': ['cp', 'comprobante', 'tipo_comprobante'],
     'entradas': ['entradas', 'entrada', 'in', 'input', 'ingreso'],
     'salidas': ['salidas', 'salida', 'out', 'output', 'egreso'],
     'unitario': ['unitario', 'unit_cost', 'costo_unitario', 'precio_unitario', 'unit', 'costo_unit'],
     'total': ['total', 'total_cost', 'valor_total', 'monto'],
     'cantidad': ['cantidad', 'quantity', 'qty', 'cant', 'amount'],
-    'cost_center': ['cost_center', 'centro_costo', 'cc', 'costcenter', 'centro_costo'],
+    'cost_center': ['cost_center', 'centro_costo', 'cc', 'costcenter', 'centro_costo', 'c_costos', 'c_costo', 'ccostos'],
+    'lote': ['lote', 'lote_ubicac', 'lote_ubicac.', 'lote_ubicacion', 'lote/ubicac', 'lote/ubicac.'],
 }
 UPDATE_READABLE_COLUMNS = {
     synonym.lower().strip()
     for synonyms in UPDATE_COLUMN_SYNONYMS.values()
     for synonym in synonyms
+}
+
+
+def _canonical_column_name(name):
+    """
+    Normaliza nombres de columnas para compararlos de forma tolerante.
+    """
+    if name is None:
+        return ''
+
+    raw = str(name).strip()
+    if not raw:
+        return ''
+
+    raw_lower = raw.lower()
+    if raw_lower.startswith('unnamed:'):
+        return ''
+
+    normalized = unicodedata.normalize('NFKD', raw_lower)
+    normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = NON_ALNUM_RE.sub('_', normalized).strip('_')
+    return normalized
+
+
+def _build_column_alias_index(synonyms_map):
+    """
+    Construye índice normalizado de sinónimos -> columna destino.
+    """
+    alias_index = {}
+    for canonical_name, synonyms in synonyms_map.items():
+        alias_index[_canonical_column_name(canonical_name)] = canonical_name
+        for synonym in synonyms:
+            alias = _canonical_column_name(synonym)
+            if alias:
+                alias_index[alias] = canonical_name
+    return alias_index
+
+
+BASE_ALIAS_INDEX = _build_column_alias_index(BASE_COLUMN_SYNONYMS)
+UPDATE_ALIAS_INDEX = _build_column_alias_index(UPDATE_COLUMN_SYNONYMS)
+BASE_READABLE_COLUMNS = {
+    alias
+    for synonyms in BASE_COLUMN_SYNONYMS.values()
+    for alias in [_canonical_column_name(s) for s in synonyms]
+    if alias
+}
+UPDATE_READABLE_CANONICAL = {
+    alias
+    for synonyms in UPDATE_COLUMN_SYNONYMS.values()
+    for alias in [_canonical_column_name(s) for s in synonyms]
+    if alias
 }
 
 
@@ -135,6 +215,15 @@ def _build_row_signature(*values):
     Construye una firma hashable de una fila para detectar duplicados.
     """
     return tuple(_normalize_signature_value(v) for v in values)
+
+
+def _build_source_record_fallback(*values):
+    """
+    Construye un identificador estable cuando el archivo no trae REGISTRO.
+    """
+    normalized_parts = [_normalize_signature_value(v) for v in values]
+    base = '|'.join(normalized_parts).encode('utf-8')
+    return hashlib.sha1(base).hexdigest()[:24]
 
 
 @lru_cache(maxsize=512)
@@ -291,8 +380,87 @@ def _update_usecols_filter(column_name):
     """
     Selecciona solo columnas potencialmente útiles para archivos de actualización.
     """
-    normalized = str(column_name).lower().strip()
-    return normalized in UPDATE_READABLE_COLUMNS
+    normalized = _canonical_column_name(column_name)
+    return normalized in UPDATE_READABLE_CANONICAL
+
+
+def _base_usecols_filter(column_name):
+    """
+    Selecciona solo columnas potencialmente útiles para archivos base.
+    """
+    normalized = _canonical_column_name(column_name)
+    return normalized in BASE_READABLE_COLUMNS
+
+
+def _coalesce_series(primary, secondary):
+    """
+    Fusiona dos series: conserva `primary` salvo cuando esté vacío.
+    """
+    if primary is None:
+        return secondary
+
+    primary_str = primary.fillna('').astype(str).str.strip()
+    empty_mask = primary_str.eq('') | primary_str.str.lower().isin(['nan', 'none', 'nat'])
+    return primary.where(~empty_mask, secondary)
+
+
+def _normalize_columns_by_synonyms(
+    df,
+    alias_index,
+    expected_columns,
+    required_columns,
+):
+    """
+    Mapea columnas de entrada a columnas canónicas usando sinónimos normalizados.
+    """
+    if df is None:
+        return None, required_columns
+
+    normalized_df = pd.DataFrame(index=df.index)
+    for original_col in df.columns:
+        canonical_source = _canonical_column_name(original_col)
+        canonical_target = alias_index.get(canonical_source)
+        if not canonical_target:
+            continue
+
+        series = df[original_col]
+        if canonical_target in normalized_df.columns:
+            normalized_df[canonical_target] = _coalesce_series(
+                normalized_df[canonical_target], series
+            )
+        else:
+            normalized_df[canonical_target] = series
+
+    for col in expected_columns:
+        if col not in normalized_df.columns:
+            normalized_df[col] = None
+
+    missing_columns = [
+        col
+        for col in required_columns
+        if col not in normalized_df.columns
+        or normalized_df[col].fillna('').astype(str).str.strip().eq('').all()
+    ]
+    return normalized_df, missing_columns
+
+
+def _drop_embedded_header_rows(df, primary_col, header_tokens):
+    """
+    Elimina filas que parecen encabezados repetidos dentro del cuerpo.
+    """
+    if df is None or df.empty or primary_col not in df.columns:
+        return df
+
+    canonical_primary = (
+        df[primary_col]
+        .fillna('')
+        .astype(str)
+        .map(_canonical_column_name)
+    )
+    header_mask = canonical_primary.isin(header_tokens)
+    if header_mask.any():
+        return df.loc[~header_mask].copy()
+    return df
 
 
 def _read_excel_bytes(file_content, engine, **kwargs):
@@ -312,10 +480,29 @@ def _read_base_dataframe(base_content, base_filename):
     Lectura robusta del archivo base manteniendo valores en tipo object
     para preservar precisión hasta la fase de normalización.
     """
+    lower_name = (base_filename or '').lower()
+    engine_candidates = _candidate_excel_engines(base_filename, base_content)
     last_error = None
-    for engine in _candidate_excel_engines(base_filename, base_content):
+
+    if lower_name.endswith('.xls') and _looks_like_html_table(base_content):
+        logger.info(f"El archivo base '{base_filename}' parece tabla HTML. Intentando read_html.")
+        for header_idx in [0, 1, 2, 3]:
+            try:
+                dfs = pd.read_html(io.BytesIO(base_content), encoding='utf-8', header=header_idx)
+                for html_df in dfs:
+                    normalized_df, missing_cols = _normalize_base_df_columns(html_df)
+                    if not missing_cols:
+                        return normalized_df
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    f"No se pudo parsear base HTML '{base_filename}' con header {header_idx + 1}: {exc}"
+                )
+
+    # Fast path: estructura clásica de base (A:J, encabezado en primera fila).
+    for engine in engine_candidates:
         try:
-            return _read_excel_bytes(
+            raw_df = _read_excel_bytes(
                 base_content,
                 engine=engine,
                 header=0,
@@ -323,9 +510,63 @@ def _read_base_dataframe(base_content, base_filename):
                 names=BASE_FILE_COLUMNS,
                 dtype='object',
             )
+            normalized_df, missing_cols = _normalize_base_df_columns(raw_df)
+            if not missing_cols:
+                return normalized_df
+            logger.warning(
+                f"Lectura base rápida incompleta en '{base_filename}' con engine '{engine}': "
+                f"faltan {missing_cols}"
+            )
         except Exception as exc:
             last_error = exc
             logger.warning(f"Error leyendo base con engine '{engine}': {exc}")
+
+    # Fallback por sinónimos de encabezado.
+    for header_idx in [0, 1, 2, 3, 4, 5]:
+        for engine in engine_candidates:
+            try:
+                raw_df = _read_excel_bytes(
+                    base_content,
+                    engine=engine,
+                    header=header_idx,
+                    dtype='object',
+                    usecols=_base_usecols_filter,
+                )
+                normalized_df, missing_cols = _normalize_base_df_columns(raw_df)
+                if not missing_cols:
+                    return normalized_df
+                logger.warning(
+                    f"Lectura base incompleta en '{base_filename}' con engine '{engine}' "
+                    f"y encabezado {header_idx + 1}: faltan {missing_cols}"
+                )
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    f"Fallback base falló en '{base_filename}' con engine '{engine}' "
+                    f"y encabezado {header_idx + 1}: {exc}"
+                )
+
+    # Fallback por posición fija (algunos archivos traen encabezados corruptos).
+    for header_idx in [0, 1, 2, 3, 4, 5]:
+        for engine in engine_candidates:
+            try:
+                raw_df = _read_excel_bytes(
+                    base_content,
+                    engine=engine,
+                    header=header_idx,
+                    usecols=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                    names=BASE_FILE_COLUMNS,
+                    dtype='object',
+                )
+                normalized_df, missing_cols = _normalize_base_df_columns(raw_df)
+                if not missing_cols:
+                    return normalized_df
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    f"Fallback posicional base falló en '{base_filename}' con engine '{engine}' "
+                    f"y encabezado {header_idx + 1}: {exc}"
+                )
 
     if last_error:
         raise last_error
@@ -375,6 +616,23 @@ def _strip_object_series(series):
     return series.fillna('').astype(str).str.strip()
 
 
+@lru_cache(maxsize=100000)
+def _normalize_product_code_cached(raw):
+    """
+    Normaliza códigos de producto para comparar base/actualización.
+    """
+    text = str(raw).strip()
+    if not text or text.lower() in ('nan', 'none', 'nat'):
+        return ''
+
+    # Excel suele exportar códigos numéricos como "123.0".
+    if re.fullmatch(r'\d+\.0+', text):
+        text = text.split('.', 1)[0]
+
+    text = text.lstrip('0')
+    return text or '0'
+
+
 def _normalize_update_dataframe(df):
     """
     Limpia dataframe de actualización preservando precisión numérica.
@@ -389,26 +647,30 @@ def _normalize_update_dataframe(df):
         if col not in df.columns:
             df[col] = None
 
-    df.loc[:, 'item'] = df['item'].apply(lambda x: str(x).strip() if pd.notna(x) else '')
+    df.loc[:, 'item'] = _strip_object_series(df['item']).apply(_normalize_product_code_cached)
     df = df.loc[df['item'] != ''].copy()
-    df = df.loc[df['item'].str.lower() != 'nan'].copy()
-    df.loc[:, 'item'] = df['item'].str.lstrip('0')
+    df = df.loc[~df['item'].str.lower().isin(['nan', 'none', 'nat'])].copy()
 
     # Estandarizamos texto y dejamos parseo numérico/fecha para la fase final.
-    df.loc[:, 'fecha'] = df['fecha'].apply(
-        lambda x: str(x).strip() if pd.notna(x) else ''
+    df.loc[:, 'fecha'] = _strip_object_series(df['fecha'])
+    df.loc[:, 'documento'] = _strip_object_series(df['documento']).apply(
+        _normalize_document_cached
     )
-    df.loc[:, 'documento'] = df['documento'].apply(_normalize_document_value)
 
     for col in UPDATE_NUMERIC_COLUMNS:
-        df.loc[:, col] = df[col].apply(
-            lambda x: str(x).strip() if pd.notna(x) else ''
-        )
+        df.loc[:, col] = _strip_object_series(df[col])
 
-    df.loc[:, 'cost_center'] = df['cost_center'].apply(
-        lambda x: str(x).strip() if pd.notna(x) else None
-    )
-    df.loc[df['cost_center'] == '', 'cost_center'] = None
+    df.loc[:, 'registro'] = _strip_object_series(df['registro'])
+    df.loc[df['registro'].str.lower().isin(['', 'nan', 'none', 'nat']), 'registro'] = ''
+
+    df.loc[:, 'cp'] = _strip_object_series(df['cp'])
+    df.loc[df['cp'].str.lower().isin(['', 'nan', 'none', 'nat']), 'cp'] = ''
+
+    df.loc[:, 'cost_center'] = _strip_object_series(df['cost_center'])
+    df.loc[df['cost_center'].isin(['', 'nan', 'none', 'nat']), 'cost_center'] = None
+
+    df.loc[:, 'lote'] = _strip_object_series(df['lote'])
+    df.loc[df['lote'].str.lower().isin(['', 'nan', 'none', 'nat']), 'lote'] = ''
 
     return df
 
@@ -419,20 +681,73 @@ def _read_update_dataframe(update_content, file_name):
     """
     lower_name = (file_name or '').lower()
 
+    if lower_name.endswith('.csv'):
+        decoded = None
+        for enc in ('utf-8-sig', 'latin-1'):
+            try:
+                decoded = update_content.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if decoded is None:
+            raise ValueError(f"No se pudo decodificar el CSV '{file_name}'")
+
+        lines = decoded.splitlines()
+        if not lines:
+            raise ValueError(f"El CSV '{file_name}' está vacío")
+
+        header_idx = 0
+        delimiter = ';'
+        for idx, line in enumerate(lines[:20]):
+            sep = ';' if line.count(';') >= line.count(',') else ','
+            raw_cols = [part.strip() for part in line.split(sep)]
+            canonical_cols = {_canonical_column_name(col) for col in raw_cols}
+            if {'item', 'fecha', 'documento'}.issubset(canonical_cols):
+                header_idx = idx
+                delimiter = sep
+                break
+
+        raw_df = pd.read_csv(
+            io.StringIO(decoded),
+            sep=delimiter,
+            header=header_idx,
+            dtype='object',
+            na_filter=False,
+            keep_default_na=False,
+            engine='python',
+        )
+        normalized_df, missing_cols = _normalize_update_df_columns(raw_df)
+        if missing_cols:
+            raise ValueError(
+                f"CSV '{file_name}' sin columnas requeridas de actualización: {missing_cols}"
+            )
+        return normalized_df
+
+    engine_candidates = _candidate_excel_engines(file_name, update_content)
+    last_error = None
+
     if lower_name.endswith('.xls') and _looks_like_html_table(update_content):
         logger.info(f"El archivo '{file_name}' parece una tabla HTML. Intentando read_html.")
-        try:
-            dfs = pd.read_html(io.BytesIO(update_content), encoding='utf-8', header=3)
-            for html_df in dfs:
-                html_df, missing_cols = _normalize_update_df_columns(html_df)
-                if not missing_cols:
-                    return html_df
-            logger.warning(f"El parseo HTML de '{file_name}' no coincide con columnas requeridas.")
-        except Exception as exc:
-            logger.warning(f"No se pudo parsear '{file_name}' como HTML: {exc}")
+        for header_idx in [3, 2, 1, 0]:
+            try:
+                dfs = pd.read_html(io.BytesIO(update_content), encoding='utf-8', header=header_idx)
+                for html_df in dfs:
+                    html_df, missing_cols = _normalize_update_df_columns(html_df)
+                    if not missing_cols:
+                        return html_df
+                logger.warning(
+                    f"Parseo HTML incompleto de '{file_name}' con header {header_idx + 1}: "
+                    f"faltan columnas requeridas."
+                )
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    f"No se pudo parsear '{file_name}' como HTML con header {header_idx + 1}: {exc}"
+                )
 
     # Intento rápido con encabezado habitual (fila 4)
-    for engine in _candidate_excel_engines(file_name, update_content):
+    for engine in engine_candidates:
         try:
             update_df = _read_excel_bytes(
                 update_content,
@@ -448,24 +763,51 @@ def _read_update_dataframe(update_content, file_name):
                 f"Lectura rápida incompleta en '{file_name}' con engine '{engine}': {missing_cols}"
             )
         except Exception as exc:
+            last_error = exc
             logger.warning(f"Lectura rápida falló en '{file_name}' con engine '{engine}': {exc}")
 
-    # Fallback por posiciones fijas de columnas y múltiples posibles headers.
-    header_positions = [0, 1, 2, 3, 4]
-    usecols = [0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21, 22]
-    last_error = None
-
+    # Fallback por encabezado variable, leyendo columnas por sinónimos.
+    header_positions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     for header_idx in header_positions:
-        for engine in _candidate_excel_engines(file_name, update_content):
+        for engine in engine_candidates:
             try:
-                return _read_excel_bytes(
+                raw_df = _read_excel_bytes(
+                    update_content,
+                    engine=engine,
+                    header=header_idx,
+                    dtype='object',
+                    usecols=_update_usecols_filter,
+                )
+                normalized_df, missing_cols = _normalize_update_df_columns(raw_df)
+                if not missing_cols:
+                    return normalized_df
+                logger.warning(
+                    f"Lectura por sinónimos incompleta en '{file_name}' con engine '{engine}' "
+                    f"y encabezado {header_idx + 1}: {missing_cols}"
+                )
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    f"Fallback por sinónimos falló en '{file_name}' con engine '{engine}' "
+                    f"y encabezado {header_idx + 1}: {exc}"
+                )
+
+    # Fallback por posiciones fijas de columnas y múltiples posibles headers.
+    usecols = [0, 2, 3, 4, 13, 14, 17, 18, 19, 20, 21, 22]
+    for header_idx in header_positions:
+        for engine in engine_candidates:
+            try:
+                raw_df = _read_excel_bytes(
                     update_content,
                     engine=engine,
                     header=header_idx,
                     usecols=usecols,
-                    names=UPDATE_FILE_COLUMNS,
+                    names=UPDATE_FALLBACK_COLUMNS,
                     dtype='object',
                 )
+                normalized_df, missing_cols = _normalize_update_df_columns(raw_df)
+                if not missing_cols:
+                    return normalized_df
             except Exception as exc:
                 last_error = exc
                 logger.warning(
@@ -486,24 +828,26 @@ def _normalize_update_df_columns(df):
         tuple[pd.DataFrame, list[str]]: dataframe normalizado y
         lista de columnas requeridas faltantes.
     """
-    if df is None:
-        return None, []
-    
-    df.columns = df.columns.str.lower().str.strip()
-    column_mapping = {}
-    
-    for expected, syn_list in UPDATE_COLUMN_SYNONYMS.items():
-        if expected in df.columns:
-            continue
-        for syn in syn_list:
-            if syn in df.columns:
-                column_mapping[syn] = expected
-                break
-    df.rename(columns=column_mapping, inplace=True)
-    
-    missing_columns = [col for col in UPDATE_REQUIRED_COLUMNS if col not in df.columns]
-    
-    return df, missing_columns
+    normalized_df, missing_columns = _normalize_columns_by_synonyms(
+        df=df,
+        alias_index=UPDATE_ALIAS_INDEX,
+        expected_columns=UPDATE_FILE_COLUMNS,
+        required_columns=UPDATE_REQUIRED_COLUMNS,
+    )
+    return normalized_df, missing_columns
+
+
+def _normalize_base_df_columns(df):
+    """
+    Normaliza columnas del DataFrame base usando sinónimos tolerantes.
+    """
+    normalized_df, missing_columns = _normalize_columns_by_synonyms(
+        df=df,
+        alias_index=BASE_ALIAS_INDEX,
+        expected_columns=BASE_FILE_COLUMNS,
+        required_columns=BASE_REQUIRED_COLUMNS,
+    )
+    return normalized_df, missing_columns
 
 
 def procesar_importacion_inventario(request, inventory_name='default'):
@@ -543,8 +887,8 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         update_files_data = []
         for update_file in update_files:
             # Validar formato y tamaño de cada archivo de actualización.
-            if not update_file.name.lower().endswith(('.xls', '.xlsx')):
-                return JsonResponse({'ok': False, 'error': f'Formato de archivo de actualización "{update_file.name}" no válido. Solo se permiten archivos .xls o .xlsx'}, status=400)
+            if not update_file.name.lower().endswith(('.xls', '.xlsx', '.csv')):
+                return JsonResponse({'ok': False, 'error': f'Formato de archivo de actualización "{update_file.name}" no válido. Solo se permiten archivos .xls, .xlsx o .csv'}, status=400)
             if update_file.size == 0:
                 return JsonResponse({'ok': False, 'error': f'El archivo de actualización "{update_file.name}" está vacío'}, status=400)
             file_content = update_file.read()
@@ -593,9 +937,13 @@ def procesar_importacion_inventario(request, inventory_name='default'):
             # datamanejamos los datos para que no sean nulos
             if base_df is not None:
                 base_df = base_df.dropna(subset=['codigo']).copy()
-                base_df.loc[:, 'codigo'] = base_df['codigo'].astype(str).str.strip()
-                # Eliminar ceros a la izquierda de los códigos de producto en archivo base
-                base_df.loc[:, 'codigo'] = base_df['codigo'].str.lstrip('0')
+                base_df.loc[:, 'codigo'] = (
+                    base_df['codigo']
+                    .fillna('')
+                    .astype(str)
+                    .str.strip()
+                    .apply(_normalize_product_code_cached)
+                )
                 base_rows = len(base_df)
                 base_csv_path = _write_dataframe_to_temp_csv(base_df, prefix='inventory_base_')
                 temp_csv_files.append(base_csv_path)
@@ -670,8 +1018,8 @@ def procesar_importacion_inventario(request, inventory_name='default'):
 
         # ── Validación de continuidad de fechas ───────────────────────────────
         # Regla de negocio:
-        #   1. La fecha mínima del archivo a subir debe ser >= la fecha máxima
-        #      ya registrada en BD para no dejar huecos en la serie.
+        #   1. La fecha mínima del archivo a subir debe ser igual a la última
+        #      fecha registrada (re-carga) o al día siguiente.
         #   2. Si la fecha mínima del archivo == la fecha máxima en BD (mismo día),
         #      se permite la re-carga: se eliminan primero los registros de ese día
         #      y se reemplazan con los datos nuevos.
@@ -705,35 +1053,61 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                     except Exception as _exc:
                         logger.warning(f"No se pudo leer fecha mínima de '{_fname}': {_exc}")
 
-                if min_file_date is not None:
-                    if isinstance(last_date_in_db, _dt.datetime):
-                        last_date_in_db = last_date_in_db.date()
-
-                    if min_file_date < last_date_in_db:
-                        # Hueco hacia atrás → rechazo total
-                        return JsonResponse({
+                if min_file_date is None:
+                    return JsonResponse(
+                        {
                             'ok': False,
                             'error': (
-                                f'El archivo contiene movimientos desde {min_file_date.strftime("%d/%m/%Y")}, '
-                                f'pero ya existen registros hasta {last_date_in_db.strftime("%d/%m/%Y")}. '
-                                f'Los archivos de actualización deben empezar desde '
-                                f'{last_date_in_db.strftime("%d/%m/%Y")} en adelante '
-                                f'para no dejar vacíos en el inventario.'
-                            )
-                        }, status=400)
+                                'No se detectaron fechas válidas en los archivos de actualización. '
+                                'Verifique la columna FECHA y el formato del archivo.'
+                            ),
+                        },
+                        status=400,
+                    )
 
-                    if min_file_date == last_date_in_db:
-                        # Re-carga del último día: eliminar registros de ese día para reemplazarlos
-                        deleted_count, _ = _IR.objects.filter(
-                            product__inventory_name=inventory_name,
-                            date=last_date_in_db
-                        ).delete()
-                        logger.info(
-                            f"Re-carga del día {last_date_in_db}: "
-                            f"eliminados {deleted_count} registros previos de ese día."
+                if isinstance(last_date_in_db, _dt.datetime):
+                    last_date_in_db = last_date_in_db.date()
+
+                if min_file_date < last_date_in_db:
+                    # Retroceso de fecha: rechazo total.
+                    return JsonResponse({
+                        'ok': False,
+                        'error': (
+                            f'El archivo contiene movimientos desde {min_file_date.strftime("%d/%m/%Y")}, '
+                            f'pero ya existen registros hasta {last_date_in_db.strftime("%d/%m/%Y")}. '
+                            f'Los archivos de actualización deben empezar desde '
+                            f'{last_date_in_db.strftime("%d/%m/%Y")} en adelante '
+                            f'para no dejar vacíos en el inventario.'
                         )
+                    }, status=400)
 
-                    # min_file_date > last_date_in_db → continuidad normal, sin huecos
+                expected_next_day = last_date_in_db + _dt.timedelta(days=1)
+                if min_file_date > expected_next_day:
+                    return JsonResponse(
+                        {
+                            'ok': False,
+                            'error': (
+                                f'Se detectó un hueco de fechas: el último movimiento cargado es '
+                                f'{last_date_in_db.strftime("%d/%m/%Y")} y el archivo inicia en '
+                                f'{min_file_date.strftime("%d/%m/%Y")}. '
+                                f'La actualización debe comenzar en '
+                                f'{last_date_in_db.strftime("%d/%m/%Y")} (repetido para reemplazo) '
+                                f'o en {expected_next_day.strftime("%d/%m/%Y")}.'
+                            ),
+                        },
+                        status=400,
+                    )
+
+                if min_file_date == last_date_in_db:
+                    # Re-carga del último día: eliminar registros de ese día para reemplazarlos.
+                    deleted_count, _ = _IR.objects.filter(
+                        product__inventory_name=inventory_name,
+                        date=last_date_in_db
+                    ).delete()
+                    logger.info(
+                        f"Re-carga del día {last_date_in_db}: "
+                        f"eliminados {deleted_count} registros previos de ese día."
+                    )
         # ── Fin validación de continuidad ─────────────────────────────────────
 
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
@@ -825,7 +1199,7 @@ def _process_base_csv(csv_path, inventory_name):
 
     Detecta filas repetidas exactas para evitar sumar cantidades/valores duplicados.
     """
-    required_columns = BASE_FILE_COLUMNS
+    required_columns = BASE_REQUIRED_COLUMNS
     records_processed = 0
     errors = 0
     duplicates_count = 0
@@ -840,7 +1214,13 @@ def _process_base_csv(csv_path, inventory_name):
             return 0, 0
 
         chunk = chunk.dropna(subset=['codigo']).copy()
-        chunk.loc[:, 'codigo'] = chunk['codigo'].astype(str).str.strip().str.lstrip('0')
+        chunk.loc[:, 'codigo'] = (
+            chunk['codigo']
+            .fillna('')
+            .astype(str)
+            .str.strip()
+            .apply(_normalize_product_code_cached)
+        )
         chunk = chunk.loc[
             (chunk['codigo'] != '') & (chunk['codigo'].str.lower() != 'nan')
         ].copy()
@@ -1124,18 +1504,21 @@ def _process_update_file(
         seen_row_signatures = set()
 
     # Columnas requeridas para el archivo de actualización
-    required_columns = ['item', 'desc_item', 'localizacion', 'categoria', 'fecha', 'documento', 'entradas', 'salidas', 'unitario', 'total']
+    required_columns = UPDATE_REQUIRED_COLUMNS
     if not all(col in df.columns for col in required_columns):
         logger.error(f"Faltan columnas requeridas en el archivo de actualización: {required_columns}")
         return 0, 0
 
     # Limpiamos y validamos los datos del dataframe
     df = df.dropna(subset=['item', 'fecha', 'documento']).copy()
-    df.loc[:, 'item'] = df['item'].astype(str).str.strip()
+    df.loc[:, 'item'] = (
+        df['item']
+        .fillna('')
+        .astype(str)
+        .str.strip()
+        .apply(_normalize_product_code_cached)
+    )
     df = df.loc[(df['item'] != '') & (df['item'].str.lower() != 'nan')].copy()
-
-    # Eliminar ceros a la izquierda de los códigos de producto
-    df.loc[:, 'item'] = df['item'].str.lstrip('0')
 
     # Recorte temprano de duplicados exactos para reducir costo de CPU.
     initial_rows = len(df)
@@ -1215,12 +1598,15 @@ def _process_update_file(
                 errors += 1
                 continue
 
-            doc_info = str(getattr(row, 'documento', '') or '')
+            doc_info = str(getattr(row, 'documento', '') or '').strip().upper()
             if doc_info and len(doc_info) >= 2:
                 doc_type = doc_info[:2]
                 doc_number = doc_info[2:]
             else:
                 doc_type, doc_number = None, None
+            source_document = doc_info or (
+                f'{doc_type or ""}{doc_number or ""}'.strip()
+            )
 
             final_quantity = _decimal_or_clean(getattr(row, 'cantidad', None))
             entradas = _decimal_or_clean(getattr(row, 'entradas', None))
@@ -1231,9 +1617,18 @@ def _process_update_file(
                 continue
 
             unit_cost = _decimal_or_clean(getattr(row, 'unitario', None))
-            total = _decimal_or_clean(getattr(row, 'total', None)) or (quantity * unit_cost)
+            if unit_cost < 0:
+                unit_cost = abs(unit_cost)
+
+            total = _decimal_or_clean(getattr(row, 'total', None))
             if unit_cost == 0 and total != 0 and quantity != 0:
-                unit_cost = total / abs(quantity)
+                unit_cost = abs(total) / abs(quantity)
+            if total == 0:
+                total = quantity * unit_cost
+            elif quantity < 0 and total > 0:
+                total = -total
+            elif quantity > 0 and total < 0:
+                total = -total
 
             fecha_valor = getattr(row, 'fecha', None)
             date_value = _parse_date_fast(fecha_valor)
@@ -1252,6 +1647,26 @@ def _process_update_file(
             cost_center = str(row_cost_center).strip() if pd.notna(row_cost_center) else None
             if cost_center == '':
                 cost_center = None
+            row_lote = str(getattr(row, 'lote', '') or '').strip()
+            row_cp = str(getattr(row, 'cp', '') or '').strip()
+            row_registro = str(getattr(row, 'registro', '') or '').strip()
+            if row_registro.lower() in ('nan', 'none', 'nat'):
+                row_registro = ''
+
+            source_record = row_registro or _build_source_record_fallback(
+                source_document,
+                product.id,
+                warehouse,
+                date_value,
+                quantity,
+                unit_cost,
+                total,
+                final_quantity,
+                cost_center,
+                category,
+                row_cp,
+                row_lote,
+            )
 
             # Duplicado de contenido exacto (misma fila de movimiento).
             row_signature = _build_row_signature(
@@ -1260,8 +1675,8 @@ def _process_update_file(
                 warehouse,
                 category,
                 date_value,
-                doc_type,
-                doc_number,
+                source_document,
+                source_record,
                 entradas,
                 salidas,
                 quantity,
@@ -1269,13 +1684,23 @@ def _process_update_file(
                 total,
                 final_quantity,
                 cost_center,
+                row_lote,
+                row_registro,
+                row_cp,
             )
             if row_signature in seen_row_signatures:
                 duplicates_count += 1
                 continue
             seen_row_signatures.add(row_signature)
 
-            unique_key = (doc_type, doc_number, product.id, cost_center, date_value, warehouse)
+            unique_key = (
+                source_document,
+                source_record,
+                product.id,
+                cost_center,
+                date_value,
+                warehouse,
+            )
 
             prepared_rows.append({
                 'key': unique_key,
@@ -1284,12 +1709,15 @@ def _process_update_file(
                 'date': date_value,
                 'document_type': doc_type,
                 'document_number': doc_number,
+                'source_document': source_document,
+                'source_record': source_record,
                 'quantity': quantity,
                 'unit_cost': unit_cost,
                 'total': total,
                 'category': category,
                 'final_quantity': final_quantity,
                 'cost_center': cost_center,
+                'lote': row_lote,
             })
             candidate_product_ids.add(product.id)
             candidate_dates.append(date_value)
@@ -1310,8 +1738,8 @@ def _process_update_file(
                 date__gte=min_date,
                 date__lte=max_date
             ).values_list(
-                'document_type',
-                'document_number',
+                'source_document',
+                'source_record',
                 'product_id',
                 'cost_center',
                 'date',
@@ -1340,19 +1768,26 @@ def _process_update_file(
             date=prepared['date'],
             document_type=prepared['document_type'],
             document_number=prepared['document_number'],
+            source_document=prepared['source_document'],
+            source_record=prepared['source_record'],
             quantity=prepared['quantity'],
             unit_cost=prepared['unit_cost'],
             total=prepared['total'],
             category=prepared['category'],
+            lote=prepared['lote'],
             final_quantity=prepared['final_quantity'],
             cost_center=prepared['cost_center']
         ))
 
         records_processed += 1
 
-        if len(records_to_create) >= 500:
+        if len(records_to_create) >= MOVEMENT_BULK_SIZE:
             try:
-                InventoryRecord.objects.bulk_create(records_to_create, ignore_conflicts=True)
+                InventoryRecord.objects.bulk_create(
+                    records_to_create,
+                    ignore_conflicts=True,
+                    batch_size=MOVEMENT_BULK_SIZE,
+                )
                 records_to_create = []
             except Exception as e:
                 logger.error(f"Error en bulk_create: {str(e)}")
@@ -1367,7 +1802,11 @@ def _process_update_file(
     # INSERTAMOS LOS REGISTROS RESTANTES
     if records_to_create:
         try:
-            InventoryRecord.objects.bulk_create(records_to_create, ignore_conflicts=True)
+            InventoryRecord.objects.bulk_create(
+                records_to_create,
+                ignore_conflicts=True,
+                batch_size=MOVEMENT_BULK_SIZE,
+            )
         except Exception as e:
             logger.error(f"Error en bulk_create final: {str(e)}")
             # INSERTAMOS INDIVIDUALMENTE EN CASO DE FALLA

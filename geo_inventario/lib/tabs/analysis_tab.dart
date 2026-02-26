@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -29,7 +28,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   bool isLoading = true;
 
   // Filters
-  DateTimeRange? selectedDateRange;
+  DateTime? selectedDate;
   String? searchQuery;
   String? selectedGroup;
   String? selectedRotation;
@@ -44,7 +43,6 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     _loadAnalysisData();
   }
 
-
   @override
   void dispose() {
     inventoryRefreshNotifier.removeListener(_onExternalRefresh);
@@ -55,7 +53,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   /// Resetea los filtros para mostrar todos los datos actualizados.
   void _onExternalRefresh() {
     setState(() {
-      selectedDateRange = null;
+      selectedDate = null;
       searchQuery = null;
       selectedGroup = null;
       selectedRotation = null;
@@ -81,8 +79,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         stagnant: selectedStagnant,
         highRotation: selectedHighRotation,
         search: searchQuery,
-        dateFrom: selectedDateRange?.start,
-        dateTo: selectedDateRange?.end,
+        specificDate: selectedDate,
       );
 
       if (mounted) {
@@ -210,19 +207,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
     }
 
-    // Colors for groups
-    final List<Color> groupColors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.red,
-      Colors.purple,
-      Colors.teal,
-      Colors.pink,
-      Colors.indigo,
-      Colors.amber,
-      Colors.cyan,
-    ];
+    // Paleta corporativa de gráficas
+    const List<Color> groupColors = AppColors.chartPalette;
 
     // Create sorted group data
     final sortedGroupData = groupData.entries.toList()
@@ -232,330 +218,359 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       final isMobile = constraints.maxWidth < 600;
       final chartHeight = isMobile ? 280.0 : 500.0;
 
-    // Gráfico de distribución por Grupo
-    Widget groupCard = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Distribución por Grupo',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                Image.asset('statics/images/logo_geoflora.png', height: 30),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Total productos: $totalProducts | Valor total: ${CurrencyFormatter.format(totalValue)}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: chartHeight,
-              child: SfCircularChart(
-                margin: EdgeInsets.zero,
-                legend: const Legend(
-                  isVisible: true,
-                  position: LegendPosition.bottom,
-                  textStyle: TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.w500),
-                  overflowMode: LegendItemOverflowMode.wrap,
-                  iconHeight: 12,
-                  iconWidth: 12,
-                ),
-                series: <CircularSeries>[
-                  PieSeries<MapEntry<String, double>, String>(
-                    dataSource: sortedGroupData,
-                    xValueMapper: (MapEntry<String, double> data, _) => data.key,
-                    yValueMapper: (MapEntry<String, double> data, _) => data.value,
-                    pointColorMapper: (MapEntry<String, double> data, int index) =>
-                        groupColors[index % groupColors.length],
-                    dataLabelMapper: (MapEntry<String, double> data, _) {
-                      final total = groupData.values.reduce((a, b) => a + b);
-                      final percentage = (data.value / total * 100).toStringAsFixed(1);
-                      final shortName = _getShortGroupName(data.key);
-                      return '$shortName\n$percentage%';
-                    },
-                    radius: '60%',
-                    dataLabelSettings: DataLabelSettings(
-                      isVisible: true,
-                      textStyle: const TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.w600),
-                      labelPosition: ChartDataLabelPosition.outside,
-                      connectorLineSettings: ConnectorLineSettings(
-                        type: ConnectorType.line,
-                        length: '10%',
-                        color: Colors.grey.shade500,
-                        width: 1.2,
-                      ),
-                      useSeriesColor: false,
-                      color: Colors.white,
-                      borderRadius: 4,
-                      borderWidth: 1,
-                      borderColor: Colors.grey.shade300,
-                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      labelIntersectAction: LabelIntersectAction.shift,
-                    ),
-                    explode: true,
-                    explodeGesture: ActivationMode.singleTap,
-                    explodeOffset: '8%',
-                    explodeAll: false,
-                    animationDuration: 1200,
-                    enableTooltip: true,
-                    strokeColor: Colors.white,
-                    strokeWidth: 2,
-                    selectionBehavior: SelectionBehavior(
-                      enable: true,
-                      selectedOpacity: 1.0,
-                      unselectedOpacity: 0.5,
-                    ),
+      // Gráfico de distribución por Grupo
+      Widget groupCard = Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Distribución por Grupo',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
+                  Image.asset('statics/images/logo_geoflora.png', height: 30),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    // Gráfico de distribución por Rotación
-    Widget rotationCard = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Distribución por Rotación',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                Image.asset('statics/images/logo_geoflora.png', height: 30),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Total productos: $totalProducts',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: chartHeight,
-              child: SfCircularChart(
-                legend: const Legend(
-                  isVisible: true,
-                  position: LegendPosition.bottom,
-                  textStyle: TextStyle(color: Colors.black87, fontSize: 8, fontWeight: FontWeight.w500),
-                  overflowMode: LegendItemOverflowMode.wrap,
-                  iconHeight: 12,
-                  iconWidth: 12,
-                ),
-                series: <CircularSeries>[
-                  PieSeries<MapEntry<String, int>, String>(
-                    dataSource: rotationData.entries.toList(),
-                    xValueMapper: (MapEntry<String, int> data, _) => data.key,
-                    yValueMapper: (MapEntry<String, int> data, _) => data.value,
-                    pointColorMapper: (MapEntry<String, int> data, int index) =>
-                        _getRotationColor(data.key),
-                    dataLabelMapper: (MapEntry<String, int> data, _) {
-                      final total = rotationData.values.reduce((a, b) => a + b);
-                      final percentage = (data.value / total * 100).toStringAsFixed(1);
-                      return '${data.key}\n${data.value} ($percentage%)';
-                    },
-                    dataLabelSettings: DataLabelSettings(
-                      isVisible: true,
-                      textStyle: const TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.w600),
-                      labelPosition: ChartDataLabelPosition.outside,
-                      useSeriesColor: false,
-                      color: Colors.white,
-                      borderRadius: 6,
-                      borderWidth: 1,
-                      borderColor: Colors.grey.shade300,
-                      margin: const EdgeInsets.all(3),
-                      labelIntersectAction: LabelIntersectAction.shift,
-                    ),
-                    explode: true,
-                    explodeGesture: ActivationMode.singleTap,
-                    explodeOffset: '8%',
-                    explodeAll: false,
-                    animationDuration: 1500,
-                    enableTooltip: true,
-                    strokeColor: Colors.white,
-                    strokeWidth: 2,
-                    selectionBehavior: SelectionBehavior(
-                      enable: true,
-                      selectedOpacity: 1.0,
-                      unselectedOpacity: 0.5,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 8),
+              Text(
+                'Total productos: $totalProducts | Valor total: ${CurrencyFormatter.format(totalValue)}',
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w500),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    // En mobile: apilados; en desktop: lado a lado
-    Widget chartsRow = isMobile
-        ? Column(children: [groupCard, const SizedBox(height: 16), rotationCard])
-        : IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(child: groupCard),
-                const SizedBox(width: 16),
-                Expanded(child: rotationCard),
-              ],
-            ),
-          );
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        chartsRow,
-        const SizedBox(height: 16),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Valor Total por Grupo',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                LayoutBuilder(builder: (ctx3, cons3) {
-                  final h3 = cons3.maxWidth < 480 ? 260.0 : 380.0;
-                  return SizedBox(
-                  height: h3,
-                  child: SfCartesianChart(
-                    primaryXAxis: const CategoryAxis(
-                      labelStyle: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      axisLine: AxisLine(width: 1, color: Colors.grey),
-                      majorTickLines: MajorTickLines(size: 0),
-                      majorGridLines: MajorGridLines(width: 0),
-                      labelRotation: 20,
-                    ),
-                    primaryYAxis: NumericAxis(
-                      numberFormat: NumberFormat.compactCurrency(
-                        locale: 'es_CO',
-                        symbol: '\$',
-                      ),
-                      labelStyle: const TextStyle(
-                        color: Colors.black87,
-                        fontSize: 8,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      axisLine: const AxisLine(width: 1, color: Colors.grey),
-                      majorTickLines: const MajorTickLines(size: 0),
-                      majorGridLines: MajorGridLines(
-                        width: 0.5,
-                        color: Colors.grey.shade200,
-                        dashArray: const [5, 5],
-                      ),
-                      title: const AxisTitle(
-                        text: 'Valor (\$)',
-                        textStyle: TextStyle(
-                          color: Colors.black87,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+              const SizedBox(height: 16),
+              SizedBox(
+                height: chartHeight,
+                child: SfCircularChart(
+                  margin: EdgeInsets.zero,
+                  legend: const Legend(
+                    isVisible: true,
+                    position: LegendPosition.bottom,
+                    textStyle: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500),
+                    overflowMode: LegendItemOverflowMode.wrap,
+                    iconHeight: 12,
+                    iconWidth: 12,
+                  ),
+                  series: <CircularSeries>[
+                    PieSeries<MapEntry<String, double>, String>(
+                      dataSource: sortedGroupData,
+                      xValueMapper: (MapEntry<String, double> data, _) =>
+                          data.key,
+                      yValueMapper: (MapEntry<String, double> data, _) =>
+                          data.value,
+                      pointColorMapper:
+                          (MapEntry<String, double> data, int index) =>
+                              groupColors[index % groupColors.length],
+                      dataLabelMapper: (MapEntry<String, double> data, _) {
+                        final total = groupData.values.reduce((a, b) => a + b);
+                        final percentage =
+                            (data.value / total * 100).toStringAsFixed(1);
+                        final shortName = _getShortGroupName(data.key);
+                        return '$shortName\n$percentage%';
+                      },
+                      radius: '60%',
+                      dataLabelSettings: DataLabelSettings(
+                        isVisible: true,
+                        textStyle: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600),
+                        labelPosition: ChartDataLabelPosition.outside,
+                        connectorLineSettings: const ConnectorLineSettings(
+                          type: ConnectorType.line,
+                          length: '10%',
+                          color: AppColors.textDisabled,
+                          width: 1.2,
                         ),
-                      ),
-                    ),
-                    plotAreaBorderWidth: 0,
-                    legend: const Legend(isVisible: false),
-                    tooltipBehavior: TooltipBehavior(
-                      enable: true,
-                      header: '',
-                      format: 'point.x\nTotal: \$point.y',
-                      textStyle: const TextStyle(
+                        useSeriesColor: false,
                         color: Colors.white,
-                        fontSize: 12,
+                        borderRadius: 4,
+                        borderWidth: 1,
+                        borderColor: AppColors.border,
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                        labelIntersectAction: LabelIntersectAction.shift,
                       ),
-                      color: Colors.black87,
-                      borderColor: Colors.grey,
-                      borderWidth: 1,
+                      explode: true,
+                      explodeGesture: ActivationMode.singleTap,
+                      explodeOffset: '8%',
+                      explodeAll: false,
+                      animationDuration: 1200,
+                      enableTooltip: true,
+                      strokeColor: Colors.white,
+                      strokeWidth: 2,
+                      selectionBehavior: SelectionBehavior(
+                        enable: true,
+                        selectedOpacity: 1.0,
+                        unselectedOpacity: 0.5,
+                      ),
                     ),
-                    series: <CartesianSeries>[
-                      ColumnSeries<MapEntry<String, double>, String>(
-                        dataSource: sortedGroupData,
-                        xValueMapper: (MapEntry<String, double> data, _) =>
-                            _getShortGroupName(data.key),
-                        yValueMapper: (MapEntry<String, double> data, _) =>
-                            data.value,
-                        pointColorMapper:
-                            (MapEntry<String, double> data, int index) =>
-                                groupColors[index % groupColors.length],
-                        dataLabelSettings: DataLabelSettings(
-                          isVisible: true,
-                          builder: (dynamic dataPoint,
-                              dynamic point,
-                              dynamic series,
-                              int pointIndex,
-                              int seriesIndex) {
-                            final entry =
-                                dataPoint as MapEntry<String, double>;
-                            final formatted =
-                                CurrencyFormatter.format(entry.value);
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                    color: Colors.grey.shade300, width: 1),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.08),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 1),
-                                  ),
-                                ],
-                              ),
-                              child: Text(
-                                formatted,
-                                style: const TextStyle(
-                                  color: Colors.black87,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            );
-                          },
-                          labelAlignment: ChartDataLabelAlignment.top,
-                          useSeriesColor: false,
-                        ),
-                        width: 0.65,
-                        spacing: 0.1,
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(5),
-                          topRight: Radius.circular(5),
-                        ),
-                        animationDuration: 1500,
-                        enableTooltip: true,
-                      ),
-                    ],
-                  ),
-                );
-                }),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-      ],
-    );
+      );
+
+      // Gráfico de distribución por Rotación
+      Widget rotationCard = Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Distribución por Rotación',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  Image.asset('statics/images/logo_geoflora.png', height: 30),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Total productos: $totalProducts',
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: chartHeight,
+                child: SfCircularChart(
+                  legend: const Legend(
+                    isVisible: true,
+                    position: LegendPosition.bottom,
+                    textStyle: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w500),
+                    overflowMode: LegendItemOverflowMode.wrap,
+                    iconHeight: 12,
+                    iconWidth: 12,
+                  ),
+                  series: <CircularSeries>[
+                    PieSeries<MapEntry<String, int>, String>(
+                      dataSource: rotationData.entries.toList(),
+                      xValueMapper: (MapEntry<String, int> data, _) => data.key,
+                      yValueMapper: (MapEntry<String, int> data, _) =>
+                          data.value,
+                      pointColorMapper:
+                          (MapEntry<String, int> data, int index) =>
+                              _getRotationColor(data.key),
+                      dataLabelMapper: (MapEntry<String, int> data, _) {
+                        final total =
+                            rotationData.values.reduce((a, b) => a + b);
+                        final percentage =
+                            (data.value / total * 100).toStringAsFixed(1);
+                        return '${data.key}\n${data.value} ($percentage%)';
+                      },
+                      dataLabelSettings: DataLabelSettings(
+                        isVisible: true,
+                        textStyle: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600),
+                        labelPosition: ChartDataLabelPosition.outside,
+                        useSeriesColor: false,
+                        color: Colors.white,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        borderColor: AppColors.border,
+                        margin: const EdgeInsets.all(3),
+                        labelIntersectAction: LabelIntersectAction.shift,
+                      ),
+                      explode: true,
+                      explodeGesture: ActivationMode.singleTap,
+                      explodeOffset: '8%',
+                      explodeAll: false,
+                      animationDuration: 1500,
+                      enableTooltip: true,
+                      strokeColor: Colors.white,
+                      strokeWidth: 2,
+                      selectionBehavior: SelectionBehavior(
+                        enable: true,
+                        selectedOpacity: 1.0,
+                        unselectedOpacity: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // En mobile: apilados; en desktop: lado a lado
+      Widget chartsRow = isMobile
+          ? Column(
+              children: [groupCard, const SizedBox(height: 16), rotationCard])
+          : IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: groupCard),
+                  const SizedBox(width: 16),
+                  Expanded(child: rotationCard),
+                ],
+              ),
+            );
+
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          chartsRow,
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Valor Total por Grupo',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  LayoutBuilder(builder: (ctx3, cons3) {
+                    final h3 = cons3.maxWidth < 480 ? 260.0 : 380.0;
+                    return SizedBox(
+                      height: h3,
+                      child: SfCartesianChart(
+                        primaryXAxis: const CategoryAxis(
+                          labelStyle: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          axisLine: AxisLine(width: 1, color: AppColors.border),
+                          majorTickLines: MajorTickLines(size: 0),
+                          majorGridLines: MajorGridLines(width: 0),
+                          labelRotation: 20,
+                        ),
+                        primaryYAxis: NumericAxis(
+                          numberFormat: NumberFormat.compactCurrency(
+                            locale: 'es_CO',
+                            symbol: '\$',
+                          ),
+                          labelStyle: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          axisLine: const AxisLine(
+                              width: 1, color: AppColors.border),
+                          majorTickLines: const MajorTickLines(size: 0),
+                          majorGridLines: const MajorGridLines(
+                            width: 0.5,
+                            color: AppColors.borderLight,
+                            dashArray: [5, 5],
+                          ),
+                          title: const AxisTitle(
+                            text: 'Valor (\$)',
+                            textStyle: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        plotAreaBorderWidth: 0,
+                        legend: const Legend(isVisible: false),
+                        tooltipBehavior: TooltipBehavior(
+                          enable: true,
+                          header: '',
+                          format: 'point.x\nTotal: \$point.y',
+                          textStyle: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                          color: AppColors.dark,
+                          borderColor: AppColors.border,
+                          borderWidth: 1,
+                        ),
+                        series: <CartesianSeries>[
+                          ColumnSeries<MapEntry<String, double>, String>(
+                            dataSource: sortedGroupData,
+                            xValueMapper: (MapEntry<String, double> data, _) =>
+                                _getShortGroupName(data.key),
+                            yValueMapper: (MapEntry<String, double> data, _) =>
+                                data.value,
+                            pointColorMapper:
+                                (MapEntry<String, double> data, int index) =>
+                                    groupColors[index % groupColors.length],
+                            dataLabelSettings: DataLabelSettings(
+                              isVisible: true,
+                              builder: (dynamic dataPoint,
+                                  dynamic point,
+                                  dynamic series,
+                                  int pointIndex,
+                                  int seriesIndex) {
+                                final entry =
+                                    dataPoint as MapEntry<String, double>;
+                                final formatted =
+                                    CurrencyFormatter.format(entry.value);
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: AppColors.border, width: 1),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x14000000),
+                                        blurRadius: 4,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Text(
+                                    formatted,
+                                    style: const TextStyle(
+                                      color: AppColors.textPrimary,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                );
+                              },
+                              labelAlignment: ChartDataLabelAlignment.top,
+                              useSeriesColor: false,
+                            ),
+                            width: 0.65,
+                            spacing: 0.1,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(5),
+                              topRight: Radius.circular(5),
+                            ),
+                            animationDuration: 1500,
+                            enableTooltip: true,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
     }); // LayoutBuilder
   }
 
@@ -670,39 +685,165 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     );
   }
 
+  bool _hasActiveFilters() =>
+      selectedGroup != null ||
+      selectedRotation != null ||
+      selectedStagnant != null ||
+      selectedHighRotation != null ||
+      selectedWarehouse != null ||
+      (searchQuery != null && searchQuery!.isNotEmpty) ||
+      selectedDate != null;
+
+  Widget _buildActiveFilterChips() {
+    final chips = <Widget>[];
+
+    void addChip(String label, VoidCallback onDelete) {
+      chips.add(
+        Chip(
+          label: Text(label, style: const TextStyle(fontSize: 11)),
+          onDeleted: onDelete,
+          backgroundColor: AppColors.infoLight,
+          deleteIconColor: AppColors.infoDark,
+          side: const BorderSide(color: AppColors.info, width: 0.5),
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+        ),
+      );
+    }
+
+    if (selectedGroup != null) {
+      addChip('Grupo: $selectedGroup', () {
+        setState(() => selectedGroup = null);
+        _loadAnalysisData();
+      });
+    }
+    if (selectedRotation != null) {
+      addChip('Rotación: $selectedRotation', () {
+        setState(() => selectedRotation = null);
+        _loadAnalysisData();
+      });
+    }
+    if (selectedStagnant != null) {
+      addChip('Estancado: $selectedStagnant', () {
+        setState(() => selectedStagnant = null);
+        _loadAnalysisData();
+      });
+    }
+    if (selectedHighRotation != null) {
+      addChip('Alta Rot.: $selectedHighRotation', () {
+        setState(() => selectedHighRotation = null);
+        _loadAnalysisData();
+      });
+    }
+    if (selectedWarehouse != null) {
+      addChip('Almacén: $selectedWarehouse', () {
+        setState(() => selectedWarehouse = null);
+        _loadAnalysisData();
+      });
+    }
+    if (searchQuery != null && searchQuery!.isNotEmpty) {
+      addChip('Búsqueda: $searchQuery', () {
+        setState(() => searchQuery = null);
+        _loadAnalysisData();
+      });
+    }
+    if (selectedDate != null) {
+      final dateStr =
+          DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate!);
+      addChip('Fecha: $dateStr', () {
+        setState(() => selectedDate = null);
+        _loadAnalysisData();
+      });
+    }
+
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Wrap(spacing: AppSpacing.xs, runSpacing: AppSpacing.xs, children: chips),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                selectedGroup = null;
+                selectedRotation = null;
+                selectedStagnant = null;
+                selectedHighRotation = null;
+                selectedWarehouse = null;
+                searchQuery = null;
+                selectedDate = null;
+              });
+              _loadAnalysisData();
+            },
+            child: const Text('Limpiar todo',
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAnalysisTable() {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Análisis de Productos',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.sm),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: const Icon(Icons.analytics_outlined,
+                          color: AppColors.primaryDark, size: 18),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    const Text(
+                      'Análisis de Productos',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
                 ),
                 Row(
                   children: [
-                    TextButton.icon(
+                    OutlinedButton.icon(
                       onPressed: _showExportDialog,
-                      icon: const Icon(Icons.download_outlined),
+                      icon: const Icon(Icons.download_outlined, size: 16),
                       label: const Text('Exportar'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.filter_list),
+                    const SizedBox(width: AppSpacing.sm),
+                    IconButton.outlined(
+                      icon: const Icon(Icons.filter_list_rounded, size: 18),
                       onPressed: showFiltersDialog,
+                      tooltip: 'Filtros',
                     ),
                   ],
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.sm),
+            if (_hasActiveFilters()) _buildActiveFilterChips(),
+            const Divider(height: 1),
+            const SizedBox(height: AppSpacing.sm),
             SizedBox(
               height: 600,
               child: PaginatedDataTable2(
@@ -765,21 +906,24 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            DateTimeRange? selectedDateRange = this.selectedDateRange;
-            String dateRangeText = 'Seleccionar rango de fechas (opcional)';
-
-            if (selectedDateRange != null) {
-              final dateFormat = DateFormat('dd/MM/yyyy');
-              final startDate = dateFormat.format(selectedDateRange.start);
-              final endDate = dateFormat.format(selectedDateRange.end);
-              dateRangeText = '$startDate - $endDate';
+            DateTime? selectedDate = this.selectedDate;
+            String selectedDateText = 'Seleccionar fecha (opcional)';
+            if (selectedDate != null) {
+              selectedDateText =
+                  DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate);
             }
 
-            final groups =
-                {'Todos', ..._getUniqueValues('grupo')}.toList();
+            final groups = {'Todos', ..._getUniqueValues('grupo')}.toList();
 
             return AlertDialog(
-              title: const Text('Filtros - Análisis de Productos'),
+              title: const Row(
+                children: [
+                  Icon(Icons.filter_list_rounded,
+                      color: AppColors.primary, size: 22),
+                  SizedBox(width: AppSpacing.sm),
+                  Text('Filtros — Análisis'),
+                ],
+              ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -868,25 +1012,26 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Rango de Fechas',
+                      'Fecha',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     ElevatedButton(
                       onPressed: () async {
-                        final picked = await showDateRangePicker(
+                        final picked = await showDatePicker(
                           context: context,
                           firstDate: DateTime(2020),
                           lastDate: DateTime.now(),
-                          initialDateRange: selectedDateRange,
+                          initialDate: selectedDate ?? DateTime.now(),
+                          locale: const Locale('es', 'CO'),
                         );
                         if (picked != null) {
                           setState(() {
-                            this.selectedDateRange = picked;
+                            this.selectedDate = picked;
                           });
                         }
                       },
-                      child: Text(dateRangeText),
+                      child: Text(selectedDateText),
                     ),
                   ],
                 ),
@@ -899,7 +1044,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       selectedRotation = null;
                       selectedStagnant = null;
                       selectedHighRotation = null;
-                      selectedDateRange = null;
+                      selectedDate = null;
                       searchQuery = null;
                     });
                     Navigator.of(context).pop();
@@ -907,12 +1052,13 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                   },
                   child: const Text('Limpiar'),
                 ),
-                TextButton(
+                ElevatedButton.icon(
                   onPressed: () {
                     _loadAnalysisData();
                     Navigator.of(context).pop();
                   },
-                  child: const Text('Aplicar'),
+                  icon: const Icon(Icons.check_rounded, size: 16),
+                  label: const Text('Aplicar'),
                 ),
               ],
             );
@@ -985,13 +1131,13 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   Color _getRotationColor(String rotation) {
     switch (rotation) {
       case 'Activo':
-        return Colors.green.shade400;
+        return AppColors.success;
       case 'Estancado':
-        return Colors.orange.shade400;
+        return AppColors.warning;
       case 'Obsoleto':
-        return Colors.red.shade400;
+        return AppColors.error;
       default:
-        return Colors.grey.shade400;
+        return AppColors.textDisabled;
     }
   }
 
@@ -1000,25 +1146,35 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Exportar Análisis'),
-          content: const Text('¿Desea exportar el análisis de productos?'),
+          title: const Row(
+            children: [
+              Icon(Icons.download_outlined, color: AppColors.primary, size: 22),
+              SizedBox(width: AppSpacing.sm),
+              Text('Exportar Análisis'),
+            ],
+          ),
+          content: const Text(
+            '¿En qué formato desea exportar el análisis de productos?',
+          ),
           actions: [
             TextButton(
               child: const Text('Cancelar'),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            TextButton(
-              child: const Text('Excel'),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.table_chart_outlined, size: 16),
+              label: const Text('Excel'),
               onPressed: () {
-                _exportAnalysis('excel');
                 Navigator.of(context).pop();
+                _exportAnalysis('excel');
               },
             ),
-            TextButton(
-              child: const Text('PDF'),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+              label: const Text('PDF'),
               onPressed: () {
-                _exportAnalysis('pdf');
                 Navigator.of(context).pop();
+                _exportAnalysis('pdf');
               },
             ),
           ],
@@ -1037,8 +1193,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         stagnant: selectedStagnant,
         highRotation: selectedHighRotation,
         search: searchQuery,
-        dateFrom: selectedDateRange?.start,
-        dateTo: selectedDateRange?.end,
+        specificDate: selectedDate,
       );
 
       if (response.statusCode == 200) {
@@ -1060,32 +1215,17 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           await file.writeAsBytes(fileBytes);
 
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Archivo guardado en: ${file.path}'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          context.showSuccessSnackBar('Archivo guardado en: ${file.path}');
         } else {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Guardado cancelado'),
-              backgroundColor: Colors.orange,
-            ),
-          );
+          context.showWarningSnackBar('Guardado cancelado');
         }
       } else {
         throw Exception('Failed to export analysis');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al exportar análisis: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      context.showErrorSnackBar('Error al exportar análisis: ${e.toString()}');
     }
   }
 }

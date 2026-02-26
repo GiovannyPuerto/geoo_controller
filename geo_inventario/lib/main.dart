@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:intl/date_symbol_data_local.dart';
 import 'dashboard.dart';
 import 'package:geo_inventario/services/excel_upload_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('es_CO', null);
   runApp(const GeoInventarioApp());
 }
 
@@ -19,6 +23,15 @@ class GeoInventarioApp extends StatelessWidget {
     return MaterialApp(
       title: 'Sistema de Inventario – Geoflora',
       theme: AppTheme.theme,
+      locale: const Locale('es', 'CO'),
+      supportedLocales: const [
+        Locale('es', 'CO'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: const WelcomePage(),
       debugShowCheckedModeBanner: false,
     );
@@ -217,8 +230,8 @@ class _WelcomePageState extends State<WelcomePage>
                   color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                child: Image.asset('statics/images/logo_geoflora.png',
-                    height: 30),
+                child:
+                    Image.asset('statics/images/logo_geoflora.png', height: 30),
               ),
               const SizedBox(width: AppSpacing.md),
               const Column(
@@ -268,7 +281,8 @@ class _WelcomePageState extends State<WelcomePage>
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(vertical: heroPaddingV, horizontal: heroPaddingH),
+      padding: EdgeInsets.symmetric(
+          vertical: heroPaddingV, horizontal: heroPaddingH),
       child: Column(
         children: [
           // Ícono principal con fondo degradado
@@ -448,7 +462,8 @@ class _WelcomePageState extends State<WelcomePage>
                                 ),
                               )
                             : const Icon(Icons.upload_rounded, size: 20),
-                        label: Text(_isLoading ? 'Procesando…' : 'Subir y procesar'),
+                        label: Text(
+                            _isLoading ? 'Procesando…' : 'Subir y procesar'),
                       ),
                     ),
                     if (_selectedFile != null) ...[
@@ -459,7 +474,8 @@ class _WelcomePageState extends State<WelcomePage>
                           side: const BorderSide(color: AppColors.border),
                           foregroundColor: AppColors.textSecondary,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+                              horizontal: AppSpacing.lg,
+                              vertical: AppSpacing.md),
                         ),
                         child: const Text('Limpiar'),
                       ),
@@ -495,12 +511,21 @@ class _WelcomePageState extends State<WelcomePage>
   Widget _buildFeaturesSection() {
     final isMobile = MediaQuery.of(context).size.width < 600;
     const features = [
-      (Icons.upload_file_rounded, 'Carga rápida',
-          'Selecciona archivos Excel y procésalos en segundos de forma automática.'),
-      (Icons.analytics_rounded, 'Análisis completo',
-          'Gráficos, estadísticas y reportes detallados del estado de tu inventario.'),
-      (Icons.history_rounded, 'Historial de importaciones',
-          'Registro completo de todas las cargas realizadas con trazabilidad total.'),
+      (
+        Icons.upload_file_rounded,
+        'Carga rápida',
+        'Selecciona archivos Excel y procésalos en segundos de forma automática.'
+      ),
+      (
+        Icons.analytics_rounded,
+        'Análisis completo',
+        'Gráficos, estadísticas y reportes detallados del estado de tu inventario.'
+      ),
+      (
+        Icons.history_rounded,
+        'Historial de importaciones',
+        'Registro completo de todas las cargas realizadas con trazabilidad total.'
+      ),
     ];
 
     return Container(
@@ -535,12 +560,21 @@ class _WelcomePageState extends State<WelcomePage>
   Widget _buildHowItWorksSection() {
     final isMobile = MediaQuery.of(context).size.width < 600;
     const steps = [
-      ('1', 'Prepara tu Excel',
-          'Asegúrate de incluir las columnas: CODIGO, DESCRIPCION, LOCALIZACION, CATEGORIA, FECHA, DOCUMENTO, SALIDA, UNITARIO, TOTAL.'),
-      ('2', 'Sube el archivo',
-          'Haz clic en "Seleccionar archivo Excel", elige tu archivo y presiona "Subir y procesar".'),
-      ('3', 'Revisa los resultados',
-          'El sistema procesará los datos automáticamente y podrás visualizarlos en el Dashboard.'),
+      (
+        '1',
+        'Prepara tu Excel',
+        'Asegúrate de incluir las columnas: CODIGO, DESCRIPCION, LOCALIZACION, CATEGORIA, FECHA, DOCUMENTO, SALIDA, UNITARIO, TOTAL.'
+      ),
+      (
+        '2',
+        'Sube el archivo',
+        'Haz clic en "Seleccionar archivo Excel", elige tu archivo y presiona "Subir y procesar".'
+      ),
+      (
+        '3',
+        'Revisa los resultados',
+        'El sistema procesará los datos automáticamente y podrás visualizarlos en el Dashboard.'
+      ),
     ];
 
     return Container(
@@ -552,7 +586,8 @@ class _WelcomePageState extends State<WelcomePage>
         children: [
           const _SectionHeader(
             title: '¿Cómo funciona?',
-            subtitle: 'Tres pasos sencillos para tener tu inventario actualizado.',
+            subtitle:
+                'Tres pasos sencillos para tener tu inventario actualizado.',
           ),
           const SizedBox(height: AppSpacing.xxxl),
           Wrap(
@@ -599,41 +634,41 @@ class _WelcomePageState extends State<WelcomePage>
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(
-                      AppColors.surfaceVariant),
-                  headingTextStyle: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
-                  dataTextStyle: const TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textPrimary,
-                  ),
-                  columnSpacing: AppSpacing.xl,
-                  columns: const [
-                    DataColumn(label: Text('Fecha')),
-                    DataColumn(label: Text('Archivo')),
-                    DataColumn(label: Text('Registros')),
-                    DataColumn(label: Text('Estado')),
-                  ],
-                  rows: _historial.take(5).map((batch) {
-                    final ok = (batch['rows_imported'] ?? 0) > 0;
-                    return DataRow(cells: [
-                      DataCell(Text(
-                          (batch['started_at'] as String).substring(0, 10))),
-                      DataCell(
-                        Text(
-                          batch['file_name'] ?? '',
-                          overflow: TextOverflow.ellipsis,
+                    headingRowColor:
+                        WidgetStateProperty.all(AppColors.surfaceVariant),
+                    headingTextStyle: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
+                    dataTextStyle: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                    columnSpacing: AppSpacing.xl,
+                    columns: const [
+                      DataColumn(label: Text('Fecha')),
+                      DataColumn(label: Text('Archivo')),
+                      DataColumn(label: Text('Registros')),
+                      DataColumn(label: Text('Estado')),
+                    ],
+                    rows: _historial.take(5).map((batch) {
+                      final ok = (batch['rows_imported'] ?? 0) > 0;
+                      return DataRow(cells: [
+                        DataCell(Text(
+                            (batch['started_at'] as String).substring(0, 10))),
+                        DataCell(
+                          Text(
+                            batch['file_name'] ?? '',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      DataCell(Text(
-                          '${batch['rows_imported']}/${batch['rows_total']}')),
-                      DataCell(_StatusChip(ok: ok)),
-                    ]);
-                  }).toList(),
-                ),
+                        DataCell(Text(
+                            '${batch['rows_imported']}/${batch['rows_total']}')),
+                        DataCell(_StatusChip(ok: ok)),
+                      ]);
+                    }).toList(),
+                  ),
                 ), // SingleChildScrollView horizontal
               ),
             ),
@@ -667,23 +702,19 @@ class _WelcomePageState extends State<WelcomePage>
                 title: 'Contáctenos',
                 children: const [
                   Text('info@geoflora.co',
-                      style:
-                          TextStyle(color: Colors.white70, fontSize: 13)),
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
                   SizedBox(height: 4),
                   Text('Km 4 Vía el Corzo, Bojacá',
-                      style:
-                          TextStyle(color: Colors.white70, fontSize: 13)),
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
                   Text('Cundinamarca, Colombia',
-                      style:
-                          TextStyle(color: Colors.white70, fontSize: 13)),
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
                 ],
               ),
               // Logo
               _FooterColumn(
                 title: 'Nuestro grupo empresarial',
                 children: [
-                  Image.asset('statics/images/logo_geoflora.png',
-                      width: 160),
+                  Image.asset('statics/images/logo_geoflora.png', width: 160),
                 ],
               ),
               // Certificaciones
@@ -741,8 +772,7 @@ class _AppBarButton extends StatelessWidget {
           style: const TextStyle(color: Colors.white, fontSize: 13)),
       style: TextButton.styleFrom(
         backgroundColor: Colors.white.withValues(alpha: 0.15),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.sm)),
       ),
@@ -774,7 +804,8 @@ class _SectionHeader extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         Text(
           subtitle,
-          style: TextStyle(fontSize: isMobile ? 14.0 : 16.0, color: AppColors.textMuted),
+          style: TextStyle(
+              fontSize: isMobile ? 14.0 : 16.0, color: AppColors.textMuted),
           textAlign: TextAlign.center,
         ),
       ],
@@ -807,7 +838,12 @@ class _FeatureCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.border),
+          border: Border(
+            left: const BorderSide(color: AppColors.primary, width: 4),
+            top: BorderSide(color: AppColors.border),
+            right: BorderSide(color: AppColors.border),
+            bottom: BorderSide(color: AppColors.border),
+          ),
           boxShadow: AppShadows.card,
         ),
         child: Column(
@@ -833,7 +869,8 @@ class _FeatureCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.xs),
             Text(
               body,
-              style: const TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.5),
+              style: const TextStyle(
+                  fontSize: 13, color: AppColors.textMuted, height: 1.5),
               textAlign: TextAlign.center,
             ),
           ],

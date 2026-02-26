@@ -75,7 +75,10 @@ class InventoryRecord(models.Model):
     MOVEMENT_TYPES = [
         ('EA', 'Entrada'),
         ('SA', 'Salida'),
-        ('GF', 'Entrada'),
+        ('ND', 'Nota Débito'),
+        ('RF', 'Referencia'),
+        ('DV', 'Devolución'),
+        ('GF', 'Documento Siesa'),
     ]
 
     batch = models.ForeignKey(ImportBatch, on_delete=models.CASCADE)
@@ -84,9 +87,11 @@ class InventoryRecord(models.Model):
 
     date = models.DateField()
 
-    # Tipo de documento EA/SA
-    document_type = models.CharField(max_length=4, choices=MOVEMENT_TYPES, null=True, blank=True)
+    # Tipo de documento detectado desde Siesa (EA/SA/ND/RF/DV/AC/...).
+    document_type = models.CharField(max_length=8, null=True, blank=True)
     document_number = models.CharField(max_length=64, null=True, blank=True)
+    source_document = models.CharField(max_length=128, blank=True, default='')
+    source_record = models.CharField(max_length=64, blank=True, default='')
 
     # Cantidad del movimiento (negativa si es salida)
     quantity = models.DecimalField(max_digits=18, decimal_places=3)
@@ -106,18 +111,21 @@ class InventoryRecord(models.Model):
 
     class Meta:
         """
-        La unicidad impide duplicados de registros de inventario.
-        Un registro es único por:
-        - documento
-        - producto
-        - centro de costo
-        - fecha
-        - almacén
+        Un registro se identifica por su línea de origen (`source_document` + `source_record`)
+        más el contexto de producto/fecha/almacén/centro de costo.
 
-        Esto permite re-subidas sin duplicados, pero mantiene la posibilidad de múltiples
-        movimientos del mismo producto en el mismo documento si cambian otros campos.
+        Esta estrategia permite:
+        - re-subidas idempotentes sin duplicar líneas;
+        - múltiples líneas legítimas del mismo documento y producto.
         """
-        unique_together = ['document_type', 'document_number', 'product', 'cost_center', 'date', 'warehouse']
+        unique_together = [
+            'source_document',
+            'source_record',
+            'product',
+            'cost_center',
+            'date',
+            'warehouse',
+        ]
 
         indexes = [
             models.Index(fields=['product', 'date']),
@@ -125,6 +133,7 @@ class InventoryRecord(models.Model):
             models.Index(fields=['product', 'warehouse', 'date']),
             models.Index(fields=['warehouse', 'date']),
             models.Index(fields=['document_type', 'document_number']),
+            models.Index(fields=['source_document', 'source_record'], name='inventory_i_source_doc_rec_idx'),
             models.Index(fields=['date']),
         ]
 

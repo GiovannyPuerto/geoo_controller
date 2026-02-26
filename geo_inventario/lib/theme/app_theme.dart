@@ -49,6 +49,23 @@ class AppColors {
   // Footer / fondos oscuros
   static const Color dark = Color(0xFF111827);
   static const Color darkMuted = Color(0xFF374151);
+
+  // Paleta para gráficas (pie, bar, line charts)
+  static const List<Color> chartPalette = [
+    Color(0xFF10B981), // verde primario
+    Color(0xFF3B82F6), // azul
+    Color(0xFFF59E0B), // ámbar
+    Color(0xFFEF4444), // rojo
+    Color(0xFF8B5CF6), // violeta
+    Color(0xFF06B6D4), // cyan
+    Color(0xFFEC4899), // rosa
+    Color(0xFF84CC16), // lima
+  ];
+
+  // Medallas de ranking (top productos)
+  static const Color medalGold   = Color(0xFFFFC107);
+  static const Color medalSilver = Color(0xFF9E9E9E);
+  static const Color medalBronze = Color(0xFF8D6E63);
 }
 
 /// Espaciados estándar reutilizables.
@@ -349,6 +366,38 @@ extension BuildContextTheme on BuildContext {
           ],
         ),
         backgroundColor: AppColors.error,
+      ),
+    );
+  }
+
+  /// Muestra un SnackBar de información.
+  void showInfoSnackBar(String message) {
+    ScaffoldMessenger.of(this).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: AppColors.info,
+      ),
+    );
+  }
+
+  /// Muestra un SnackBar de advertencia.
+  void showWarningSnackBar(String message) {
+    ScaffoldMessenger.of(this).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: AppColors.warning,
       ),
     );
   }

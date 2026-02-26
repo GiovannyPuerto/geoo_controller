@@ -18,6 +18,11 @@ CATEGORIA_MAP = {
     '5': 'DOTACION Y SEGURIDAD'
 }
 
+# Tipos de documento observados en reportes de movimientos de Siesa.
+DOCUMENT_TYPE_CODES = (
+    'EA', 'SA', 'ND', 'RF', 'DV', 'EB', 'SB', 'EN', 'SN', 'SR', 'SE', 'NC', 'FC'
+)
+
 def clean_number(s):
     """
     limpiamos y convertimos a Decimal una cadena que puede tener diferentes formatos
@@ -95,22 +100,34 @@ def parse_date(value):
 def parse_document(value):
     """
     Extraemos el tipo y numero de documento de una cadena
-    Ejemplos:   
+    Ejemplos:
     SA12345
     EA67890
+    GF102SA037480
+    GF102ND000026
     """
     if not value:
         return None, None
 
     s = str(value).upper().strip()
 
-    # Observe el patron: SA 12345 o EA 67890
-    m = re.search(r'\b(SA|EA)\b\D*?(\d+)', s)
+    # Prioriza el tipo+consecutivo más cercano al final del string.
+    codes_regex = '|'.join(DOCUMENT_TYPE_CODES)
+    m = re.search(rf'({codes_regex})\D*(\d+)$', s)
     if m:
         return m.group(1), m.group(2)
 
-    # Alternativa de solo SA12345 o EA67890
-    m = re.search(r'(SA|EA)(\d+)', s)
+    # Fallback genérico para códigos de 2 letras no catalogados (ej. AC000722).
+    m = re.search(r'([A-Z]{2})\D*(\d+)$', s)
+    if m:
+        return m.group(1), m.group(2)
+
+    # Fallback: primer patrón tipo+consecutivo encontrado.
+    m = re.search(rf'({codes_regex})(\d+)', s)
+    if m:
+        return m.group(1), m.group(2)
+
+    m = re.search(r'([A-Z]{2})(\d+)', s)
     if m:
         return m.group(1), m.group(2)
 

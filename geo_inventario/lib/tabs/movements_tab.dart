@@ -34,7 +34,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   bool isLoading = true;
 
   // filtros
-  DateTimeRange? selectedDateRange;
+  DateTime? selectedDate;
   String? selectedWarehouse;
   String? selectedGroup;
   List<String> availableWarehouses = [];
@@ -58,7 +58,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   /// Resetea los filtros para mostrar todos los datos actualizados.
   void _onExternalRefresh() {
     setState(() {
-      selectedDateRange = null;
+      selectedDate = null;
       selectedWarehouse = null;
       selectedGroup = null;
       searchQuery = null;
@@ -110,15 +110,13 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           warehouse: selectedWarehouse,
           category: selectedGroup,
           search: searchQuery,
-          dateFrom: selectedDateRange?.start,
-          dateTo: selectedDateRange?.end,
+          specificDate: selectedDate,
         ),
         _apiService.getMonthlyMovements(
           warehouse: selectedWarehouse,
           category: selectedGroup,
           search: searchQuery,
-          dateFrom: selectedDateRange?.start,
-          dateTo: selectedDateRange?.end,
+          specificDate: selectedDate,
         ),
       ]);
       final filteredMovementsData = results[0] as List<Map<String, dynamic>>;
@@ -265,7 +263,8 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 ColumnSeries<MonthlyMovement, String>(
                   dataSource: monthlyMovements,
                   xValueMapper: (MonthlyMovement data, _) =>
-                      DateFormat('MMM yy').format(DateTime.parse('${data.month}-01')),
+                      DateFormat('MMM yy', 'es_CO')
+                          .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.totalEntries,
                   name: 'Entradas',
                   color: AppColors.success,
@@ -278,7 +277,8 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 ColumnSeries<MonthlyMovement, String>(
                   dataSource: monthlyMovements,
                   xValueMapper: (MonthlyMovement data, _) =>
-                      DateFormat('MMM yy').format(DateTime.parse('${data.month}-01')),
+                      DateFormat('MMM yy', 'es_CO')
+                          .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.totalExits,
                   name: 'Salidas',
                   color: AppColors.error,
@@ -291,7 +291,8 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 LineSeries<MonthlyMovement, String>(
                   dataSource: monthlyMovements,
                   xValueMapper: (MonthlyMovement data, _) =>
-                      DateFormat('MMM yy').format(DateTime.parse('${data.month}-01')),
+                      DateFormat('MMM yy', 'es_CO')
+                          .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.closingBalance,
                   name: 'Saldo',
                   color: AppColors.info,
@@ -371,7 +372,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
               rows: monthlyMovements.asMap().entries.map((e) {
                 final i = e.key;
                 final movement = e.value;
-                final monthName = DateFormat('MMMM yyyy')
+                final monthName = DateFormat('MMMM yyyy', 'es_CO')
                     .format(DateTime.parse('${movement.month}-01'));
                 return DataRow(
                   color: WidgetStateProperty.all(
@@ -473,6 +474,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
+          if (_hasActiveFilters()) _buildActiveFilterChips(),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.md),
 
@@ -553,31 +555,119 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     );
   }
 
+  bool _hasActiveFilters() =>
+      selectedWarehouse != null ||
+      selectedGroup != null ||
+      (searchQuery != null && searchQuery!.isNotEmpty) ||
+      selectedDate != null;
+
+  Widget _buildActiveFilterChips() {
+    final chips = <Widget>[];
+
+    void addChip(String label, VoidCallback onDelete) {
+      chips.add(
+        Chip(
+          label: Text(label, style: const TextStyle(fontSize: 11)),
+          onDeleted: onDelete,
+          backgroundColor: AppColors.infoLight,
+          deleteIconColor: AppColors.infoDark,
+          side: const BorderSide(color: AppColors.info, width: 0.5),
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+        ),
+      );
+    }
+
+    if (selectedWarehouse != null) {
+      addChip('Almacén: $selectedWarehouse', () {
+        setState(() => selectedWarehouse = null);
+        _loadMovementsData();
+      });
+    }
+    if (selectedGroup != null) {
+      addChip('Categoría: $selectedGroup', () {
+        setState(() => selectedGroup = null);
+        _loadMovementsData();
+      });
+    }
+    if (searchQuery != null && searchQuery!.isNotEmpty) {
+      addChip('Búsqueda: $searchQuery', () {
+        setState(() => searchQuery = null);
+        _loadMovementsData();
+      });
+    }
+    if (selectedDate != null) {
+      final dateStr =
+          DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate!);
+      addChip('Fecha: $dateStr', () {
+        setState(() => selectedDate = null);
+        _loadMovementsData();
+      });
+    }
+
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: chips),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                selectedWarehouse = null;
+                selectedGroup = null;
+                searchQuery = null;
+                selectedDate = null;
+              });
+              _loadMovementsData();
+            },
+            child: const Text('Limpiar todo',
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showExportDialog() {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Exportar Datos'),
-          content:
-              const Text('¿En qué formato desea exportar los movimientos?'),
+          title: const Row(
+            children: [
+              Icon(Icons.download_outlined, color: AppColors.primary, size: 22),
+              SizedBox(width: AppSpacing.sm),
+              Text('Exportar Movimientos'),
+            ],
+          ),
+          content: const Text(
+              '¿En qué formato desea exportar los movimientos?'),
           actions: [
             TextButton(
               child: const Text('Cancelar'),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            TextButton(
-              child: const Text('Excel'),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.table_chart_outlined, size: 16),
+              label: const Text('Excel'),
               onPressed: () {
-                _exportMovements('excel');
                 Navigator.of(context).pop();
+                _exportMovements('excel');
               },
             ),
-            TextButton(
-              child: const Text('PDF'),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+              label: const Text('PDF'),
               onPressed: () {
-                _exportMovements('pdf');
                 Navigator.of(context).pop();
+                _exportMovements('pdf');
               },
             ),
           ],
@@ -594,8 +684,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         warehouse: selectedWarehouse,
         category: selectedGroup,
         search: searchQuery,
-        dateFrom: selectedDateRange?.start,
-        dateTo: selectedDateRange?.end,
+        specificDate: selectedDate,
       );
 
       if (response.statusCode == 200) {
@@ -663,14 +752,11 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        DateTimeRange? selectedDateRange = this.selectedDateRange;
-        String dateRangeText = 'Seleccionar rango de fechas (opcional)';
-
-        if (selectedDateRange != null) {
-          final dateFormat = DateFormat('dd/MM/yyyy');
-          final startDate = dateFormat.format(selectedDateRange.start);
-          final endDate = dateFormat.format(selectedDateRange.end);
-          dateRangeText = '$startDate - $endDate';
+        DateTime? selectedDate = this.selectedDate;
+        String selectedDateText = 'Seleccionar fecha (opcional)';
+        if (selectedDate != null) {
+          selectedDateText =
+              DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate);
         }
 
         // Get unique values from allMovements data
@@ -682,7 +768,14 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         return StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
-              title: const Text('Filtros - Movimientos'),
+              title: const Row(
+                children: [
+                  Icon(Icons.filter_list_rounded,
+                      color: AppColors.primary, size: 22),
+                  SizedBox(width: AppSpacing.sm),
+                  Text('Filtros — Movimientos'),
+                ],
+              ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -735,25 +828,26 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Rango de Fechas',
+                      'Fecha',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     ElevatedButton(
                       onPressed: () async {
-                        final picked = await showDateRangePicker(
+                        final picked = await showDatePicker(
                           context: context,
                           firstDate: DateTime(2020),
                           lastDate: DateTime.now(),
-                          initialDateRange: selectedDateRange,
+                          initialDate: selectedDate ?? DateTime.now(),
+                          locale: const Locale('es', 'CO'),
                         );
                         if (picked != null) {
                           setState(() {
-                            this.selectedDateRange = picked;
+                            this.selectedDate = picked;
                           });
                         }
                       },
-                      child: Text(dateRangeText),
+                      child: Text(selectedDateText),
                     ),
                   ],
                 ),
@@ -764,7 +858,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     setState(() {
                       selectedWarehouse = null;
                       selectedGroup = null;
-                      selectedDateRange = null;
+                      selectedDate = null;
                       searchQuery = null;
                     });
                     Navigator.of(context).pop();
@@ -772,12 +866,13 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                   },
                   child: const Text('Limpiar'),
                 ),
-                TextButton(
+                ElevatedButton.icon(
                   onPressed: () {
                     _loadMovementsData();
                     Navigator.of(context).pop();
                   },
-                  child: const Text('Aplicar'),
+                  icon: const Icon(Icons.check_rounded, size: 16),
+                  label: const Text('Aplicar'),
                 ),
               ],
             );

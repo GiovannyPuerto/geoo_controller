@@ -856,9 +856,9 @@ class _TopProductRow extends StatelessWidget {
   Widget build(BuildContext context) {
     // Los primeros tres puestos tienen medalla de color
     final medalColors = [
-      const Color(0xFFFFC107), // oro
-      const Color(0xFF9E9E9E), // plata
-      const Color(0xFF8D6E63), // bronce
+      AppColors.medalGold,
+      AppColors.medalSilver,
+      AppColors.medalBronze,
     ];
     final medalColor =
         rank <= 3 ? medalColors[rank - 1] : AppColors.textDisabled;

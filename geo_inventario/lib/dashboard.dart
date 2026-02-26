@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/excel_upload_service.dart';
 import 'package:geo_inventario/tabs/analysis_tab.dart';
+import 'package:geo_inventario/tabs/monthly_cuts_tab.dart';
 import 'package:geo_inventario/tabs/movements_tab.dart';
 import 'package:geo_inventario/tabs/summary_tab.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
@@ -30,7 +31,7 @@ class _DashboardPageState extends State<DashboardPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadDashboardState();
   }
 
@@ -60,8 +61,8 @@ class _DashboardPageState extends State<DashboardPage>
         }
         try {
           final dt = DateTime.parse(data);
-          _lastUpdateTime =
-              DateFormat("dd/MM/yyyy 'a las' HH:mm").format(dt.toLocal());
+          _lastUpdateTime = DateFormat("dd/MM/yyyy 'a las' HH:mm", 'es_CO')
+              .format(dt.toLocal());
         } catch (_) {
           _lastUpdateTime = data;
         }
@@ -116,8 +117,8 @@ class _DashboardPageState extends State<DashboardPage>
           result: result,
         );
       } else {
-        context.showErrorSnackBar(
-            result.error ?? 'Error al cargar el archivo.');
+        context
+            .showErrorSnackBar(result.error ?? 'Error al cargar el archivo.');
       }
     } catch (e) {
       if (!mounted) return;
@@ -159,6 +160,57 @@ class _DashboardPageState extends State<DashboardPage>
       if (!mounted) return;
       Navigator.of(context).pop();
       context.showErrorSnackBar('Error de conexión: ${e.toString()}');
+    }
+  }
+
+  Future<void> _rollbackLastUpdate() async {
+    if (!_hasBaseData || !mounted) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Revertir última actualización'),
+        content: const Text(
+          'Se eliminarán los movimientos del último lote cargado. ¿Desea continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Revertir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+    _showLoadingDialog('Revirtiendo última actualización…');
+
+    try {
+      final result = await _apiService.rollbackBatch();
+      if (!mounted) return;
+      Navigator.of(context).pop();
+
+      if (result['ok'] == true) {
+        _loadLastUpdateTime();
+        inventoryRefreshNotifier.refresh();
+        final deleted =
+            result['deleted_records'] ?? result['deleted_rows'] ?? 0;
+        context
+            .showSuccessSnackBar('Reversión completada ($deleted registros).');
+      } else {
+        context.showErrorSnackBar(
+          (result['error'] ?? 'No fue posible revertir la actualización')
+              .toString(),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      context.showErrorSnackBar('Error al revertir actualización: $e');
     }
   }
 
@@ -227,6 +279,7 @@ class _DashboardPageState extends State<DashboardPage>
           SummaryTabPage(onPickFile: _pickAndUploadBaseFile),
           const AnalysisTabPage(),
           const MovementsTabPage(),
+          const MonthlyCutsTabPage(),
         ],
       ),
     );
@@ -251,7 +304,8 @@ class _DashboardPageState extends State<DashboardPage>
           ),
           title: Row(
             children: [
-              Image.asset('statics/images/logo_geoflora.png', height: isMobile ? 28 : 36),
+              Image.asset('statics/images/logo_geoflora.png',
+                  height: isMobile ? 28 : 36),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
@@ -283,6 +337,7 @@ class _DashboardPageState extends State<DashboardPage>
               hasBaseData: _hasBaseData,
               onUploadBase: _pickAndUploadBaseFile,
               onUploadUpdate: _pickAndUploadUpdateFiles,
+              onRollbackUpdate: _rollbackLastUpdate,
             ),
             const SizedBox(width: AppSpacing.sm),
           ],
@@ -290,6 +345,11 @@ class _DashboardPageState extends State<DashboardPage>
             controller: _tabController,
             isScrollable: true,
             tabAlignment: TabAlignment.start,
+            indicator: const UnderlineTabIndicator(
+              borderSide: BorderSide(color: Colors.white, width: 3),
+              insets: EdgeInsets.symmetric(horizontal: 8),
+            ),
+            indicatorSize: TabBarIndicatorSize.tab,
             tabs: const [
               Tab(
                 child: Row(
@@ -321,6 +381,16 @@ class _DashboardPageState extends State<DashboardPage>
                   ],
                 ),
               ),
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.calendar_month_rounded, size: 16),
+                    SizedBox(width: 6),
+                    Text('Cortes Mensuales'),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -339,11 +409,13 @@ class _UploadMenu extends StatelessWidget {
     required this.hasBaseData,
     required this.onUploadBase,
     required this.onUploadUpdate,
+    required this.onRollbackUpdate,
   });
 
   final bool hasBaseData;
   final VoidCallback onUploadBase;
   final VoidCallback onUploadUpdate;
+  final VoidCallback onRollbackUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -358,6 +430,8 @@ class _UploadMenu extends StatelessWidget {
           onUploadBase();
         } else if (value == 'update') {
           onUploadUpdate();
+        } else if (value == 'rollback') {
+          onRollbackUpdate();
         }
       },
       itemBuilder: (_) => [
@@ -365,9 +439,10 @@ class _UploadMenu extends StatelessWidget {
           const PopupMenuItem(
             value: 'base',
             child: ListTile(
-              leading: Icon(Icons.upload_file_rounded, color: AppColors.primary),
-              title: Text('Cargar archivo base',
-                  style: TextStyle(fontSize: 14)),
+              leading:
+                  Icon(Icons.upload_file_rounded, color: AppColors.primary),
+              title:
+                  Text('Cargar archivo base', style: TextStyle(fontSize: 14)),
               subtitle: Text('Inventario inicial',
                   style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
               contentPadding: EdgeInsets.zero,
@@ -378,11 +453,23 @@ class _UploadMenu extends StatelessWidget {
           const PopupMenuItem(
             value: 'update',
             child: ListTile(
-              leading:
-                  Icon(Icons.cloud_sync_rounded, color: AppColors.primary),
-              title: Text('Cargar actualización',
-                  style: TextStyle(fontSize: 14)),
+              leading: Icon(Icons.cloud_sync_rounded, color: AppColors.primary),
+              title:
+                  Text('Cargar actualización', style: TextStyle(fontSize: 14)),
               subtitle: Text('Movimientos nuevos',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
+          ),
+        if (hasBaseData)
+          const PopupMenuItem(
+            value: 'rollback',
+            child: ListTile(
+              leading: Icon(Icons.undo_rounded, color: AppColors.error),
+              title:
+                  Text('Revertir última carga', style: TextStyle(fontSize: 14)),
+              subtitle: Text('Eliminar último lote de movimientos',
                   style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
               contentPadding: EdgeInsets.zero,
               dense: true,
@@ -390,8 +477,7 @@ class _UploadMenu extends StatelessWidget {
           ),
       ],
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -401,8 +487,7 @@ class _UploadMenu extends StatelessWidget {
           children: [
             Icon(Icons.cloud_upload_outlined, color: Colors.white, size: 20),
             SizedBox(width: 6),
-            Text('Cargar',
-                style: TextStyle(color: Colors.white, fontSize: 13)),
+            Text('Cargar', style: TextStyle(color: Colors.white, fontSize: 13)),
             SizedBox(width: 4),
             Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
           ],
@@ -613,8 +698,7 @@ class _UploadResultDialog extends StatelessWidget {
                     // Mensaje fallback cuando no hay métricas estructuradas
                     if (!hasMetrics && updateFiles.isEmpty)
                       Padding(
-                        padding:
-                            const EdgeInsets.only(top: AppSpacing.sm),
+                        padding: const EdgeInsets.only(top: AppSpacing.sm),
                         child: Text(
                           result.ok
                               ? (result.message.isNotEmpty
@@ -714,7 +798,8 @@ class _MetricSection extends StatelessWidget {
               children: [
                 for (int i = 0; i < rows.length; i++) ...[
                   rows[i],
-                  if (i < rows.length - 1) const SizedBox(height: AppSpacing.sm),
+                  if (i < rows.length - 1)
+                    const SizedBox(height: AppSpacing.sm),
                 ],
               ],
             ),
@@ -823,12 +908,12 @@ class _FileDetailRow extends StatelessWidget {
           Row(
             children: [
               _SmallBadge(
-                  label: '$registered registrados',
-                  color: AppColors.success),
+                  label: '$registered registrados', color: AppColors.success),
               const SizedBox(width: AppSpacing.sm),
               _SmallBadge(
                 label: '$repeated duplicados',
-                color: repeated > 0 ? AppColors.warning : AppColors.textDisabled,
+                color:
+                    repeated > 0 ? AppColors.warning : AppColors.textDisabled,
               ),
             ],
           ),

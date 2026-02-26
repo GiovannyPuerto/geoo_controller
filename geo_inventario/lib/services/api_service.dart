@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:geo_inventario/models/monthly_cut.dart';
+import 'package:geo_inventario/models/monthly_product_cut.dart';
 import 'package:geo_inventario/models/monthly_movement.dart';
 
 class ApiService {
   static const String baseUrl = 'http://127.0.0.1:8000/api/inventory';
+  String _toIsoDate(DateTime date) => date.toIso8601String().split('T')[0];
+
   // Suamtoria endpoints
   Future<Map<String, dynamic>?> getSummary() async {
     try {
@@ -31,6 +35,7 @@ class ApiService {
     String? search,
     DateTime? dateFrom,
     DateTime? dateTo,
+    DateTime? specificDate,
   }) async {
     try {
       final params = <String, String>{};
@@ -52,11 +57,15 @@ class ApiService {
       if (search != null && search.isNotEmpty) {
         params['search'] = search;
       }
-      if (dateFrom != null) {
-        params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      }
-      if (dateTo != null) {
-        params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      if (specificDate != null) {
+        params['date'] = _toIsoDate(specificDate);
+      } else {
+        if (dateFrom != null) {
+          params['date_from'] = _toIsoDate(dateFrom);
+        }
+        if (dateTo != null) {
+          params['date_to'] = _toIsoDate(dateTo);
+        }
       }
 
       final uri =
@@ -84,6 +93,7 @@ class ApiService {
     String? search,
     DateTime? dateFrom,
     DateTime? dateTo,
+    DateTime? specificDate,
   }) async {
     try {
       final params = <String, String>{};
@@ -99,11 +109,15 @@ class ApiService {
       if (search != null && search.isNotEmpty) {
         params['search'] = search;
       }
-      if (dateFrom != null) {
-        params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      }
-      if (dateTo != null) {
-        params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      if (specificDate != null) {
+        params['date'] = _toIsoDate(specificDate);
+      } else {
+        if (dateFrom != null) {
+          params['date_from'] = _toIsoDate(dateFrom);
+        }
+        if (dateTo != null) {
+          params['date_to'] = _toIsoDate(dateTo);
+        }
       }
       final uri =
           Uri.parse('$baseUrl/records/').replace(queryParameters: params);
@@ -129,6 +143,7 @@ class ApiService {
     String? search,
     DateTime? dateFrom,
     DateTime? dateTo,
+    DateTime? specificDate,
   }) async {
     try {
       final params = <String, String>{};
@@ -139,11 +154,15 @@ class ApiService {
         params['category'] = category;
       }
       if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null) {
-        params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      }
-      if (dateTo != null) {
-        params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      if (specificDate != null) {
+        params['date'] = _toIsoDate(specificDate);
+      } else {
+        if (dateFrom != null) {
+          params['date_from'] = _toIsoDate(dateFrom);
+        }
+        if (dateTo != null) {
+          params['date_to'] = _toIsoDate(dateTo);
+        }
       }
 
       final uri = Uri.parse('$baseUrl/monthly-movements/')
@@ -160,6 +179,151 @@ class ApiService {
       return [];
     } catch (e) {
       throw Exception('Error al obtener movimientos mensuales: $e');
+    }
+  }
+
+  // Cortes mensuales promediados
+  Future<Map<String, dynamic>> getMonthlyCuts({
+    String? warehouse,
+    String? category,
+    String? search,
+    int months = 12,
+  }) async {
+    try {
+      final params = <String, String>{'months': months.toString()};
+      if (warehouse != null && warehouse.isNotEmpty) {
+        params['warehouse'] = warehouse;
+      }
+      if (category != null && category.isNotEmpty) {
+        params['category'] = category;
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+
+      final uri =
+          Uri.parse('$baseUrl/monthly-cuts/').replace(queryParameters: params);
+      final response = await http.get(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final raw = json.decode(response.body) as Map<String, dynamic>;
+        final rows = (raw['months'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(MonthlyCut.fromJson)
+            .toList();
+        return {
+          'months': rows,
+          'period_average_cut':
+              ((raw['period_average_cut'] as num?) ?? 0).toDouble(),
+          'period_average_general':
+              ((raw['period_average_general'] as num?) ?? 0).toDouble(),
+          'period_average_per_product':
+              ((raw['period_average_per_product'] as num?) ?? 0).toDouble(),
+          'products_count': (raw['products_count'] as int?) ?? 0,
+          'months_count': (raw['months_count'] as int?) ?? rows.length,
+        };
+      }
+
+      return {
+        'months': <MonthlyCut>[],
+        'period_average_cut': 0.0,
+        'period_average_general': 0.0,
+        'period_average_per_product': 0.0,
+        'products_count': 0,
+        'months_count': 0,
+      };
+    } catch (e) {
+      throw Exception('Error al obtener cortes mensuales: $e');
+    }
+  }
+
+  // Corte mensual promedio por producto (inventario del mes)
+  Future<Map<String, dynamic>> getMonthlyProductCuts({
+    String? warehouse,
+    String? category,
+    String? search,
+    String? month,
+    int limit = 5000,
+  }) async {
+    try {
+      final params = <String, String>{'limit': limit.toString()};
+      if (warehouse != null && warehouse.isNotEmpty) {
+        params['warehouse'] = warehouse;
+      }
+      if (category != null && category.isNotEmpty) {
+        params['category'] = category;
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+      if (month != null && month.isNotEmpty) {
+        params['month'] = month;
+      }
+
+      final uri = Uri.parse('$baseUrl/monthly-cuts-products/')
+          .replace(queryParameters: params);
+      final response = await http.get(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final raw = json.decode(response.body) as Map<String, dynamic>;
+        final products = (raw['products'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(MonthlyProductCut.fromJson)
+            .toList();
+        final rawTotals = (raw['totals'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{};
+
+        return {
+          'month': (raw['month'] ?? '').toString(),
+          'month_start': (raw['month_start'] ?? '').toString(),
+          'month_end': (raw['month_end'] ?? '').toString(),
+          'products': products,
+          'products_count':
+              ((raw['products_count'] as num?) ?? products.length).toInt(),
+          'totals': {
+            'opening_quantity':
+                ((rawTotals['opening_quantity'] as num?) ?? 0).toDouble(),
+            'closing_quantity':
+                ((rawTotals['closing_quantity'] as num?) ?? 0).toDouble(),
+            'average_quantity':
+                ((rawTotals['average_quantity'] as num?) ?? 0).toDouble(),
+            'opening_value':
+                ((rawTotals['opening_value'] as num?) ?? 0).toDouble(),
+            'closing_value':
+                ((rawTotals['closing_value'] as num?) ?? 0).toDouble(),
+            'average_value':
+                ((rawTotals['average_value'] as num?) ?? 0).toDouble(),
+          },
+          'truncated': raw['truncated'] == true,
+          'limit': ((raw['limit'] as num?) ?? limit).toInt(),
+        };
+      }
+
+      return {
+        'month': '',
+        'month_start': '',
+        'month_end': '',
+        'products': <MonthlyProductCut>[],
+        'products_count': 0,
+        'totals': {
+          'opening_quantity': 0.0,
+          'closing_quantity': 0.0,
+          'average_quantity': 0.0,
+          'opening_value': 0.0,
+          'closing_value': 0.0,
+          'average_value': 0.0,
+        },
+        'truncated': false,
+        'limit': limit,
+      };
+    } catch (e) {
+      throw Exception('Error al obtener corte mensual por producto: $e');
     }
   }
 
@@ -304,6 +468,7 @@ class ApiService {
     String? search,
     DateTime? dateFrom,
     DateTime? dateTo,
+    DateTime? specificDate,
   }) async {
     try {
       final params = <String, String>{'format': format};
@@ -324,12 +489,16 @@ class ApiService {
         params['high_rotation'] = highRotation;
       }
       if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null) {
-        params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      }
+      if (specificDate != null) {
+        params['date'] = _toIsoDate(specificDate);
+      } else {
+        if (dateFrom != null) {
+          params['date_from'] = _toIsoDate(dateFrom);
+        }
 
-      if (dateTo != null) {
-        params['date_to'] = dateTo.toIso8601String().split('T')[0];
+        if (dateTo != null) {
+          params['date_to'] = _toIsoDate(dateTo);
+        }
       }
 
       final uri = Uri.parse('$baseUrl/export-analysis/')
@@ -353,6 +522,7 @@ class ApiService {
     String? search,
     DateTime? dateFrom,
     DateTime? dateTo,
+    DateTime? specificDate,
   }) async {
     try {
       final params = <String, String>{'format': format};
@@ -363,11 +533,15 @@ class ApiService {
         params['category'] = category;
       }
       if (search != null && search.isNotEmpty) params['search'] = search;
-      if (dateFrom != null) {
-        params['date_from'] = dateFrom.toIso8601String().split('T')[0];
-      }
-      if (dateTo != null) {
-        params['date_to'] = dateTo.toIso8601String().split('T')[0];
+      if (specificDate != null) {
+        params['date'] = _toIsoDate(specificDate);
+      } else {
+        if (dateFrom != null) {
+          params['date_from'] = _toIsoDate(dateFrom);
+        }
+        if (dateTo != null) {
+          params['date_to'] = _toIsoDate(dateTo);
+        }
       }
 
       final uri = Uri.parse('$baseUrl/export-movements/')
@@ -380,6 +554,71 @@ class ApiService {
       return response;
     } catch (e) {
       throw Exception('Error al exportar movimientos: $e');
+    }
+  }
+
+  // Exportar cortes mensuales
+  Future<http.Response> exportMonthlyCuts({
+    String format = 'excel',
+    String? warehouse,
+    String? category,
+    String? search,
+    int months = 12,
+    String? month,
+    int productLimit = 5000,
+  }) async {
+    try {
+      final params = <String, String>{
+        'format': format,
+        'months': months.toString(),
+        'product_limit': productLimit.toString(),
+      };
+      if (warehouse != null && warehouse.isNotEmpty) {
+        params['warehouse'] = warehouse;
+      }
+      if (category != null && category.isNotEmpty) {
+        params['category'] = category;
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+      if (month != null && month.isNotEmpty) {
+        params['month'] = month;
+      }
+
+      final uri = Uri.parse('$baseUrl/export-monthly-cuts/')
+          .replace(queryParameters: params);
+      final response = await http.get(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 60));
+
+      return response;
+    } catch (e) {
+      throw Exception('Error al exportar cortes mensuales: $e');
+    }
+  }
+
+  // Revertir último lote de actualización
+  Future<Map<String, dynamic>> rollbackBatch({int? batchId}) async {
+    try {
+      final payload = <String, dynamic>{};
+      if (batchId != null) {
+        payload['batch_id'] = batchId;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/rollback/'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(payload),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      return data;
+    } catch (e) {
+      return {'ok': false, 'error': 'Error al revertir lote: $e'};
     }
   }
 
@@ -479,9 +718,7 @@ class ApiService {
   // Obtener inventario en una fecha específica
   Future<List<Map<String, dynamic>>> getInventoryAtDate(DateTime date) async {
     try {
-      final params = <String, String>{
-        'date': date.toIso8601String().split('T')[0]
-      };
+      final params = <String, String>{'date': _toIsoDate(date)};
 
       final uri = Uri.parse('$baseUrl/inventory-at-date/')
           .replace(queryParameters: params);
@@ -497,7 +734,8 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      throw Exception('Error al obtener inventario en una fecha específica: $e');
+      throw Exception(
+          'Error al obtener inventario en una fecha específica: $e');
     }
   }
 }
