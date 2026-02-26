@@ -267,7 +267,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.totalEntries,
                   name: 'Entradas',
-                  color: AppColors.success,
+                  color: AppColors.chartPositive,
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(3),
                     topRight: Radius.circular(3),
@@ -281,7 +281,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.totalExits,
                   name: 'Salidas',
-                  color: AppColors.error,
+                  color: AppColors.chartNegative,
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(3),
                     topRight: Radius.circular(3),
@@ -295,13 +295,13 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.closingBalance,
                   name: 'Saldo',
-                  color: AppColors.info,
+                  color: AppColors.chartBalance,
                   width: 2,
                   markerSettings: const MarkerSettings(
                     isVisible: true,
                     height: 6,
                     width: 6,
-                    color: AppColors.info,
+                    color: AppColors.chartBalance,
                     borderColor: Colors.white,
                     borderWidth: 2,
                   ),

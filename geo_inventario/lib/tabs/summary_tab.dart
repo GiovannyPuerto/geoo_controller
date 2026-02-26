@@ -112,8 +112,9 @@ class _SummaryTabPageState extends State<SummaryTabPage>
   }
 
   /// Productos con saldo negativo (alertas).
-  List<Map<String, dynamic>> get _negativeStockProducts =>
-      _analysis.where((i) => ((i['cantidad_saldo_actual'] ?? 0.0) as num) < 0).toList();
+  List<Map<String, dynamic>> get _negativeStockProducts => _analysis
+      .where((i) => ((i['cantidad_saldo_actual'] ?? 0.0) as num) < 0)
+      .toList();
 
   // ─── UI ────────────────────────────────────────────────────────────────────
 
@@ -147,7 +148,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Banner de bienvenida (opcional)
-                  if (_welcomeMessage != null && _welcomeMessage!.isNotEmpty) ...[
+                  if (_welcomeMessage != null &&
+                      _welcomeMessage!.isNotEmpty) ...[
                     _WelcomeBanner(message: _welcomeMessage!),
                     const SizedBox(height: AppSpacing.md),
                   ],
@@ -278,82 +280,18 @@ class _SummaryTabPageState extends State<SummaryTabPage>
 
       return Row(
         children: cards
-            .expand((c) => [Expanded(child: c), const SizedBox(width: AppSpacing.sm)])
+            .expand((c) =>
+                [Expanded(child: c), const SizedBox(width: AppSpacing.sm)])
             .toList()
           ..removeLast(),
       );
     });
   }
 
-  // ─── Fila 2: Estado + Rotación rápida ─────────────────────────────────────
+  // ─── Fila 2: Solo Rotación rápida ─────────────────────────────────────
 
   Widget _buildMiddleRow() {
-    return LayoutBuilder(builder: (context, constraints) {
-      final narrow = constraints.maxWidth < 640;
-      final statusCard = _buildStatusCard();
-      final rotCard = _buildRotationQuickView();
-
-      if (narrow) {
-        return Column(
-          children: [
-            statusCard,
-            const SizedBox(height: AppSpacing.md),
-            rotCard,
-          ],
-        );
-      }
-
-      return IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(flex: 3, child: statusCard),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(flex: 3, child: rotCard),
-          ],
-        ),
-      );
-    });
-  }
-
-  // ─── Tarjeta de estado con barras animadas ─────────────────────────────────
-
-  Widget _buildStatusCard() {
-    final total = _analysis.length;
-    return _SectionCard(
-      title: 'Estado del inventario',
-      icon: Icons.donut_large_rounded,
-      child: AnimatedBuilder(
-        animation: _progressAnim,
-        builder: (_, __) => Column(
-          children: [
-            _AnimatedStatusBar(
-              label: 'Activos',
-              count: _activeCount,
-              total: total,
-              color: AppColors.success,
-              progress: _progressAnim.value,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _AnimatedStatusBar(
-              label: 'Estancados',
-              count: _stagnantCount,
-              total: total,
-              color: AppColors.warning,
-              progress: _progressAnim.value,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _AnimatedStatusBar(
-              label: 'Obsoletos',
-              count: _obsoleteCount,
-              total: total,
-              color: AppColors.error,
-              progress: _progressAnim.value,
-            ),
-          ],
-        ),
-      ),
-    );
+    return _buildRotationQuickView();
   }
 
   // ─── Vista rápida de rotación (tres chips grandes) ─────────────────────────
@@ -408,8 +346,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
         children: [
           // Encabezado de columnas
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm, vertical: 4),
             child: Row(
               children: const [
                 Expanded(
@@ -446,10 +384,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
             final item = e.value;
             final name = (item['nombre_producto'] ?? item['descripcion'] ?? '-')
                 .toString();
-            final qty =
-                (item['cantidad_saldo_actual'] ?? 0.0) as num;
-            final val =
-                (item['valor_saldo_actual'] ?? 0.0) as num;
+            final qty = (item['cantidad_saldo_actual'] ?? 0.0) as num;
+            final val = (item['valor_saldo_actual'] ?? 0.0) as num;
             return _TopProductRow(
               rank: index + 1,
               name: name,
@@ -488,21 +424,17 @@ class _SummaryTabPageState extends State<SummaryTabPage>
                   child: Text(
                     'Los siguientes productos tienen saldo negativo y requieren revisión.',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.errorDark,
-                        height: 1.4),
+                        fontSize: 12, color: AppColors.errorDark, height: 1.4),
                   ),
                 ),
               ],
             ),
           ),
           ..._negativeStockProducts.take(8).map((item) {
-            final name =
-                (item['nombre_producto'] ?? item['descripcion'] ?? '–')
-                    .toString();
+            final name = (item['nombre_producto'] ?? item['descripcion'] ?? '–')
+                .toString();
             final code = (item['codigo'] ?? '').toString();
-            final qty =
-                (item['cantidad_saldo_actual'] ?? 0.0) as num;
+            final qty = (item['cantidad_saldo_actual'] ?? 0.0) as num;
             return _AlertRow(
               code: code,
               name: name,
@@ -514,8 +446,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
               padding: const EdgeInsets.only(top: AppSpacing.sm),
               child: Text(
                 '… y ${_negativeStockProducts.length - 8} más. Ve a "Análisis" para verlos todos.',
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textMuted),
+                style:
+                    const TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
             ),
         ],
@@ -724,8 +656,7 @@ class _AnimatedStatusBar extends StatelessWidget {
             Container(
               width: 10,
               height: 10,
-              decoration:
-                  BoxDecoration(color: color, shape: BoxShape.circle),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
@@ -737,8 +668,7 @@ class _AnimatedStatusBar extends StatelessWidget {
             ),
             // Badge con conteo + porcentaje
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(AppRadius.full),
@@ -856,9 +786,9 @@ class _TopProductRow extends StatelessWidget {
   Widget build(BuildContext context) {
     // Los primeros tres puestos tienen medalla de color
     final medalColors = [
-      AppColors.medalGold,
-      AppColors.medalSilver,
-      AppColors.medalBronze,
+      const Color(0xFFFFC107), // oro
+      const Color(0xFF9E9E9E), // plata
+      const Color(0xFF8D6E63), // bronce
     ];
     final medalColor =
         rank <= 3 ? medalColors[rank - 1] : AppColors.textDisabled;

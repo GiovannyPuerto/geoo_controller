@@ -216,8 +216,6 @@ class ApiService {
             .toList();
         return {
           'months': rows,
-          'period_average_cut':
-              ((raw['period_average_cut'] as num?) ?? 0).toDouble(),
           'period_average_general':
               ((raw['period_average_general'] as num?) ?? 0).toDouble(),
           'period_average_per_product':
@@ -229,7 +227,6 @@ class ApiService {
 
       return {
         'months': <MonthlyCut>[],
-        'period_average_cut': 0.0,
         'period_average_general': 0.0,
         'period_average_per_product': 0.0,
         'products_count': 0,

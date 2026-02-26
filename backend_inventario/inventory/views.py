@@ -55,23 +55,23 @@ from openpyxl.chart.series import DataPoint as XLDataPoint
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Paleta corporativa GeoFlora
+# Paleta corporativa GeoFlora — Rosa #EF7C91 · Blanco #FFFFFD · Cyan #4BC0D9
 # ---------------------------------------------------------------------------
-_CORP_HEADER_BG   = rl_colors.HexColor('#10B981')
-_CORP_HEADER_BG2  = rl_colors.HexColor('#059669')
-_CORP_ROW_ALT     = rl_colors.HexColor('#ECFDF5')
-_CORP_TOTAL_BG    = rl_colors.HexColor('#D1FAE5')
-_CORP_TEXT        = rl_colors.HexColor('#111827')
+_CORP_HEADER_BG   = rl_colors.HexColor('#EF7C91')   # Rosa primario
+_CORP_HEADER_BG2  = rl_colors.HexColor('#4BC0D9')   # Cyan secundario
+_CORP_ROW_ALT     = rl_colors.HexColor('#FFF0F3')   # Rosa muy suave
+_CORP_TOTAL_BG    = rl_colors.HexColor('#EBF9FC')   # Cyan muy suave
+_CORP_TEXT        = rl_colors.HexColor('#1A1F2E')
 _CORP_BORDER      = rl_colors.HexColor('#E5E7EB')
 _CORP_WHITE       = rl_colors.white
 
-_XL_HEADER_BG  = '10B981'
+_XL_HEADER_BG  = 'EF7C91'   # Rosa primario
 _XL_HEADER_FG  = 'FFFFFF'
-_XL_ROW_ALT    = 'ECFDF5'
-_XL_TOTAL_BG   = 'D1FAE5'
+_XL_ROW_ALT    = 'FFF0F3'   # Rosa muy suave
+_XL_TOTAL_BG   = 'EBF9FC'   # Cyan muy suave
 _XL_BORDER_CLR = 'BDBDBD'
-_XL_TEXT       = '111827'
-_XL_ACCENT     = '059669'
+_XL_TEXT       = '1A1F2E'
+_XL_ACCENT     = '4BC0D9'   # Cyan secundario
 
 # ---------------------------------------------------------------------------
 # Helpers de reportes
@@ -107,7 +107,7 @@ def _build_pdf_header_elements(logo_path, title, inventory_name, subtitle=None):
     date_style = ParagraphStyle(
         'HdrDate', parent=rl_styles['Normal'],
         fontName='Times-Italic', fontSize=8,
-        textColor=rl_colors.HexColor('#374151'),
+        textColor=rl_colors.HexColor('#3D4459'),
     )
     right_col = [
         Paragraph(title, title_style),
@@ -142,7 +142,7 @@ def _create_pdf_doc(buffer, pagesize, report_title):
     def _footer(canvas, doc):
         canvas.saveState()
         canvas.setFont('Times-Roman', 7)
-        canvas.setFillColor(rl_colors.HexColor('#374151'))
+        canvas.setFillColor(rl_colors.HexColor('#3D4459'))
         text = f'Geo Inventario  |  {report_title}  |  Página {doc.page}  |  {datetime.now().strftime("%Y-%m-%d")}'
         canvas.drawString(margin, 0.6 * cm, text)
         canvas.setStrokeColor(_CORP_HEADER_BG)
@@ -184,7 +184,7 @@ def _apply_excel_header(ws, title, inventory_name, logo_path, header_rows=4):
     ws['B2'].font = Font(name='Calibri', size=10, color=_XL_TEXT)
 
     ws['B3'].value = f'Generado: {datetime.now().strftime("%Y-%m-%d %H:%M")}'
-    ws['B3'].font = Font(name='Calibri', size=9, italic=True, color='374151')
+    ws['B3'].font = Font(name='Calibri', size=9, italic=True, color='3D4459')
 
     return header_rows + 1  # primera fila disponible para datos
 
@@ -603,7 +603,7 @@ def export_analysis(request, inventory_name='default'):
                 data_ref   = Reference(chart_ws, min_col=2, min_row=3, max_row=6)
                 pie.add_data(data_ref, titles_from_data=True)
                 pie.set_categories(labels_ref)
-                slice_colors = ['10B981', 'EF4444', 'D1FAE5']
+                slice_colors = ['EF7C91', 'EF4444', 'EBF9FC']
                 for si, color_hex in enumerate(slice_colors):
                     dp = XLDataPoint(idx=si)
                     dp.graphicalProperties.solidFill = color_hex
@@ -653,8 +653,8 @@ def export_analysis(request, inventory_name='default'):
                     f'Normal ({normal_c})',
                 ]
                 rl_pie.slices[0].fillColor = rl_colors.HexColor('#EF4444')
-                rl_pie.slices[1].fillColor = rl_colors.HexColor('#10B981')
-                rl_pie.slices[2].fillColor = rl_colors.HexColor('#D1FAE5')
+                rl_pie.slices[1].fillColor = rl_colors.HexColor('#EF7C91')
+                rl_pie.slices[2].fillColor = rl_colors.HexColor('#4BC0D9')
                 rl_pie.slices.strokeColor  = rl_colors.white
                 rl_pie.slices.strokeWidth  = 0.5
                 legend = Legend()
@@ -666,8 +666,8 @@ def export_analysis(request, inventory_name='default'):
                 legend.fontSize  = 8
                 legend.colorNamePairs = [
                     (rl_colors.HexColor('#EF4444'), f'Estancados ({estancados_c})'),
-                    (rl_colors.HexColor('#10B981'), f'Alta Rotación ({alta_rot_c})'),
-                    (rl_colors.HexColor('#D1FAE5'), f'Normal ({normal_c})'),
+                    (rl_colors.HexColor('#EF7C91'), f'Alta Rotación ({alta_rot_c})'),
+                    (rl_colors.HexColor('#4BC0D9'), f'Normal ({normal_c})'),
                 ]
                 pie_drawing.add(rl_pie)
                 pie_drawing.add(legend)
@@ -846,8 +846,8 @@ def export_movements(request, inventory_name='default'):
                 cats_ref = Reference(chart_ws, min_col=1, min_row=4, max_row=3 + len(months_sorted))
                 bar.add_data(data_ref, titles_from_data=True)
                 bar.set_categories(cats_ref)
-                bar.series[0].graphicalProperties.solidFill = '10B981'
-                bar.series[1].graphicalProperties.solidFill = 'EF4444'
+                bar.series[0].graphicalProperties.solidFill = 'EF7C91'
+                bar.series[1].graphicalProperties.solidFill = '4BC0D9'
                 chart_ws.add_chart(bar, 'E3')
 
             buffer = BytesIO()
@@ -895,8 +895,8 @@ def export_movements(request, inventory_name='default'):
                 bc.width  = 540
                 bc.data   = [entradas_vals, salidas_vals]
                 bc.categoryAxis.categoryNames = [m[-5:] for m in months_sorted]
-                bc.bars[0].fillColor = rl_colors.HexColor('#10B981')
-                bc.bars[1].fillColor = rl_colors.HexColor('#EF4444')
+                bc.bars[0].fillColor = rl_colors.HexColor('#EF7C91')
+                bc.bars[1].fillColor = rl_colors.HexColor('#4BC0D9')
                 bc.valueAxis.valueMin = 0
                 bar_drawing.add(bc)
                 elements.append(GraphicsFlowable(bar_drawing))
@@ -979,7 +979,7 @@ def export_monthly_cuts(request, inventory_name='default'):
             months=months,
         )
         cuts_rows = cuts_payload.get('months', [])
-        period_average_cut = cuts_payload.get('period_average_cut', 0)
+        period_average_general = cuts_payload.get('period_average_general', 0)
         product_cuts_payload = get_monthly_product_cuts_data(
             inventory_name=inventory_name_param,
             target_month=month,
@@ -999,7 +999,6 @@ def export_monthly_cuts(request, inventory_name='default'):
                 'salidas': row.get('total_exits', 0),
                 'corte_final': row.get('closing_balance', 0),
                 'corte_promedio_general': row.get('average_balance_general', row.get('average_balance', 0)),
-                'corte_promedio_producto': row.get('average_balance_per_product', 0),
             })
 
         logo_path = _get_logo_path()
@@ -1012,8 +1011,8 @@ def export_monthly_cuts(request, inventory_name='default'):
             ws.title = 'CortesMensuales'
             data_row = _apply_excel_header(ws, 'Cortes Mensuales de Inventario', inventory_name_param, logo_path)
 
-            cuts_col_headers = ['Mes', 'Corte Inicial', 'Entradas', 'Salidas', 'Corte Final', 'Promedio General', 'Promedio por Producto']
-            cuts_col_widths  = [14, 18, 16, 16, 18, 22, 24]
+            cuts_col_headers = ['Mes', 'Corte Inicial', 'Entradas', 'Salidas', 'Corte Final', 'Promedio General']
+            cuts_col_widths  = [14, 18, 16, 16, 18, 22]
             for ci, (hdr, w) in enumerate(zip(cuts_col_headers, cuts_col_widths), 1):
                 ws.cell(row=data_row, column=ci, value=hdr)
                 ws.column_dimensions[get_column_letter(ci)].width = w
@@ -1026,7 +1025,6 @@ def export_monthly_cuts(request, inventory_name='default'):
                 ws.cell(row=rn, column=4, value=float(row['salidas']))
                 ws.cell(row=rn, column=5, value=float(row['corte_final']))
                 ws.cell(row=rn, column=6, value=float(row['corte_promedio_general']))
-                ws.cell(row=rn, column=7, value=float(row['corte_promedio_producto']))
 
             cuts_end = data_row + len(export_rows)
             _style_excel_table(ws, data_row, data_row + 1, cuts_end, len(cuts_col_headers))
@@ -1034,12 +1032,9 @@ def export_monthly_cuts(request, inventory_name='default'):
             # Promedios del periodo (celdas extra)
             ws.column_dimensions['I'].width = 30
             ws.column_dimensions['J'].width = 22
-            ws['I1'] = 'Promedio del periodo (por producto)'
+            ws['I1'] = 'Promedio del periodo (general)'
             ws['I1'].font = Font(name='Calibri', size=10, bold=True, color=_XL_ACCENT)
-            ws['J1'] = float(period_average_cut)
-            ws['I2'] = 'Promedio del periodo (general)'
-            ws['I2'].font = Font(name='Calibri', size=10, bold=True, color=_XL_ACCENT)
-            ws['J2'] = float(cuts_payload.get('period_average_general', 0))
+            ws['J1'] = float(period_average_general)
 
             # Hoja de gráfica LineChart
             chart_ws = wb.create_sheet('GraficaCortes')
@@ -1067,9 +1062,9 @@ def export_monthly_cuts(request, inventory_name='default'):
                 cats_ref = Reference(chart_ws, min_col=1, min_row=4, max_row=3 + len(export_rows))
                 line.add_data(data_ref, titles_from_data=True)
                 line.set_categories(cats_ref)
-                line.series[0].graphicalProperties.line.solidFill = '10B981'
-                line.series[1].graphicalProperties.line.solidFill = '059669'
-                line.series[2].graphicalProperties.line.solidFill = '047857'
+                line.series[0].graphicalProperties.line.solidFill = 'EF7C91'
+                line.series[1].graphicalProperties.line.solidFill = '4BC0D9'
+                line.series[2].graphicalProperties.line.solidFill = 'D9607A'
                 chart_ws.add_chart(line, 'F3')
 
             # --- Hoja CorteProductosMes ---
@@ -1134,13 +1129,13 @@ def export_monthly_cuts(request, inventory_name='default'):
             info_style = ParagraphStyle(
                 'CutsInfo', parent=rl_styles['Normal'],
                 fontName='Times-Italic', fontSize=9,
-                textColor=rl_colors.HexColor('#374151'),
+                textColor=rl_colors.HexColor('#3D4459'),
             )
 
             elements = _build_pdf_header_elements(logo_path, 'Cortes Mensuales de Inventario', inventory_name_param)
             elements += [
                 Spacer(1, 6),
-                Paragraph(f'Promedio del periodo: ${float(period_average_cut):,.2f}', info_style),
+                Paragraph(f'Promedio del periodo (general): ${float(period_average_general):,.2f}', info_style),
                 Spacer(1, 8),
             ]
 
@@ -1157,9 +1152,9 @@ def export_monthly_cuts(request, inventory_name='default'):
                     lc.width  = 540
                     lc.data   = [closing, avg_gen]
                     lc.categoryAxis.categoryNames = [str(r['mes'])[-7:] for r in export_rows]
-                    lc.lines[0].strokeColor = rl_colors.HexColor('#10B981')
+                    lc.lines[0].strokeColor = rl_colors.HexColor('#EF7C91')
                     lc.lines[0].strokeWidth = 1.5
-                    lc.lines[1].strokeColor = rl_colors.HexColor('#059669')
+                    lc.lines[1].strokeColor = rl_colors.HexColor('#4BC0D9')
                     lc.lines[1].strokeWidth = 1.5
                     lc.valueAxis.valueMin = 0
                     line_drawing.add(lc)
@@ -1186,7 +1181,7 @@ def export_monthly_cuts(request, inventory_name='default'):
                     Paragraph(f"${float(row['corte_promedio_general']):,.2f}", normal_style),
                 ])
 
-            table = Table(table_rows_pdf, colWidths=[75, 95, 85, 85, 95, 95, 95], repeatRows=1)
+            table = Table(table_rows_pdf, colWidths=[75, 95, 85, 85, 95, 95], repeatRows=1)
             table.setStyle(_pdf_table_style(len(table_rows_pdf)))
             elements.append(table)
 

@@ -14,6 +14,7 @@ import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
+import 'package:geo_inventario/widgets/data_sources.dart';
 
 class MonthlyCutsTabPage extends StatefulWidget {
   const MonthlyCutsTabPage({super.key});
@@ -39,12 +40,15 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   int monthsWindow = 12;
   int productLimit = 5000;
 
+  // Paginación de la tabla de productos
+  MonthlyProductCutDataSource? _productDataSource;
+  int _productPageRows = 25;
+
   String? selectedWarehouse;
   String? selectedCategory;
   String? searchQuery;
   String? selectedMonth;
 
-  double periodAverageCut = 0;
   double periodAverageGeneral = 0;
   int productsCount = 0;
   int monthProductsCount = 0;
@@ -59,6 +63,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   @override
   void dispose() {
     inventoryRefreshNotifier.removeListener(_onExternalRefresh);
+    _productDataSource?.dispose();
     super.dispose();
   }
 
@@ -103,7 +108,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
       if (!mounted) return;
       setState(() {
         monthlyCuts = cuts;
-        periodAverageCut = ((cutsResponse['period_average_cut'] as num?) ?? 0).toDouble();
         periodAverageGeneral =
             ((cutsResponse['period_average_general'] as num?) ?? 0).toDouble();
         productsCount = (cutsResponse['products_count'] as int?) ?? 0;
@@ -128,6 +132,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
       if (!mounted) return;
       setState(() {
         productCuts = [];
+        _productDataSource?.dispose();
+        _productDataSource = null;
         monthProductsCount = 0;
         productCutsTruncated = false;
         productTotals = const {'average_quantity': 0.0, 'average_value': 0.0};
@@ -154,6 +160,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
       if (!mounted) return;
       setState(() {
         productCuts = rows;
+        _productDataSource?.dispose();
+        _productDataSource = MonthlyProductCutDataSource(rows);
         monthProductsCount = (response['products_count'] as int?) ?? rows.length;
         selectedMonth = (response['month'] as String?) ?? targetMonth;
         productCutsTruncated = response['truncated'] == true;
@@ -289,12 +297,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
             children: [
-              _kpiChip(
-                Icons.trending_up_rounded,
-                'Promedio por producto',
-                CurrencyFormatter.format(periodAverageCut),
-                AppColors.primary,
-              ),
               _kpiChip(
                 Icons.bar_chart_rounded,
                 'Promedio general',
@@ -513,7 +515,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         xValueMapper: (d, _) => _formatMonth(d.month),
                         yValueMapper: (d, _) => d.averageBalanceGeneral,
                         name: 'Corte Promedio General',
-                        color: AppColors.primary,
+                        color: AppColors.chartCutAverage,
                         borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(4)),
                         dataLabelSettings: const DataLabelSettings(
@@ -525,12 +527,13 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         xValueMapper: (d, _) => _formatMonth(d.month),
                         yValueMapper: (d, _) => d.closingBalance,
                         name: 'Corte Final General',
-                        color: AppColors.errorDark,
+                        color: AppColors.chartCutFinal,
                         width: 2,
                         markerSettings: const MarkerSettings(
                           isVisible: true,
                           height: 6,
                           width: 6,
+                          color: AppColors.chartCutFinal,
                         ),
                       ),
                     ],
@@ -624,7 +627,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                   DataColumn2(label: Text('Salidas'), numeric: true),
                   DataColumn2(label: Text('Cierre'), numeric: true),
                   DataColumn2(label: Text('Prom. General'), numeric: true),
-                  DataColumn2(label: Text('Prom. Producto'), numeric: true),
                 ],
                 rows: monthlyCuts.asMap().entries.map((entry) {
                   final i = entry.key;
@@ -646,7 +648,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                       )),
                       DataCell(Text(CurrencyFormatter.format(row.closingBalance))),
                       DataCell(Text(CurrencyFormatter.format(row.averageBalanceGeneral))),
-                      DataCell(Text(CurrencyFormatter.format(row.averageBalancePerProduct))),
                     ],
                   );
                 }).toList(),
@@ -675,6 +676,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -794,9 +796,10 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
               'No hay productos registrados para este mes.',
             )
           else
+            // Altura = header(56) + n filas(52) + footer(56) + padding extra
             SizedBox(
-              height: 420,
-              child: DataTable2(
+              height: 56 + (_productPageRows * 52.0) + 64,
+              child: PaginatedDataTable2(
                 minWidth: 1100,
                 headingRowColor:
                     WidgetStateProperty.all(AppColors.surfaceVariant),
@@ -806,40 +809,27 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                   color: AppColors.textSecondary,
                 ),
                 dataTextStyle: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 12,
                   color: AppColors.textPrimary,
                 ),
+                rowsPerPage: _productPageRows,
+                availableRowsPerPage: const [25, 50, 100],
+                onRowsPerPageChanged: (value) {
+                  if (value != null) setState(() => _productPageRows = value);
+                },
                 columns: const [
                   DataColumn2(label: Text('Código')),
-                  DataColumn2(label: Text('Nombre Producto'), size: ColumnSize.L),
+                  DataColumn2(
+                      label: Text('Nombre Producto'), size: ColumnSize.L),
                   DataColumn2(label: Text('Grupo')),
-                  DataColumn2(label: Text('Cantidad Saldo Promedio'), numeric: true),
-                  DataColumn2(label: Text('Valor Saldo Promedio'), numeric: true),
-                  DataColumn2(label: Text('Costo Unitario'), numeric: true),
+                  DataColumn2(
+                      label: Text('Cant. Promedio'), numeric: true),
+                  DataColumn2(
+                      label: Text('Valor Promedio'), numeric: true),
+                  DataColumn2(
+                      label: Text('Costo Unitario'), numeric: true),
                 ],
-                rows: productCuts.asMap().entries.map((entry) {
-                  final i = entry.key;
-                  final row = entry.value;
-                  return DataRow(
-                    color: WidgetStateProperty.all(
-                      i.isOdd ? AppColors.surfaceVariant : AppColors.surface,
-                    ),
-                    cells: [
-                      DataCell(Text(row.code)),
-                      DataCell(Text(row.description)),
-                      DataCell(Text(row.group)),
-                      DataCell(Text(NumberFormat('#,##0.###', 'es_CO')
-                          .format(row.averageQuantity))),
-                      DataCell(
-                        Text(
-                          CurrencyFormatter.format(row.averageValue),
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      DataCell(Text(CurrencyFormatter.format(row.unitCost))),
-                    ],
-                  );
-                }).toList(),
+                source: _productDataSource!,
               ),
             ),
         ],

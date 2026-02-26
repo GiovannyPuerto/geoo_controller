@@ -1131,11 +1131,11 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   Color _getRotationColor(String rotation) {
     switch (rotation) {
       case 'Activo':
-        return AppColors.success;
+        return AppColors.chartPositive;
       case 'Estancado':
-        return AppColors.warning;
+        return AppColors.chartCutFinal;
       case 'Obsoleto':
-        return AppColors.error;
+        return AppColors.chartNegative;
       default:
         return AppColors.textDisabled;
     }

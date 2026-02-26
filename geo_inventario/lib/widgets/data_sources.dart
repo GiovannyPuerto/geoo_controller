@@ -1,6 +1,7 @@
 import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:geo_inventario/models/monthly_product_cut.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 
@@ -327,6 +328,75 @@ class AnalysisDataSource extends DataTableSource {
 
   @override
   int get rowCount => analysis.length;
+
+  @override
+  bool get isRowCountApproximate => false;
+
+  @override
+  int get selectedRowCount => 0;
+}
+
+// ─── MonthlyProductCutDataSource ────────────────────────────────────────────
+
+class MonthlyProductCutDataSource extends DataTableSource {
+  final List<MonthlyProductCut> rows;
+  final NumberFormat _qtyFmt = NumberFormat('#,##0.###', 'es_CO');
+
+  MonthlyProductCutDataSource(this.rows);
+
+  @override
+  DataRow getRow(int index) {
+    final row = rows[index];
+    return DataRow(
+      color: WidgetStateProperty.resolveWith((_) => _rowColor(index)),
+      cells: [
+        DataCell(Text(
+          row.code,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppColors.textMuted,
+            fontFamily: 'monospace',
+          ),
+        )),
+        DataCell(Tooltip(
+          message: row.description,
+          child: Text(
+            row.description,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        )),
+        DataCell(Text(
+          row.group,
+          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          overflow: TextOverflow.ellipsis,
+        )),
+        DataCell(Text(
+          _qtyFmt.format(row.averageQuantity),
+          style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+        )),
+        DataCell(Text(
+          CurrencyFormatter.format(row.averageValue),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        )),
+        DataCell(Text(
+          CurrencyFormatter.format(row.unitCost),
+          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+        )),
+      ],
+    );
+  }
+
+  @override
+  int get rowCount => rows.length;
 
   @override
   bool get isRowCountApproximate => false;

@@ -185,7 +185,7 @@ class _WelcomePageState extends State<WelcomePage>
       appBar: _buildAppBar(),
       body: Container(
         width: double.infinity,
-        decoration: const BoxDecoration(gradient: AppGradients.background),
+        color: AppColors.background,
         child: FadeTransition(
           opacity: _fadeAnim,
           child: SlideTransition(
@@ -213,26 +213,19 @@ class _WelcomePageState extends State<WelcomePage>
 
   PreferredSizeWidget _buildAppBar() {
     return PreferredSize(
-      preferredSize: const Size.fromHeight(70),
+      preferredSize: const Size.fromHeight(68),
       child: Container(
         decoration: const BoxDecoration(
-          gradient: AppGradients.primary,
-          boxShadow: AppShadows.elevated,
+          color: AppColors.surface,
+          border: Border(bottom: BorderSide(color: AppColors.border)),
+          boxShadow: AppShadows.card,
         ),
         child: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           title: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child:
-                    Image.asset('statics/images/logo_geoflora.png', height: 30),
-              ),
+              Image.asset('statics/images/logo_geoflora.png', height: 32),
               const SizedBox(width: AppSpacing.md),
               const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,14 +234,15 @@ class _WelcomePageState extends State<WelcomePage>
                   Text(
                     'Sistema de Inventario',
                     style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                      letterSpacing: 0.1,
                     ),
                   ),
                   Text(
                     'Geoflora SAS',
-                    style: TextStyle(fontSize: 11, color: Colors.white70),
+                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -260,7 +254,7 @@ class _WelcomePageState extends State<WelcomePage>
               label: 'Dashboard',
               onTap: _goToDashboard,
             ),
-            const SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.md),
           ],
         ),
       ),
@@ -272,55 +266,69 @@ class _WelcomePageState extends State<WelcomePage>
   Widget _buildHeroSection() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
-    final heroIconSize = isMobile ? 72.0 : 96.0;
-    final heroIconInner = isMobile ? 36.0 : 48.0;
-    final heroTitleSize = isMobile ? 26.0 : 40.0;
-    final heroSubtitleSize = isMobile ? 14.0 : 17.0;
-    final heroPaddingV = isMobile ? AppSpacing.xl : AppSpacing.xxxl;
-    final heroPaddingH = isMobile ? AppSpacing.md : AppSpacing.xxl;
+    final heroTitleSize = isMobile ? 28.0 : 44.0;
+    final heroSubtitleSize = isMobile ? 14.0 : 18.0;
+    final heroPaddingV = isMobile ? AppSpacing.xxl : 72.0;
+    final heroPaddingH = isMobile ? AppSpacing.lg : AppSpacing.xxl;
 
     return Container(
       width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppColors.primaryDark, AppColors.primary],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
       padding: EdgeInsets.symmetric(
           vertical: heroPaddingV, horizontal: heroPaddingH),
       child: Column(
         children: [
-          // Ícono principal con fondo degradado
+          // Badge superior
           Container(
-            width: heroIconSize,
-            height: heroIconSize,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
-              gradient: AppGradients.primary,
-              borderRadius: BorderRadius.circular(AppRadius.xl),
-              boxShadow: AppShadows.colored(AppColors.primary),
+              color: Colors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(AppRadius.full),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
             ),
-            child: Icon(Icons.inventory_2_rounded,
-                size: heroIconInner, color: Colors.white),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.verified_rounded, color: Colors.white, size: 14),
+                SizedBox(width: 6),
+                Text(
+                  'Plataforma corporativa Geoflora',
+                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
           Text(
-            'Gestión de Inventario',
+            'Gestión de\nInventario',
             style: TextStyle(
               fontSize: heroTitleSize,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
               height: 1.1,
+              letterSpacing: -0.5,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
           Text(
             isMobile
-                ? 'Procesa Excel, analiza movimientos y visualiza tu inventario.'
+                ? 'Procesa Excel, analiza movimientos\ny visualiza tu inventario.'
                 : 'Procesa archivos Excel, analiza movimientos\ny visualiza el estado de tu inventario en tiempo real.',
             style: TextStyle(
               fontSize: heroSubtitleSize,
-              color: AppColors.textMuted,
+              color: Colors.white.withValues(alpha: 0.75),
               height: 1.6,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: AppSpacing.xl),
+          const SizedBox(height: AppSpacing.xxl),
           // Botones de acción
           Wrap(
             spacing: AppSpacing.md,
@@ -329,16 +337,52 @@ class _WelcomePageState extends State<WelcomePage>
             children: [
               ElevatedButton.icon(
                 onPressed: _pickFile,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.primaryDark,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  textStyle: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w700),
+                ),
                 icon: const Icon(Icons.upload_file_rounded, size: 20),
                 label: const Text('Seleccionar archivo Excel'),
               ),
               OutlinedButton.icon(
                 onPressed: _goToDashboard,
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Colors.white, width: 1.5),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  textStyle: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w600),
+                ),
                 icon: const Icon(Icons.bar_chart_rounded, size: 20),
                 label: const Text('Ver Dashboard'),
               ),
             ],
           ),
+          const SizedBox(height: AppSpacing.xxl),
+          // Indicadores KPI rápidos
+          if (!isMobile)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _HeroStat(label: 'Carga rápida', icon: Icons.bolt_rounded),
+                _HeroStatDivider(),
+                _HeroStat(label: 'Análisis completo', icon: Icons.analytics_rounded),
+                _HeroStatDivider(),
+                _HeroStat(label: 'Reportes PDF/Excel', icon: Icons.picture_as_pdf_rounded),
+              ],
+            ),
         ],
       ),
     );
@@ -513,16 +557,19 @@ class _WelcomePageState extends State<WelcomePage>
     const features = [
       (
         Icons.upload_file_rounded,
+        AppColors.primary,
         'Carga rápida',
         'Selecciona archivos Excel y procésalos en segundos de forma automática.'
       ),
       (
         Icons.analytics_rounded,
+        AppColors.accent,
         'Análisis completo',
         'Gráficos, estadísticas y reportes detallados del estado de tu inventario.'
       ),
       (
         Icons.history_rounded,
+        AppColors.primary,
         'Historial de importaciones',
         'Registro completo de todas las cargas realizadas con trazabilidad total.'
       ),
@@ -533,7 +580,7 @@ class _WelcomePageState extends State<WelcomePage>
       padding: EdgeInsets.symmetric(
           vertical: isMobile ? AppSpacing.xl : AppSpacing.xxxl,
           horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
-      color: AppColors.surface,
+      color: AppColors.background,
       child: Column(
         children: [
           const _SectionHeader(
@@ -541,13 +588,13 @@ class _WelcomePageState extends State<WelcomePage>
             subtitle:
                 'Todas las herramientas que necesitas para gestionar tu inventario en un solo lugar.',
           ),
-          const SizedBox(height: AppSpacing.xxxl),
+          const SizedBox(height: AppSpacing.xxl),
           Wrap(
             spacing: AppSpacing.lg,
             runSpacing: AppSpacing.lg,
             alignment: WrapAlignment.center,
             children: features
-                .map((f) => _FeatureCard(icon: f.$1, title: f.$2, body: f.$3))
+                .map((f) => _FeatureCard(icon: f.$1, accentColor: f.$2, title: f.$3, body: f.$4))
                 .toList(),
           ),
         ],
@@ -582,6 +629,7 @@ class _WelcomePageState extends State<WelcomePage>
       padding: EdgeInsets.symmetric(
           vertical: isMobile ? AppSpacing.xl : AppSpacing.xxxl,
           horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
+      color: AppColors.surfaceBlue,
       child: Column(
         children: [
           const _SectionHeader(
@@ -589,10 +637,10 @@ class _WelcomePageState extends State<WelcomePage>
             subtitle:
                 'Tres pasos sencillos para tener tu inventario actualizado.',
           ),
-          const SizedBox(height: AppSpacing.xxxl),
+          const SizedBox(height: AppSpacing.xxl),
           Wrap(
             spacing: AppSpacing.lg,
-            runSpacing: AppSpacing.xxl,
+            runSpacing: AppSpacing.xl,
             alignment: WrapAlignment.center,
             children: steps
                 .map((s) => _StepCard(number: s.$1, title: s.$2, body: s.$3))
@@ -687,7 +735,7 @@ class _WelcomePageState extends State<WelcomePage>
       padding: EdgeInsets.symmetric(
           vertical: AppSpacing.xl,
           horizontal: isMobile ? AppSpacing.md : AppSpacing.xxl),
-      color: AppColors.dark,
+      color: AppColors.primaryDark,
       child: Column(
         children: [
           // Tres columnas informativas
@@ -767,14 +815,14 @@ class _AppBarButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextButton.icon(
       onPressed: onTap,
-      icon: Icon(icon, color: Colors.white, size: 20),
+      icon: Icon(icon, color: Colors.white, size: 18),
       label: Text(label,
-          style: const TextStyle(color: Colors.white, fontSize: 13)),
+          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
       style: TextButton.styleFrom(
-        backgroundColor: Colors.white.withValues(alpha: 0.15),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        backgroundColor: AppColors.accent.withValues(alpha: 0.9),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.sm)),
+            borderRadius: BorderRadius.circular(AppRadius.md)),
       ),
     );
   }
@@ -792,20 +840,27 @@ class _SectionHeader extends StatelessWidget {
     final isMobile = MediaQuery.of(context).size.width < 600;
     return Column(
       children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: isMobile ? 22.0 : 28.0,
-            fontWeight: FontWeight.bold,
-            color: AppColors.textPrimary,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppColors.primaryLighter,
+            borderRadius: BorderRadius.circular(AppRadius.full),
           ),
-          textAlign: TextAlign.center,
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: isMobile ? 12.0 : 13.0,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+              letterSpacing: 0.5,
+            ),
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
           subtitle,
           style: TextStyle(
-              fontSize: isMobile ? 14.0 : 16.0, color: AppColors.textMuted),
+              fontSize: isMobile ? 14.0 : 16.0, color: AppColors.textMuted, height: 1.5),
           textAlign: TextAlign.center,
         ),
       ],
@@ -819,11 +874,13 @@ class _FeatureCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
+    this.accentColor = AppColors.primary,
   });
 
   final IconData icon;
   final String title;
   final String body;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -838,40 +895,34 @@ class _FeatureCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border(
-            left: const BorderSide(color: AppColors.primary, width: 4),
-            top: BorderSide(color: AppColors.border),
-            right: BorderSide(color: AppColors.border),
-            bottom: BorderSide(color: AppColors.border),
-          ),
+          border: Border.all(color: AppColors.border),
           boxShadow: AppShadows.card,
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
-                color: AppColors.primaryLight,
+                color: accentColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(AppRadius.md),
               ),
-              child: Icon(icon, size: 32, color: AppColors.primary),
+              child: Icon(icon, size: 28, color: accentColor),
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
               title,
               style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
               ),
-              textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
               body,
               style: const TextStyle(
-                  fontSize: 13, color: AppColors.textMuted, height: 1.5),
-              textAlign: TextAlign.center,
+                  fontSize: 13, color: AppColors.textMuted, height: 1.55),
             ),
           ],
         ),
@@ -900,45 +951,57 @@ class _StepCard extends StatelessWidget {
 
     return SizedBox(
       width: cardWidth,
-      child: Column(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              gradient: AppGradients.primary,
-              shape: BoxShape.circle,
-              boxShadow: AppShadows.colored(AppColors.primary),
-            ),
-            child: Center(
-              child: Text(
-                number,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: AppColors.border),
+          boxShadow: AppShadows.card,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    boxShadow: AppShadows.colored(AppColors.primary),
+                  ),
+                  child: Center(
+                    child: Text(
+                      number,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
               ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              body,
+              style: const TextStyle(
+                  fontSize: 13, color: AppColors.textMuted, height: 1.55),
             ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            body,
-            style: const TextStyle(
-                fontSize: 13, color: AppColors.textMuted, height: 1.5),
-            textAlign: TextAlign.center,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1009,6 +1072,42 @@ class _StatusChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Indicador de característica en la barra inferior del hero.
+class _HeroStat extends StatelessWidget {
+  const _HeroStat({required this.label, required this.icon});
+
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: Colors.white70, size: 16),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+      ],
+    );
+  }
+}
+
+/// Separador vertical entre indicadores del hero.
+class _HeroStatDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      width: 1,
+      height: 16,
+      color: Colors.white.withValues(alpha: 0.3),
     );
   }
 }

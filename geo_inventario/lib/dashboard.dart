@@ -291,21 +291,22 @@ class _DashboardPageState extends State<DashboardPage>
       preferredSize: Size.fromHeight(isMobile ? 96 : 112),
       child: Container(
         decoration: const BoxDecoration(
-          gradient: AppGradients.primary,
-          boxShadow: AppShadows.elevated,
+          color: AppColors.surface,
+          border: Border(bottom: BorderSide(color: AppColors.border)),
+          boxShadow: AppShadows.card,
         ),
         child: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+            icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
             tooltip: 'Volver al inicio',
             onPressed: () => Navigator.pop(context),
           ),
           title: Row(
             children: [
-              Image.asset('statics/images/logo_geoflora.png',
-                  height: isMobile ? 28 : 36),
+              Image.asset('statics/images/logo.png',
+                  height: isMobile ? 26 : 32),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
@@ -315,8 +316,9 @@ class _DashboardPageState extends State<DashboardPage>
                       'Dashboard de Inventario',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                        letterSpacing: 0.1,
                       ),
                     ),
                     if (_lastUpdateTime != null)
@@ -324,7 +326,7 @@ class _DashboardPageState extends State<DashboardPage>
                         'Actualizado el $_lastUpdateTime',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: Colors.white70,
+                          color: AppColors.textMuted,
                         ),
                       ),
                   ],
@@ -339,15 +341,19 @@ class _DashboardPageState extends State<DashboardPage>
               onUploadUpdate: _pickAndUploadUpdateFiles,
               onRollbackUpdate: _rollbackLastUpdate,
             ),
-            const SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.md),
           ],
           bottom: TabBar(
             controller: _tabController,
             isScrollable: true,
             tabAlignment: TabAlignment.start,
-            indicator: const UnderlineTabIndicator(
-              borderSide: BorderSide(color: Colors.white, width: 3),
-              insets: EdgeInsets.symmetric(horizontal: 8),
+            labelColor: AppColors.primary,
+            unselectedLabelColor: AppColors.textMuted,
+            labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+            indicator: UnderlineTabIndicator(
+              borderSide: BorderSide(color: AppColors.accent, width: 3),
+              insets: const EdgeInsets.symmetric(horizontal: 8),
             ),
             indicatorSize: TabBarIndicatorSize.tab,
             tabs: const [
@@ -477,17 +483,18 @@ class _UploadMenu extends StatelessWidget {
           ),
       ],
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(AppRadius.sm),
+          color: AppColors.accent,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          boxShadow: AppShadows.colored(AppColors.accent),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_upload_outlined, color: Colors.white, size: 20),
+            Icon(Icons.cloud_upload_outlined, color: Colors.white, size: 18),
             SizedBox(width: 6),
-            Text('Cargar', style: TextStyle(color: Colors.white, fontSize: 13)),
+            Text('Cargar', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
             SizedBox(width: 4),
             Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
           ],

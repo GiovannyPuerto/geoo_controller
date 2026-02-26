@@ -321,6 +321,8 @@ def get_monthly_product_cuts_data(
     category_filter="",
     search_filter="",
     limit="",
+    offset="",
+    page_size="",
 ):
     """
     Retorna el corte mensual por producto usando promedio diario real.
@@ -375,6 +377,18 @@ def get_monthly_product_cuts_data(
         limit_value = 0
     if limit_value < 0:
         limit_value = 0
+    try:
+        offset_value = int(offset) if str(offset).strip() else 0
+    except (TypeError, ValueError):
+        offset_value = 0
+    if offset_value < 0:
+        offset_value = 0
+    try:
+        page_size_value = int(page_size) if str(page_size).strip() else 0
+    except (TypeError, ValueError):
+        page_size_value = 0
+    if page_size_value < 0:
+        page_size_value = 0
 
     products_meta = list(
         products_qs.values(
@@ -404,6 +418,9 @@ def get_monthly_product_cuts_data(
             },
             "truncated": False,
             "limit": limit_value,
+            "offset": offset_value,
+            "page_size": page_size_value,
+            "has_next_page": False,
         }
 
     records_scope = InventoryRecord.objects.filter(product_id__in=product_ids)
@@ -611,16 +628,27 @@ def get_monthly_product_cuts_data(
         )
 
     rows.sort(key=lambda item: item["valor_promedio"], reverse=True)
-    total_count = len(rows)
+    total_count_unbounded = len(rows)
     if limit_value > 0:
         rows = rows[:limit_value]
+    total_count = len(rows)
+
+    if page_size_value > 0:
+        start = min(offset_value, total_count)
+        end = min(start + page_size_value, total_count)
+        page_rows = rows[start:end]
+    else:
+        start = 0
+        end = total_count
+        page_rows = rows
 
     return {
         "month": month_key,
         "month_start": month_start.isoformat(),
         "month_end": month_end.isoformat(),
-        "products": rows,
+        "products": page_rows,
         "products_count": total_count,
+        "products_count_unbounded": total_count_unbounded,
         "totals": {
             "opening_quantity": float(total_opening_qty),
             "closing_quantity": float(total_closing_qty),
@@ -632,8 +660,11 @@ def get_monthly_product_cuts_data(
         # Alias de compatibilidad para cliente tipo inventario actual.
         "total_quantity": float(total_average_qty),
         "total_value": float(total_average_value),
-        "truncated": bool(limit_value and total_count > len(rows)),
+        "truncated": bool(limit_value and total_count_unbounded > total_count),
         "limit": limit_value,
+        "offset": start,
+        "page_size": page_size_value,
+        "has_next_page": end < total_count,
     }
 
 
@@ -758,7 +789,13 @@ def get_product_analysis_data(
     }
 
     #  4. Movimientos acumulados antes del año de rotación (balance_pre_year)
-    rotation_year = target_date.year if target_date else datetime.now().year
+    # Si no se filtra fecha explícita, usamos el último año con movimientos
+    # para no evaluar contra un año futuro sin datos.
+    if target_date:
+        rotation_year = target_date.year
+    else:
+        latest_scope_date = records_scope.aggregate(max_date=Max("date"))["max_date"]
+        rotation_year = latest_scope_date.year if latest_scope_date else datetime.now().year
     pre_year_filter = Q(product_id__in=product_ids)
     if target_date:
         pre_year_filter &= Q(date__lt=target_date.replace(day=1, month=1))
@@ -830,10 +867,14 @@ def get_product_analysis_data(
             movements_by_month = monthly_dict.get(pid, {})
 
             monthly_balances = []
+            monthly_changed = []
             running = balance_pre_year
+            previous_balance = balance_pre_year
             for month in range(1, 13):
                 running += movements_by_month.get(month, Decimal("0"))
                 monthly_balances.append(running)
+                monthly_changed.append(running != previous_balance)
+                previous_balance = running
 
             all_zero = all(b == 0 for b in monthly_balances)
             unique_b = set(monthly_balances)
@@ -854,12 +895,14 @@ def get_product_analysis_data(
                 rotation = "Activo"
 
             is_stagnant = rotation in ["Estancado", "Obsoleto"]
-            consecutive_changes = sum(
-                1
-                for i in range(len(monthly_balances) - 1)
-                if monthly_balances[i] != monthly_balances[i + 1]
+            # Alta rotación:
+            # "Sí" si hubo cambios en al menos 2 meses consecutivos
+            # en los saldos mensuales (dos transiciones seguidas con cambio).
+            has_two_consecutive_changes = any(
+                monthly_changed[i] and monthly_changed[i + 1]
+                for i in range(len(monthly_changed) - 1)
             )
-            high_rotation = "Sí" if consecutive_changes >= 2 else "No"
+            high_rotation = "Sí" if has_two_consecutive_changes else "No"
 
             # Filtros de negocio en Python (aplicados tras calcular)
             if rotation_filter and rotation != rotation_filter:
