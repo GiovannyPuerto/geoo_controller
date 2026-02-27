@@ -8,7 +8,8 @@ import pandas as pd
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Coalesce, Length
 from .models import ImportBatch, Product, InventoryRecord
 from .services.analytics_service import (
     get_inventory_at_date_data,
@@ -53,6 +54,21 @@ from openpyxl.chart import PieChart, BarChart, LineChart, Reference
 from openpyxl.chart.series import DataPoint as XLDataPoint
 
 logger = logging.getLogger(__name__)
+
+
+def _order_by_document_number_desc(records_query):
+    """
+    Ordena por número de documento de mayor a menor.
+
+    Estrategia "inteligente" para números almacenados como texto:
+    - primero por longitud (desc),
+    - luego por valor textual (desc),
+    - desempate por fecha e id (desc).
+    """
+    return records_query.annotate(
+        _doc_number_text=Coalesce('document_number', Value('')),
+        _doc_number_len=Length(Coalesce('document_number', Value(''))),
+    ).order_by('-_doc_number_len', '-_doc_number_text', '-date', '-id')
 
 # ---------------------------------------------------------------------------
 # Paleta corporativa GeoFlora — Rosa #EF7C91 · Blanco #FFFFFD · Cyan #4BC0D9
@@ -306,6 +322,7 @@ def get_monthly_product_cuts(request):
     search_filter = request.GET.get('search', '')
     month = request.GET.get('month', '')
     limit = request.GET.get('limit', '')
+    page_size = request.GET.get('page_size', '')
 
     try:
         result_data = get_monthly_product_cuts_data(
@@ -315,6 +332,7 @@ def get_monthly_product_cuts(request):
             category_filter=category_filter,
             search_filter=search_filter,
             limit=limit,
+            page_size=page_size,
         )
         return JsonResponse(result_data)
     except Exception as e:
@@ -438,8 +456,8 @@ def get_records(request):
                 Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
             )
 
-        # Aplicar paginación
-        records = records_query.order_by('-date')[:1000]
+        # Aplicar orden y paginación
+        records = _order_by_document_number_desc(records_query)[:1000]
         records_data = [{
             'id': r.id,
             'product_code': r.product.code,
@@ -652,11 +670,15 @@ def export_analysis(request, inventory_name='default'):
                     f'Alta Rot. ({alta_rot_c})',
                     f'Normal ({normal_c})',
                 ]
-                rl_pie.slices[0].fillColor = rl_colors.HexColor('#EF4444')
-                rl_pie.slices[1].fillColor = rl_colors.HexColor('#EF7C91')
-                rl_pie.slices[2].fillColor = rl_colors.HexColor('#4BC0D9')
-                rl_pie.slices.strokeColor  = rl_colors.white
-                rl_pie.slices.strokeWidth  = 0.5
+                rl_pie.slices[0].fillColor   = rl_colors.HexColor('#EF4444')
+                rl_pie.slices[0].strokeColor = rl_colors.white
+                rl_pie.slices[0].strokeWidth = 0.5
+                rl_pie.slices[1].fillColor   = rl_colors.HexColor('#EF7C91')
+                rl_pie.slices[1].strokeColor = rl_colors.white
+                rl_pie.slices[1].strokeWidth = 0.5
+                rl_pie.slices[2].fillColor   = rl_colors.HexColor('#4BC0D9')
+                rl_pie.slices[2].strokeColor = rl_colors.white
+                rl_pie.slices[2].strokeWidth = 0.5
                 legend = Legend()
                 legend.x = 200
                 legend.y = 80
@@ -765,8 +787,8 @@ def export_movements(request, inventory_name='default'):
                 Q(product__code__icontains=search_filter) | Q(product__description__icontains=search_filter)
             )
 
-        # Limite de exportacion de hasta  5000 de record(Historial)
-        records = records_query.order_by('-date')[:5000]
+        # Limite de exportacion de hasta 5000 registros (historial)
+        records = _order_by_document_number_desc(records_query)[:5000]
         movements_data = [{
             'fecha': r.date.isoformat(),
             'codigo': r.product.code,
@@ -887,17 +909,22 @@ def export_movements(request, inventory_name='default'):
             salidas_vals  = [monthly_totals[m]['salidas']  for m in months_sorted]
 
             if months_sorted and (any(entradas_vals) or any(salidas_vals)):
-                bar_drawing = Drawing(620, 200)
+                bar_drawing = Drawing(620, 220)
                 bc = VerticalBarChart()
-                bc.x      = 60
-                bc.y      = 20
-                bc.height = 160
-                bc.width  = 540
+                bc.x      = 70
+                bc.y      = 40
+                bc.height = 150
+                bc.width  = 520
                 bc.data   = [entradas_vals, salidas_vals]
-                bc.categoryAxis.categoryNames = [m[-5:] for m in months_sorted]
+                bc.categoryAxis.categoryNames    = [m[-7:] for m in months_sorted]
+                bc.categoryAxis.labels.angle     = 30 if len(months_sorted) > 6 else 0
+                bc.categoryAxis.labels.fontSize  = 7
                 bc.bars[0].fillColor = rl_colors.HexColor('#EF7C91')
                 bc.bars[1].fillColor = rl_colors.HexColor('#4BC0D9')
-                bc.valueAxis.valueMin = 0
+                max_bar = max(entradas_vals + salidas_vals) if (entradas_vals + salidas_vals) else 1
+                bc.valueAxis.valueMin  = 0
+                bc.valueAxis.valueMax  = max_bar * 1.1
+                bc.valueAxis.valueStep = max_bar / 5
                 bar_drawing.add(bc)
                 elements.append(GraphicsFlowable(bar_drawing))
                 elements.append(Spacer(1, 10))
@@ -1072,20 +1099,54 @@ def export_monthly_cuts(request, inventory_name='default'):
                 prod_ws = wb.create_sheet('CorteProductosMes')
                 prod_data_row = _apply_excel_header(prod_ws, 'Corte de Productos por Mes', inventory_name_param, logo_path)
 
-                prod_keys = list(product_rows[0].keys()) if product_rows else []
-                prod_col_widths_map = {'A': 14, 'B': 38, 'C': 24, 'D': 16, 'E': 16, 'F': 16, 'G': 14, 'H': 18, 'I': 18, 'J': 18}
-                for ci, key in enumerate(prod_keys, 1):
-                    prod_ws.cell(row=prod_data_row, column=ci, value=key)
-                    col_letter = get_column_letter(ci)
-                    prod_ws.column_dimensions[col_letter].width = prod_col_widths_map.get(col_letter, 14)
+                prod_col_defs = [
+                    ('codigo',            'Código',          14),
+                    ('nombre_producto',   'Producto',        40),
+                    ('grupo',             'Grupo',           22),
+                    ('cantidad_apertura', 'Cant. Apertura',  18),
+                    ('cantidad_promedio', 'Cant. Promedio',  18),
+                    ('cantidad_cierre',   'Cant. Cierre',    18),
+                    ('costo_unitario',    'Costo Unitario',  18),
+                    ('valor_apertura',    'Valor Apertura',  20),
+                    ('valor_promedio',    'Valor Promedio',  20),
+                    ('valor_cierre',      'Valor Cierre',    20),
+                ]
+                for ci, (key, hdr, w) in enumerate(prod_col_defs, 1):
+                    prod_ws.cell(row=prod_data_row, column=ci, value=hdr)
+                    prod_ws.column_dimensions[get_column_letter(ci)].width = w
 
                 for ri, prow in enumerate(product_rows, 1):
                     rn = prod_data_row + ri
-                    for ci, key in enumerate(prod_keys, 1):
-                        prod_ws.cell(row=rn, column=ci, value=prow.get(key, ''))
+                    for ci, (key, _hdr, _w) in enumerate(prod_col_defs, 1):
+                        val = prow.get(key, '')
+                        prod_ws.cell(row=rn, column=ci, value=val)
+
+                # Fila de totales
+                totals = product_cuts_payload.get('totals', {})
+                total_rn = prod_data_row + len(product_rows) + 1
+                total_fill = PatternFill(start_color=_XL_TOTAL_BG, end_color=_XL_TOTAL_BG, fill_type='solid')
+                total_font = Font(name='Calibri', size=11, bold=True, color=_XL_TEXT)
+                totals_values = [
+                    'TOTALES', '', '',
+                    float(totals.get('opening_quantity', 0)),
+                    float(totals.get('average_quantity', 0)),
+                    float(totals.get('closing_quantity', 0)),
+                    '',
+                    float(totals.get('opening_value', 0)),
+                    float(totals.get('average_value', 0)),
+                    float(totals.get('closing_value', 0)),
+                ]
+                thin = Side(border_style='thin', color=_XL_BORDER_CLR)
+                cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+                for ci, val in enumerate(totals_values, 1):
+                    c = prod_ws.cell(row=total_rn, column=ci, value=val)
+                    c.fill = total_fill
+                    c.font = total_font
+                    c.border = cell_border
+                    c.alignment = Alignment(vertical='center', wrap_text=True)
 
                 prod_end = prod_data_row + len(product_rows)
-                _style_excel_table(prod_ws, prod_data_row, prod_data_row + 1, prod_end, len(prod_keys))
+                _style_excel_table(prod_ws, prod_data_row, prod_data_row + 1, prod_end, len(prod_col_defs))
 
                 totals = product_cuts_payload.get('totals', {})
                 prod_ws.column_dimensions['L'].width = 18
@@ -1144,19 +1205,29 @@ def export_monthly_cuts(request, inventory_name='default'):
                 closing  = [float(r['corte_final'])         for r in export_rows]
                 avg_gen  = [float(r['corte_promedio_general']) for r in export_rows]
                 if any(closing) or any(avg_gen):
-                    line_drawing = Drawing(620, 190)
+                    n = len(export_rows)
+                    line_drawing = Drawing(620, 210)
                     lc = HorizontalLineChart()
-                    lc.x      = 60
-                    lc.y      = 20
+                    lc.x      = 70
+                    lc.y      = 30
                     lc.height = 150
-                    lc.width  = 540
+                    lc.width  = 520
+                    lc.joinedLines = 1
                     lc.data   = [closing, avg_gen]
-                    lc.categoryAxis.categoryNames = [str(r['mes'])[-7:] for r in export_rows]
+                    lc.categoryAxis.categoryNames = [str(r['mes']) for r in export_rows]
+                    lc.categoryAxis.labels.angle  = 30 if n > 6 else 0
+                    lc.categoryAxis.labels.fontSize = 7
                     lc.lines[0].strokeColor = rl_colors.HexColor('#EF7C91')
-                    lc.lines[0].strokeWidth = 1.5
+                    lc.lines[0].strokeWidth = 2
+                    lc.lines[0].symbol      = None
                     lc.lines[1].strokeColor = rl_colors.HexColor('#4BC0D9')
-                    lc.lines[1].strokeWidth = 1.5
-                    lc.valueAxis.valueMin = 0
+                    lc.lines[1].strokeWidth = 2
+                    lc.lines[1].symbol      = None
+                    max_val = max(closing + avg_gen) if (closing + avg_gen) else 1
+                    lc.valueAxis.valueMin   = 0
+                    lc.valueAxis.valueMax   = max_val * 1.1
+                    lc.valueAxis.valueStep  = max_val / 5
+                    lc.valueAxis.labelTextFormat = lambda v: f'${v/1_000_000:.1f}M' if v >= 1_000_000 else f'${v:,.0f}'
                     line_drawing.add(lc)
                     elements.append(GraphicsFlowable(line_drawing))
                     elements.append(Spacer(1, 10))
@@ -1185,6 +1256,75 @@ def export_monthly_cuts(request, inventory_name='default'):
             table.setStyle(_pdf_table_style(len(table_rows_pdf)))
             elements.append(table)
 
+            # Tabla de inventario promediado por producto
+            if product_rows:
+                totals_prod = product_cuts_payload.get('totals', {})
+                elements.append(Spacer(1, 16))
+                elements.append(HRFlowable(width='100%', thickness=1, color=_CORP_HEADER_BG2, spaceAfter=6))
+
+                prod_title_style = ParagraphStyle(
+                    'ProdTitle', parent=rl_styles['Normal'],
+                    fontName='Times-Bold', fontSize=11,
+                    textColor=_CORP_HEADER_BG2, spaceAfter=4,
+                )
+                elements.append(Paragraph(
+                    f'Inventario Promediado por Producto — Mes: {product_cuts_payload.get("month", "")}',
+                    prod_title_style,
+                ))
+                elements.append(Spacer(1, 4))
+
+                prod_headers = [
+                    Paragraph('Código', header_style),
+                    Paragraph('Producto', header_style),
+                    Paragraph('Grupo', header_style),
+                    Paragraph('Cant. Apertura', header_style),
+                    Paragraph('Cant. Promedio', header_style),
+                    Paragraph('Cant. Cierre', header_style),
+                    Paragraph('Costo Unit.', header_style),
+                    Paragraph('Valor Apertura', header_style),
+                    Paragraph('Valor Promedio', header_style),
+                    Paragraph('Valor Cierre', header_style),
+                ]
+                prod_rows_pdf = [prod_headers]
+                for p in product_rows:
+                    prod_rows_pdf.append([
+                        Paragraph(str(p.get('codigo', '')), normal_style),
+                        Paragraph(str(p.get('nombre_producto', '')), normal_style),
+                        Paragraph(str(p.get('grupo', '')), normal_style),
+                        Paragraph(f"{float(p.get('cantidad_apertura', 0)):,.2f}", normal_style),
+                        Paragraph(f"{float(p.get('cantidad_promedio', 0)):,.2f}", normal_style),
+                        Paragraph(f"{float(p.get('cantidad_cierre', 0)):,.2f}", normal_style),
+                        Paragraph(f"${float(p.get('costo_unitario', 0)):,.2f}", normal_style),
+                        Paragraph(f"${float(p.get('valor_apertura', 0)):,.2f}", normal_style),
+                        Paragraph(f"${float(p.get('valor_promedio', 0)):,.2f}", normal_style),
+                        Paragraph(f"${float(p.get('valor_cierre', 0)):,.2f}", normal_style),
+                    ])
+
+                # Fila de totales
+                prod_rows_pdf.append([
+                    Paragraph('TOTALES', ParagraphStyle('Tot', parent=rl_styles['Normal'], fontName='Times-Bold', fontSize=8)),
+                    Paragraph('', normal_style),
+                    Paragraph('', normal_style),
+                    Paragraph(f"{float(totals_prod.get('opening_quantity', 0)):,.2f}", normal_style),
+                    Paragraph(f"{float(totals_prod.get('average_quantity', 0)):,.2f}", normal_style),
+                    Paragraph(f"{float(totals_prod.get('closing_quantity', 0)):,.2f}", normal_style),
+                    Paragraph('', normal_style),
+                    Paragraph(f"${float(totals_prod.get('opening_value', 0)):,.2f}", normal_style),
+                    Paragraph(f"${float(totals_prod.get('average_value', 0)):,.2f}", normal_style),
+                    Paragraph(f"${float(totals_prod.get('closing_value', 0)):,.2f}", normal_style),
+                ])
+
+                prod_table = Table(
+                    prod_rows_pdf,
+                    colWidths=[52, 120, 58, 62, 62, 62, 60, 72, 72, 72],
+                    repeatRows=1,
+                )
+                base_style = _pdf_table_style(len(prod_rows_pdf))
+                base_style.add('BACKGROUND', (0, len(prod_rows_pdf) - 1), (-1, len(prod_rows_pdf) - 1), _CORP_TOTAL_BG)
+                base_style.add('FONTNAME', (0, len(prod_rows_pdf) - 1), (-1, len(prod_rows_pdf) - 1), 'Times-Bold')
+                prod_table.setStyle(base_style)
+                elements.append(prod_table)
+
             try:
                 doc.build(elements)
                 buffer.seek(0)
@@ -1205,6 +1345,316 @@ def export_monthly_cuts(request, inventory_name='default'):
 
     except Exception as e:
         logger.error(f"Error exporting monthly cuts: {str(e)}", exc_info=True)
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@require_http_methods(["GET"])
+def export_tops(request, inventory_name='default'):
+    """
+    Exporta reporte de Tops (valor, movimientos, entradas y salidas) en Excel o PDF.
+    Usa estilo corporativo consistente con los demás reportes.
+    """
+    try:
+        format_type = request.GET.get('format', 'excel')
+        inventory_name_param = request.GET.get('inventory_name', inventory_name)
+        warehouse_filter = request.GET.get('warehouse', '')
+        category_filter = request.GET.get('category', '')
+        rotation_filter = request.GET.get('rotation', '')
+        search_filter = request.GET.get('search', '')
+        group_filter = request.GET.get('group', '')
+        exact_cutoff_date = request.GET.get('date', '')
+        movement_date_from = request.GET.get('movement_date_from', '') or request.GET.get('date_from', '')
+        movement_date_to = request.GET.get('movement_date_to', '') or request.GET.get('date_to', '')
+
+        try:
+            top_limit = int(request.GET.get('top', '30'))
+        except (TypeError, ValueError):
+            top_limit = 30
+        top_limit = max(1, min(top_limit, 500))
+
+        def _safe_float(val):
+            try:
+                return float(val or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # Base para top de valor (corte)
+        cutoff_analysis = get_product_analysis_data(
+            inventory_name=inventory_name_param,
+            category_filter=category_filter,
+            warehouse_filter=warehouse_filter,
+            rotation_filter=rotation_filter,
+            stagnant_filter='',
+            high_rotation_filter='',
+            date_from='',
+            date_to=exact_cutoff_date,
+            search_filter=search_filter,
+            limit='',
+        )
+
+        # Base para top de movimientos (rango)
+        range_analysis = get_product_analysis_data(
+            inventory_name=inventory_name_param,
+            category_filter=category_filter,
+            warehouse_filter=warehouse_filter,
+            rotation_filter=rotation_filter,
+            stagnant_filter='',
+            high_rotation_filter='',
+            date_from=movement_date_from,
+            date_to=movement_date_to,
+            search_filter=search_filter,
+            limit='',
+        )
+
+        def _apply_group_filter(items):
+            if not group_filter:
+                return items
+            return [it for it in items if str(it.get('grupo', '')) == group_filter]
+
+        cutoff_base = _apply_group_filter(cutoff_analysis)
+        range_base = _apply_group_filter(range_analysis)
+
+        def _top_by(items, selector):
+            sorted_items = sorted(items, key=selector, reverse=True)
+            return sorted_items[:top_limit]
+
+        top_valor = _top_by(cutoff_base, lambda it: _safe_float(it.get('valor_saldo_actual')))
+        top_movimientos = _top_by(
+            range_base,
+            lambda it: _safe_float(it.get('entradas_periodo')) + _safe_float(it.get('salidas_periodo')),
+        )
+        top_entradas = _top_by(range_base, lambda it: _safe_float(it.get('entradas_periodo')))
+        top_salidas = _top_by(range_base, lambda it: _safe_float(it.get('salidas_periodo')))
+
+        def _movement_value(item, qty_key, value_key):
+            val = _safe_float(item.get(value_key))
+            if val != 0:
+                return val
+            return _safe_float(item.get(qty_key)) * _safe_float(item.get('costo_unitario'))
+
+        logo_path = _get_logo_path()
+        filters_txt = (
+            f"Top {top_limit} | Grupo: {group_filter or 'Todos'} | "
+            f"Rotación: {rotation_filter or 'Todos'} | "
+            f"Corte valor: {exact_cutoff_date or 'sin fecha'} | "
+            f"Rango mov.: {movement_date_from or 'sin'} - {movement_date_to or 'rango'}"
+        )
+
+        sections = [
+            {
+                'title': 'Top valor en inventario',
+                'items': top_valor,
+                'qty_fn': lambda it: _safe_float(it.get('cantidad_saldo_actual')),
+                'val_fn': lambda it: _safe_float(it.get('valor_saldo_actual')),
+            },
+            {
+                'title': 'Top movimientos totales',
+                'items': top_movimientos,
+                'qty_fn': lambda it: _safe_float(it.get('entradas_periodo')) + _safe_float(it.get('salidas_periodo')),
+                'val_fn': lambda it: _movement_value(it, 'entradas_periodo', 'valor_entradas_periodo') + _movement_value(it, 'salidas_periodo', 'valor_salidas_periodo'),
+            },
+            {
+                'title': 'Más entradas',
+                'items': top_entradas,
+                'qty_fn': lambda it: _safe_float(it.get('entradas_periodo')),
+                'val_fn': lambda it: _movement_value(it, 'entradas_periodo', 'valor_entradas_periodo'),
+            },
+            {
+                'title': 'Más salidas',
+                'items': top_salidas,
+                'qty_fn': lambda it: _safe_float(it.get('salidas_periodo')),
+                'val_fn': lambda it: _movement_value(it, 'salidas_periodo', 'valor_salidas_periodo'),
+            },
+        ]
+
+        if format_type == 'excel':
+            wb = Workbook()
+            default_ws = wb.active
+            wb.remove(default_ws)
+
+            def _fill_top_sheet(ws, title, items, qty_fn, val_fn):
+                row0 = _apply_excel_header(ws, title, inventory_name_param, logo_path)
+                ws.cell(row=row0, column=1, value='Posición')
+                ws.cell(row=row0, column=2, value='Código')
+                ws.cell(row=row0, column=3, value='Producto')
+                ws.cell(row=row0, column=4, value='Grupo')
+                ws.cell(row=row0, column=5, value='Rotación')
+                ws.cell(row=row0, column=6, value='Cantidad')
+                ws.cell(row=row0, column=7, value='Valor')
+
+                widths = [10, 16, 42, 24, 16, 18, 20]
+                for ci, w in enumerate(widths, 1):
+                    ws.column_dimensions[get_column_letter(ci)].width = w
+
+                for idx, item in enumerate(items, 1):
+                    rn = row0 + idx
+                    ws.cell(row=rn, column=1, value=idx)
+                    ws.cell(row=rn, column=2, value=str(item.get('codigo', '')))
+                    ws.cell(row=rn, column=3, value=str(item.get('nombre_producto', '')))
+                    ws.cell(row=rn, column=4, value=str(item.get('grupo', '')))
+                    ws.cell(row=rn, column=5, value=str(item.get('rotacion', '')))
+                    ws.cell(row=rn, column=6, value=float(qty_fn(item)))
+                    ws.cell(row=rn, column=7, value=float(val_fn(item)))
+
+                data_end = row0 + len(items)
+                _style_excel_table(ws, row0, row0 + 1, data_end, 7)
+
+            for section in sections:
+                sheet_name = section['title'].replace(' ', '')[:31]
+                ws = wb.create_sheet(sheet_name)
+                _fill_top_sheet(ws, section['title'], section['items'], section['qty_fn'], section['val_fn'])
+
+            buffer = BytesIO()
+            wb.save(buffer)
+            buffer.seek(0)
+            response = HttpResponse(
+                buffer.getvalue(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            )
+            response['Content-Disposition'] = f'attachment; filename="tops_inventario_{inventory_name_param}.xlsx"'
+            return response
+
+        if format_type == 'pdf':
+            buffer = BytesIO()
+            doc = _create_pdf_doc(buffer, landscape(A4), 'Informe de Tops')
+
+            rl_styles = getSampleStyleSheet()
+            normal_style = ParagraphStyle(
+                'TopsNormal', parent=rl_styles['Normal'],
+                fontName='Times-Roman', fontSize=8, leading=10,
+            )
+            header_style = ParagraphStyle(
+                'TopsHeader', parent=rl_styles['Normal'],
+                fontName='Times-Bold', fontSize=9, alignment=1,
+            )
+            section_style = ParagraphStyle(
+                'TopsSection', parent=rl_styles['Normal'],
+                fontName='Times-Bold', fontSize=11,
+                textColor=_CORP_HEADER_BG2,
+            )
+            info_style = ParagraphStyle(
+                'TopsInfo', parent=rl_styles['Normal'],
+                fontName='Times-Italic', fontSize=9,
+                textColor=rl_colors.HexColor('#3D4459'),
+            )
+
+            elements = _build_pdf_header_elements(
+                logo_path,
+                'Informe de Tops',
+                inventory_name_param,
+                subtitle=filters_txt,
+            )
+            elements += [
+                Spacer(1, 4),
+                Paragraph(filters_txt, info_style),
+                Spacer(1, 8),
+            ]
+
+            for section in sections:
+                section_items = section['items']
+                qty_total = sum(float(section['qty_fn'](it)) for it in section_items)
+                val_total = sum(float(section['val_fn'](it)) for it in section_items)
+
+                section_band = Table(
+                    [[Paragraph(section['title'], section_style)]],
+                    colWidths=[614],
+                )
+                section_band.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), _CORP_TOTAL_BG),
+                    ('BOX', (0, 0), (-1, -1), 0.6, _CORP_BORDER),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                elements.append(section_band)
+                elements.append(Spacer(1, 4))
+
+                summary_table = Table(
+                    [[
+                        Paragraph(f"Registros: {len(section_items)}", info_style),
+                        Paragraph(f"Cantidad total: {qty_total:,.3f}", info_style),
+                        Paragraph(f"Valor total: ${val_total:,.2f}", info_style),
+                    ]],
+                    colWidths=[170, 220, 224],
+                )
+                summary_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), rl_colors.HexColor('#F9FAFB')),
+                    ('BOX', (0, 0), (-1, -1), 0.4, _CORP_BORDER),
+                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                    ('ALIGN', (1, 0), (-1, 0), 'RIGHT'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                elements.append(summary_table)
+                elements.append(Spacer(1, 5))
+
+                headers = [
+                    Paragraph('Posición', header_style),
+                    Paragraph('Código', header_style),
+                    Paragraph('Producto', header_style),
+                    Paragraph('Grupo', header_style),
+                    Paragraph('Rotación', header_style),
+                    Paragraph('Cantidad', header_style),
+                    Paragraph('Valor', header_style),
+                ]
+                table_data = [headers]
+                for idx, item in enumerate(section_items, 1):
+                    table_data.append([
+                        Paragraph(str(idx), normal_style),
+                        Paragraph(str(item.get('codigo', '')), normal_style),
+                        Paragraph(str(item.get('nombre_producto', '')), normal_style),
+                        Paragraph(str(item.get('grupo', '')), normal_style),
+                        Paragraph(str(item.get('rotacion', '')), normal_style),
+                        Paragraph(f"{section['qty_fn'](item):,.3f}", normal_style),
+                        Paragraph(f"${section['val_fn'](item):,.2f}", normal_style),
+                    ])
+
+                table_data.append([
+                    Paragraph('TOTAL', ParagraphStyle('TopTotalCell', parent=normal_style, fontName='Times-Bold')),
+                    Paragraph('', normal_style),
+                    Paragraph('', normal_style),
+                    Paragraph('', normal_style),
+                    Paragraph('', normal_style),
+                    Paragraph(f"{qty_total:,.3f}", ParagraphStyle('TopTotalQty', parent=normal_style, fontName='Times-Bold')),
+                    Paragraph(f"${val_total:,.2f}", ParagraphStyle('TopTotalVal', parent=normal_style, fontName='Times-Bold')),
+                ])
+
+                table = Table(
+                    table_data,
+                    colWidths=[45, 62, 170, 92, 72, 78, 95],
+                    repeatRows=1,
+                )
+                table_style = _pdf_table_style(len(table_data))
+                total_row = len(table_data) - 1
+                table_style.add('BACKGROUND', (0, total_row), (-1, total_row), _CORP_TOTAL_BG)
+                table_style.add('FONTNAME', (0, total_row), (-1, total_row), 'Times-Bold')
+                table_style.add('ALIGN', (0, 1), (0, total_row), 'CENTER')
+                table_style.add('ALIGN', (5, 1), (6, total_row), 'RIGHT')
+                table.setStyle(table_style)
+                elements.append(table)
+                elements.append(Spacer(1, 10))
+
+            try:
+                doc.build(elements)
+                buffer.seek(0)
+                if not buffer.getvalue():
+                    logger.error("PDF buffer vacío tras build")
+                    return JsonResponse({'error': 'PDF generation failed - empty content'}, status=500)
+            except Exception as e:
+                logger.error(f"Error building PDF tops: {str(e)}", exc_info=True)
+                return JsonResponse({'error': f'PDF generation failed: {str(e)}'}, status=500)
+
+            response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="tops_inventario_{inventory_name_param}.pdf"'
+            return response
+
+        return JsonResponse({'error': 'Formato no soportado'}, status=400)
+
+    except Exception as e:
+        logger.error(f"Error exporting tops: {str(e)}", exc_info=True)
         return JsonResponse({'error': str(e)}, status=500)
 
 

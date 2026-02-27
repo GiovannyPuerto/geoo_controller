@@ -6,6 +6,7 @@ import 'package:geo_inventario/tabs/analysis_tab.dart';
 import 'package:geo_inventario/tabs/monthly_cuts_tab.dart';
 import 'package:geo_inventario/tabs/movements_tab.dart';
 import 'package:geo_inventario/tabs/summary_tab.dart';
+import 'package:geo_inventario/tabs/tops_tab.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:intl/intl.dart';
@@ -31,7 +32,7 @@ class _DashboardPageState extends State<DashboardPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _loadDashboardState();
   }
 
@@ -278,6 +279,7 @@ class _DashboardPageState extends State<DashboardPage>
         children: [
           SummaryTabPage(onPickFile: _pickAndUploadBaseFile),
           const AnalysisTabPage(),
+          const TopsTabPage(),
           const MovementsTabPage(),
           const MonthlyCutsTabPage(),
         ],
@@ -299,7 +301,8 @@ class _DashboardPageState extends State<DashboardPage>
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
+            icon: const Icon(Icons.arrow_back_rounded,
+                color: AppColors.textPrimary),
             tooltip: 'Volver al inicio',
             onPressed: () => Navigator.pop(context),
           ),
@@ -349,8 +352,10 @@ class _DashboardPageState extends State<DashboardPage>
             tabAlignment: TabAlignment.start,
             labelColor: AppColors.primary,
             unselectedLabelColor: AppColors.textMuted,
-            labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-            unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+            labelStyle:
+                const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            unselectedLabelStyle:
+                const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
             indicator: UnderlineTabIndicator(
               borderSide: BorderSide(color: AppColors.accent, width: 3),
               insets: const EdgeInsets.symmetric(horizontal: 8),
@@ -374,6 +379,16 @@ class _DashboardPageState extends State<DashboardPage>
                     Icon(Icons.analytics_rounded, size: 16),
                     SizedBox(width: 6),
                     Text('Análisis'),
+                  ],
+                ),
+              ),
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.leaderboard_rounded, size: 16),
+                    SizedBox(width: 6),
+                    Text('Tops'),
                   ],
                 ),
               ),
@@ -494,7 +509,11 @@ class _UploadMenu extends StatelessWidget {
           children: [
             Icon(Icons.cloud_upload_outlined, color: Colors.white, size: 18),
             SizedBox(width: 6),
-            Text('Cargar', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+            Text('Cargar',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700)),
             SizedBox(width: 4),
             Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
           ],

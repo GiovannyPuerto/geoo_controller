@@ -5,7 +5,7 @@ from .views import (
     get_summary, export_analysis, export_movements, list_inventories,
     upload_base_file, welcome, get_monthly_movements, get_monthly_cuts,
     get_monthly_product_cuts, get_last_update_time, get_inventory_at_date, rollback_batch,
-    export_monthly_cuts
+    export_monthly_cuts, export_tops
 )
 
 urlpatterns = [
@@ -32,6 +32,8 @@ urlpatterns = [
     path('export-movements/<str:inventory_name>/', export_movements, name='export_movements_with_inventory'),
     path('export-monthly-cuts/', export_monthly_cuts, name='export_monthly_cuts'),
     path('export-monthly-cuts/<str:inventory_name>/', export_monthly_cuts, name='export_monthly_cuts_with_inventory'),
+    path('export-tops/', export_tops, name='export_tops'),
+    path('export-tops/<str:inventory_name>/', export_tops, name='export_tops_with_inventory'),
     path('create/', create_inventory, name='create_inventory'),
     path('create-inventory/', create_inventory, name='create_inventory_alias'),
     path('inventories/', list_inventories, name='list_inventories'),

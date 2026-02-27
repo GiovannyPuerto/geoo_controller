@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
-// ignore: avoid_web_libraries_in_flutter
 import 'package:universal_html/html.dart' as html
     if (dart.library.io) 'package:geo_inventario/stubs/html_stub.dart';
 import 'package:geo_inventario/models/monthly_cut.dart';
@@ -42,7 +41,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
 
   // Paginación de la tabla de productos
   MonthlyProductCutDataSource? _productDataSource;
-  int _productPageRows = 25;
+  int _productPageRows = 10;
+  int _productCurrentPage = 0;
 
   String? selectedWarehouse;
   String? selectedCategory;
@@ -53,10 +53,15 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   int productsCount = 0;
   int monthProductsCount = 0;
 
+  List<String> _warehouseOptions = const [];
+  List<String> _categoryOptions = const [];
+  List<MapEntry<String, String>> _searchOptions = const [];
+
   @override
   void initState() {
     super.initState();
     inventoryRefreshNotifier.addListener(_onExternalRefresh);
+    _loadSelectableFilterOptions();
     _loadData();
   }
 
@@ -68,6 +73,64 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   }
 
   void _onExternalRefresh() => _loadData();
+
+  Future<void> _loadSelectableFilterOptions() async {
+    try {
+      final rows = await _apiService.getMovements();
+      final warehouses = <String>{};
+      final categories = <String>{};
+      final searchMap = <String, String>{};
+
+      for (final row in rows) {
+        final warehouse = (row['warehouse'] ?? '').toString().trim();
+        final category = (row['category'] ?? '').toString().trim();
+        final code = (row['product_code'] ?? '').toString().trim();
+        final description = (row['product_description'] ?? '').toString().trim();
+
+        if (warehouse.isNotEmpty) warehouses.add(warehouse);
+        if (category.isNotEmpty) categories.add(category);
+
+        if (code.isNotEmpty || description.isNotEmpty) {
+          final value = code.isNotEmpty ? code : description;
+          final label = code.isNotEmpty && description.isNotEmpty
+              ? '$code - $description'
+              : value;
+          searchMap.putIfAbsent(value, () => label);
+        }
+      }
+
+      if (selectedWarehouse != null && selectedWarehouse!.isNotEmpty) {
+        warehouses.add(selectedWarehouse!);
+      }
+      if (selectedCategory != null && selectedCategory!.isNotEmpty) {
+        categories.add(selectedCategory!);
+      }
+      if (searchQuery != null && searchQuery!.isNotEmpty) {
+        searchMap.putIfAbsent(searchQuery!, () => searchQuery!);
+      }
+
+      final warehouseList = warehouses.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final categoryList = categories.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final searchList = searchMap.entries.toList()
+        ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+
+      if (!mounted) return;
+      setState(() {
+        _warehouseOptions = warehouseList;
+        _categoryOptions = categoryList;
+        _searchOptions = searchList;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _warehouseOptions = const [];
+        _categoryOptions = const [];
+        _searchOptions = const [];
+      });
+    }
+  }
 
   List<String> get _monthOptions {
     final seen = <String>{};
@@ -114,6 +177,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
         selectedMonth = month;
         isLoading = false;
       });
+
+      _loadSelectableFilterOptions();
 
       await _loadProductCuts(month: month);
     } catch (e) {
@@ -169,6 +234,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
           'average_quantity': ((totals['average_quantity'] as num?) ?? 0).toDouble(),
           'average_value': ((totals['average_value'] as num?) ?? 0).toDouble(),
         };
+        _productCurrentPage = 0;
         isProductLoading = false;
       });
     } catch (e) {
@@ -796,44 +862,105 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
               'No hay productos registrados para este mes.',
             )
           else
-            // Altura = header(56) + n filas(52) + footer(56) + padding extra
-            SizedBox(
-              height: 56 + (_productPageRows * 52.0) + 64,
-              child: PaginatedDataTable2(
-                minWidth: 1100,
-                headingRowColor:
-                    WidgetStateProperty.all(AppColors.surfaceVariant),
-                headingTextStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                ),
-                dataTextStyle: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textPrimary,
-                ),
-                rowsPerPage: _productPageRows,
-                availableRowsPerPage: const [25, 50, 100],
-                onRowsPerPageChanged: (value) {
-                  if (value != null) setState(() => _productPageRows = value);
-                },
-                columns: const [
-                  DataColumn2(label: Text('Código')),
-                  DataColumn2(
-                      label: Text('Nombre Producto'), size: ColumnSize.L),
-                  DataColumn2(label: Text('Grupo')),
-                  DataColumn2(
-                      label: Text('Cant. Promedio'), numeric: true),
-                  DataColumn2(
-                      label: Text('Valor Promedio'), numeric: true),
-                  DataColumn2(
-                      label: Text('Costo Unitario'), numeric: true),
-                ],
-                source: _productDataSource!,
-              ),
-            ),
+            _buildProductTable(),
         ],
       ),
+    );
+  }
+
+  // ─── Tabla paginada de productos ───────────────────────────────────────────
+
+  Widget _buildProductTable() {
+    final totalRows = productCuts.length;
+    final totalPages = (totalRows / _productPageRows).ceil().clamp(1, double.maxFinite).toInt();
+    final safePage = _productCurrentPage.clamp(0, totalPages - 1);
+    final start = safePage * _productPageRows;
+    final end = (start + _productPageRows).clamp(0, totalRows);
+    final pageRows = productCuts.sublist(start, end);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 56 + (pageRows.length * 52.0),
+          child: DataTable2(
+            minWidth: 1100,
+            headingRowColor: WidgetStateProperty.all(AppColors.surfaceVariant),
+            headingTextStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              color: AppColors.textSecondary,
+            ),
+            dataTextStyle: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textPrimary,
+            ),
+            columns: const [
+              DataColumn2(label: Text('Código')),
+              DataColumn2(label: Text('Nombre Producto'), size: ColumnSize.L),
+              DataColumn2(label: Text('Grupo')),
+              DataColumn2(label: Text('Cant. Promedio'), numeric: true),
+              DataColumn2(label: Text('Valor Promedio'), numeric: true),
+              DataColumn2(label: Text('Costo Unitario'), numeric: true),
+            ],
+            rows: pageRows.asMap().entries.map((entry) {
+              final globalIndex = start + entry.key;
+              return _productDataSource!.getRow(globalIndex);
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              '${start + 1}–$end de $totalRows',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            ),
+            const SizedBox(width: 16),
+            const Text('Filas por página:', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+            const SizedBox(width: 8),
+            DropdownButton<int>(
+              value: _productPageRows,
+              underline: const SizedBox(),
+              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+              items: const [
+                DropdownMenuItem(value: 10, child: Text('10')),
+                DropdownMenuItem(value: 25, child: Text('25')),
+                DropdownMenuItem(value: 50, child: Text('50')),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() { _productPageRows = value; _productCurrentPage = 0; });
+              },
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.first_page_rounded, size: 20),
+              tooltip: 'Primera página',
+              onPressed: safePage > 0 ? () => setState(() => _productCurrentPage = 0) : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.chevron_left_rounded, size: 20),
+              tooltip: 'Página anterior',
+              onPressed: safePage > 0 ? () => setState(() => _productCurrentPage = safePage - 1) : null,
+            ),
+            Text(
+              '${safePage + 1} / $totalPages',
+              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+            ),
+            IconButton(
+              icon: const Icon(Icons.chevron_right_rounded, size: 20),
+              tooltip: 'Página siguiente',
+              onPressed: safePage < totalPages - 1 ? () => setState(() => _productCurrentPage = safePage + 1) : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.last_page_rounded, size: 20),
+              tooltip: 'Última página',
+              onPressed: safePage < totalPages - 1 ? () => setState(() => _productCurrentPage = totalPages - 1) : null,
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -891,8 +1018,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
 
   void _showFiltersDialog() {
     int localMonths = monthsWindow;
-    String localWarehouse = selectedWarehouse ?? '';
-    String localCategory = selectedCategory ?? '';
+    String? localWarehouse = selectedWarehouse;
+    String? localCategory = selectedCategory;
     String localSearch = searchQuery ?? '';
 
     showDialog(
@@ -937,31 +1064,53 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                 },
               ),
               const SizedBox(height: AppSpacing.md),
-              TextFormField(
+              DropdownButtonFormField<String>(
                 initialValue: localWarehouse,
                 decoration: const InputDecoration(
                   labelText: 'Almacén',
-                  hintText: 'Opcional',
                   prefixIcon: Icon(Icons.warehouse_outlined, size: 18),
                 ),
+                items: [
+                  const DropdownMenuItem<String>(
+                    value: null,
+                    child: Text('Todos'),
+                  ),
+                  ..._warehouseOptions.map(
+                    (item) => DropdownMenuItem<String>(
+                      value: item,
+                      child: Text(item),
+                    ),
+                  ),
+                ],
                 onChanged: (value) => localWarehouse = value,
               ),
               const SizedBox(height: AppSpacing.md),
-              TextFormField(
+              DropdownButtonFormField<String>(
                 initialValue: localCategory,
                 decoration: const InputDecoration(
                   labelText: 'Categoría',
-                  hintText: 'Opcional',
                   prefixIcon: Icon(Icons.category_outlined, size: 18),
                 ),
+                items: [
+                  const DropdownMenuItem<String>(
+                    value: null,
+                    child: Text('Todas'),
+                  ),
+                  ..._categoryOptions.map(
+                    (item) => DropdownMenuItem<String>(
+                      value: item,
+                      child: Text(item),
+                    ),
+                  ),
+                ],
                 onChanged: (value) => localCategory = value,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 initialValue: localSearch,
                 decoration: const InputDecoration(
-                  labelText: 'Buscar',
-                  hintText: 'Código o descripción',
+                  labelText: 'Producto o código',
+                  hintText: 'Escribe código o descripción',
                   prefixIcon: Icon(Icons.search_rounded, size: 18),
                 ),
                 onChanged: (value) => localSearch = value,
@@ -988,10 +1137,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
             onPressed: () {
               setState(() {
                 monthsWindow = localMonths;
-                selectedWarehouse =
-                    localWarehouse.trim().isEmpty ? null : localWarehouse.trim();
-                selectedCategory =
-                    localCategory.trim().isEmpty ? null : localCategory.trim();
+                selectedWarehouse = localWarehouse;
+                selectedCategory = localCategory;
                 searchQuery = localSearch.trim().isEmpty ? null : localSearch.trim();
               });
               Navigator.of(dialogContext).pop();

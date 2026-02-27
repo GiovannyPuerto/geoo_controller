@@ -14,6 +14,7 @@ from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 from django.db.models import (
     Case,
+    Count,
     DecimalField,
     ExpressionWrapper,
     F,
@@ -684,7 +685,12 @@ def get_product_analysis_data(
     Construye el análisis agregado por producto con filtros de negocio.
     Usa queries SQL masivas para evitar N+1 y loops lentos.
     """
-    _ = date_from
+    start_date = None
+    if date_from:
+        try:
+            start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+        except ValueError:
+            start_date = None
 
     target_date = None
     if date_to:
@@ -722,6 +728,18 @@ def get_product_analysis_data(
     product_ids = [p["id"] for p in products_list]
 
     # ── 2. Scope de movimientos para stock/costo/rotación ────────────────────
+    # Importante: el calendario de evaluación (año de rotación) se determina
+    # a nivel inventario para que no cambie al filtrar productos específicos.
+    records_calendar_scope = InventoryRecord.objects.filter(
+        product__inventory_name=inventory_name
+    )
+    if target_date:
+        records_calendar_scope = records_calendar_scope.filter(date__lte=target_date)
+    if warehouse_filter:
+        records_calendar_scope = records_calendar_scope.filter(
+            warehouse__icontains=warehouse_filter
+        )
+
     records_scope = InventoryRecord.objects.filter(product_id__in=product_ids)
     if target_date:
         records_scope = records_scope.filter(date__lte=target_date)
@@ -791,11 +809,34 @@ def get_product_analysis_data(
     #  4. Movimientos acumulados antes del año de rotación (balance_pre_year)
     # Si no se filtra fecha explícita, usamos el último año con movimientos
     # para no evaluar contra un año futuro sin datos.
+    latest_scope_date = None
     if target_date:
         rotation_year = target_date.year
     else:
-        latest_scope_date = records_scope.aggregate(max_date=Max("date"))["max_date"]
+        latest_scope_date = records_calendar_scope.aggregate(max_date=Max("date"))["max_date"]
         rotation_year = latest_scope_date.year if latest_scope_date else datetime.now().year
+
+        if latest_scope_date:
+            months_in_latest_year = (
+                records_calendar_scope.filter(date__year=rotation_year)
+                .values("date__month")
+                .distinct()
+                .count()
+            )
+            if months_in_latest_year < 3:
+                previous_year_last_date = (
+                    records_calendar_scope.filter(date__year__lt=rotation_year)
+                    .aggregate(max_date=Max("date"))["max_date"]
+                )
+                if previous_year_last_date:
+                    rotation_year = previous_year_last_date.year
+
+    if target_date and target_date.year == rotation_year:
+        evaluation_end_date = target_date
+    elif latest_scope_date and latest_scope_date.year == rotation_year:
+        evaluation_end_date = latest_scope_date
+    else:
+        evaluation_end_date = datetime(rotation_year, 12, 31).date()
     pre_year_filter = Q(product_id__in=product_ids)
     if target_date:
         pre_year_filter &= Q(date__lt=target_date.replace(day=1, month=1))
@@ -811,22 +852,60 @@ def get_product_analysis_data(
         .annotate(total=Sum("quantity"))
     }
 
-    #  5. Movimientos mensuales del año de rotación
+    #  5. Movimientos del año de rotación (evaluación diaria)
     monthly_filter = Q(product_id__in=product_ids, date__year=rotation_year)
     if target_date:
         monthly_filter &= Q(date__lte=target_date)
     if warehouse_filter:
         monthly_filter &= Q(warehouse__icontains=warehouse_filter)
 
-    monthly_dict: dict[int, dict[int, Decimal]] = {}
+    daily_movements_by_product: dict[int, dict] = {}
     for row in (
         InventoryRecord.objects.filter(monthly_filter)
-        .annotate(month=TruncMonth("date"))
-        .values("product_id", "month")
-        .annotate(monthly_total=Sum("quantity"))
+        .values("product_id", "date")
+        .annotate(daily_total=Sum("quantity"))
     ):
         pid = row["product_id"]
-        monthly_dict.setdefault(pid, {})[row["month"].month] = row["monthly_total"] or Decimal("0")
+        daily_movements_by_product.setdefault(pid, {})[row["date"]] = row[
+            "daily_total"
+        ] or Decimal("0")
+
+    qty_output = DecimalField(max_digits=28, decimal_places=6)
+    movement_stats_filter = monthly_filter
+    if start_date:
+        movement_stats_filter = Q(product_id__in=product_ids)
+        if warehouse_filter:
+            movement_stats_filter &= Q(warehouse__icontains=warehouse_filter)
+        movement_stats_filter &= Q(date__gte=start_date)
+        if target_date:
+            movement_stats_filter &= Q(date__lte=target_date)
+
+    movement_stats_by_product: dict[int, dict[str, Decimal | int]] = {
+        row["product_id"]: {
+            "entries_qty": row["entries_qty"] or Decimal("0"),
+            "exits_qty": row["exits_qty"] or Decimal("0"),
+            "movement_count": row["movement_count"] or 0,
+        }
+        for row in InventoryRecord.objects.filter(movement_stats_filter)
+        .values("product_id")
+        .annotate(
+            entries_qty=Sum(
+                Case(
+                    When(quantity__gt=0, then=F("quantity")),
+                    default=Value(Decimal("0"), output_field=qty_output),
+                    output_field=qty_output,
+                )
+            ),
+            exits_qty=Sum(
+                Case(
+                    When(quantity__lt=0, then=ExpressionWrapper(-1 * F("quantity"), output_field=qty_output)),
+                    default=Value(Decimal("0"), output_field=qty_output),
+                    output_field=qty_output,
+                )
+            ),
+            movement_count=Count("id"),
+        )
+    }
 
     #  6. Construir resultado
     analysis_data = []
@@ -864,43 +943,128 @@ def get_product_analysis_data(
             # Rotación
             pre_year_sum = pre_year_dict.get(pid, Decimal("0"))
             balance_pre_year = initial_base + pre_year_sum
-            movements_by_month = monthly_dict.get(pid, {})
+            daily_movements = daily_movements_by_product.get(pid, {})
 
+            period_start = datetime(rotation_year, 1, 1).date()
+            period_end = evaluation_end_date
             monthly_balances = []
             monthly_changed = []
+            month_numbers = []
+            month_has_daily_changes: dict[int, bool] = {}
             running = balance_pre_year
-            previous_balance = balance_pre_year
-            for month in range(1, 13):
-                running += movements_by_month.get(month, Decimal("0"))
-                monthly_balances.append(running)
-                monthly_changed.append(running != previous_balance)
-                previous_balance = running
+            previous_day_balance = balance_pre_year
+            had_positive_stock = balance_pre_year > 0
+            all_daily_zero = balance_pre_year == 0
 
-            all_zero = all(b == 0 for b in monthly_balances)
+            day_cursor = period_start
+            while day_cursor <= period_end:
+                running += daily_movements.get(day_cursor, Decimal("0"))
+
+                day_changed = running != previous_day_balance
+                month_has_daily_changes[day_cursor.month] = (
+                    month_has_daily_changes.get(day_cursor.month, False) or day_changed
+                )
+
+                if running > 0:
+                    had_positive_stock = True
+                if running != 0:
+                    all_daily_zero = False
+
+                is_period_end = day_cursor == period_end
+                next_day = day_cursor + timedelta(days=1)
+                is_month_end = is_period_end or next_day.month != day_cursor.month
+                if is_month_end:
+                    previous_month_balance = (
+                        monthly_balances[-1] if monthly_balances else balance_pre_year
+                    )
+                    monthly_balances.append(running)
+                    monthly_changed.append(running != previous_month_balance)
+                    month_numbers.append(day_cursor.month)
+
+                previous_day_balance = running
+                day_cursor = next_day
+
+            if not monthly_balances:
+                monthly_balances = [balance_pre_year]
+                monthly_changed = [False]
+                month_numbers = [period_start.month]
+
             unique_b = set(monthly_balances)
 
-            if all_zero and balance_pre_year == 0:
-                rotation = "Activo"
-            elif all_zero and balance_pre_year > 0:
-                rotation = "Obsoleto"
-            elif len(unique_b) == 1 and monthly_balances[0] > 0:
-                rotation = "Obsoleto"
-            elif (
+            movement_stats = movement_stats_by_product.get(pid, {})
+            entries_qty = movement_stats.get("entries_qty", Decimal("0"))
+            exits_qty = movement_stats.get("exits_qty", Decimal("0"))
+            movement_count = movement_stats.get("movement_count", 0)
+
+            has_movements = bool(movement_count)
+            has_variations = any(month_has_daily_changes.values())
+            all_same_year = len(unique_b) == 1 and not has_variations
+            all_zero_year = all_daily_zero
+            month_change_flags = [
+                month_has_daily_changes.get(month, False) for month in month_numbers
+            ]
+            last_three_months = month_numbers[-3:]
+            last_three_same = (
                 len(monthly_balances) >= 3
                 and len(set(monthly_balances[-3:])) == 1
-                and monthly_balances[-1] > 0
-            ):
+                and all(not month_has_daily_changes.get(month, False) for month in last_three_months)
+            )
+
+            zero_stock_reason = ""
+            zero_type = "sin_cero"
+            zero_by_depletion = False
+            zero_by_inactivity = False
+            year_end_balance = monthly_balances[-1] if monthly_balances else Decimal("0")
+            is_zero_stock = current_stock == 0 or all_zero_year
+
+            if current_stock <= 0 or all_zero_year:
+                if all_zero_year:
+                    zero_stock_reason = "Inactivo en cero (todo el año en 0)"
+                    zero_type = "obsoleto_cero"
+                elif Decimal(exits_qty) > 0 and had_positive_stock:
+                    zero_stock_reason = "Agotamiento"
+                    zero_type = "agotamiento"
+                    zero_by_depletion = True
+                elif not has_movements and balance_pre_year <= 0:
+                    zero_stock_reason = "Sin movimientos (sin entradas/salidas)"
+                    zero_type = "inactividad"
+                    zero_by_inactivity = True
+                else:
+                    zero_stock_reason = "Cero con movimiento no concluyente"
+                    zero_type = "no_concluyente"
+
+            # Columna Estancado (Sí/No)
+            # Sí: saldo final igual en todos los meses del año y diferente de cero.
+            # No: si hay variaciones o saldo de cierre en cero.
+            is_stagnant = all_same_year and year_end_balance != 0
+
+            # Columna Rotación
+            # - Obsoleto: mismo saldo todo el año y no cero.
+            # - Estancado: mismo saldo en últimos 3 meses y no cero (sin caer en Obsoleto).
+            # - Activo: variaciones durante el año.
+            rotation_rule = ""
+            if is_zero_stock:
+                rotation = "Inactivo"
+                rotation_rule = "stock_en_cero"
+            elif all_same_year and year_end_balance != 0:
+                rotation = "Obsoleto"
+                rotation_rule = "saldo_constante_todo_el_anio_no_cero"
+            elif last_three_same and year_end_balance != 0:
                 rotation = "Estancado"
+                rotation_rule = "ultimos_tres_meses_constantes_no_cero"
+            elif has_variations:
+                rotation = "Activo"
+                rotation_rule = "variaciones_detectadas"
             else:
                 rotation = "Activo"
+                rotation_rule = "fallback_activo"
 
-            is_stagnant = rotation in ["Estancado", "Obsoleto"]
             # Alta rotación:
             # "Sí" si hubo cambios en al menos 2 meses consecutivos
-            # en los saldos mensuales (dos transiciones seguidas con cambio).
+            # en actividad mensual real (detectada día a día).
             has_two_consecutive_changes = any(
-                monthly_changed[i] and monthly_changed[i + 1]
-                for i in range(len(monthly_changed) - 1)
+                month_change_flags[i] and month_change_flags[i + 1]
+                for i in range(len(month_change_flags) - 1)
             )
             high_rotation = "Sí" if has_two_consecutive_changes else "No"
 
@@ -927,6 +1091,13 @@ def get_product_analysis_data(
                     "consumed": "Sí" if is_consumed else "No",
                     "estancado": "Sí" if is_stagnant else "No",
                     "rotacion": rotation,
+                    "regla_rotacion_aplicada": rotation_rule,
+                    "causa_stock_cero": zero_stock_reason,
+                    "tipo_cero": zero_type,
+                    "cero_por_agotamiento": "Sí" if zero_by_depletion else "No",
+                    "cero_por_inactividad": "Sí" if zero_by_inactivity else "No",
+                    "entradas_periodo": float(entries_qty),
+                    "salidas_periodo": float(exits_qty),
                     "alta_rotacion": high_rotation,
                     "almacen": warehouses_str.get(pid, "Todos"),
                     "negative_stock_alert": negative_stock_alert,

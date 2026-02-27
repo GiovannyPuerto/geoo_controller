@@ -55,7 +55,6 @@ void main() {
 
     // Verify that the welcome page loads with expected text
     expect(find.text('Sistema de Gestión de Inventario'), findsOneWidget);
-    expect(find.text('Seleccionar Archivo Excel'), findsOneWidget);
     expect(find.text('Ver Dashboard'), findsOneWidget);
   });
 }

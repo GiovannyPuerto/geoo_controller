@@ -596,6 +596,62 @@ class ApiService {
     }
   }
 
+  // Exportar tops
+  Future<http.Response> exportTops({
+    String format = 'excel',
+    String? warehouse,
+    String? category,
+    String? rotation,
+    String? group,
+    String? search,
+    int top = 30,
+    DateTime? cutoffDate,
+    DateTime? movementDateFrom,
+    DateTime? movementDateTo,
+  }) async {
+    try {
+      final params = <String, String>{
+        'format': format,
+        'top': top.toString(),
+      };
+      if (warehouse != null && warehouse.isNotEmpty) {
+        params['warehouse'] = warehouse;
+      }
+      if (category != null && category.isNotEmpty) {
+        params['category'] = category;
+      }
+      if (rotation != null && rotation.isNotEmpty) {
+        params['rotation'] = rotation;
+      }
+      if (group != null && group.isNotEmpty) {
+        params['group'] = group;
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+      if (cutoffDate != null) {
+        params['date'] = _toIsoDate(cutoffDate);
+      }
+      if (movementDateFrom != null) {
+        params['movement_date_from'] = _toIsoDate(movementDateFrom);
+      }
+      if (movementDateTo != null) {
+        params['movement_date_to'] = _toIsoDate(movementDateTo);
+      }
+
+      final uri =
+          Uri.parse('$baseUrl/export-tops/').replace(queryParameters: params);
+      final response = await http.get(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 60));
+
+      return response;
+    } catch (e) {
+      throw Exception('Error al exportar tops: $e');
+    }
+  }
+
   // Revertir último lote de actualización
   Future<Map<String, dynamic>> rollbackBatch({int? batchId}) async {
     try {

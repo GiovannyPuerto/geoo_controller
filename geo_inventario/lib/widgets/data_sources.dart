@@ -42,7 +42,7 @@ Widget _StatusBadge({
   );
 }
 
-// MovementsDataSource 
+// MovementsDataSource
 class MovementsDataSource extends DataTableSource {
   final List<Map<String, dynamic>> movements;
 
@@ -65,7 +65,9 @@ class MovementsDataSource extends DataTableSource {
     final item = movements[index];
     final docType = item['document_type']?.toString() ?? '';
     final qty = item['quantity'];
-    final qtyNum = qty is num ? qty.toDouble() : double.tryParse(qty?.toString() ?? '') ?? 0.0;
+    final qtyNum = qty is num
+        ? qty.toDouble()
+        : double.tryParse(qty?.toString() ?? '') ?? 0.0;
     final isNegative = qtyNum < 0;
 
     return DataRow(
@@ -100,7 +102,8 @@ class MovementsDataSource extends DataTableSource {
         DataCell(
           Text(
             item['warehouse'] ?? '',
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ),
         // Tipo Doc — con badge de color
@@ -125,7 +128,7 @@ class MovementsDataSource extends DataTableSource {
         // Cantidad — rojo si negativa
         DataCell(
           Text(
-            qtyNum.toStringAsFixed(0),
+            qtyNum.toStringAsFixed(3),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -137,7 +140,8 @@ class MovementsDataSource extends DataTableSource {
         DataCell(
           Text(
             CurrencyFormatter.format(item['unit_cost'] ?? 0),
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ),
         // Total
@@ -204,6 +208,13 @@ class AnalysisDataSource extends DataTableSource {
           fg: AppColors.errorDark,
           icon: Icons.cancel_rounded,
         );
+      case 'Inactivo':
+        return _StatusBadge(
+          label: 'Inactivo',
+          bg: AppColors.surfaceVariant,
+          fg: AppColors.textMuted,
+          icon: Icons.pause_circle_rounded,
+        );
       default:
         return _StatusBadge(
           label: rotation,
@@ -218,12 +229,8 @@ class AnalysisDataSource extends DataTableSource {
     final isGood = positiveIsGood ? isYes : !isYes;
     return _StatusBadge(
       label: value,
-      bg: isGood
-          ? AppColors.successLight
-          : AppColors.surfaceVariant,
-      fg: isGood
-          ? AppColors.successDark
-          : AppColors.textMuted,
+      bg: isGood ? AppColors.successLight : AppColors.surfaceVariant,
+      fg: isGood ? AppColors.successDark : AppColors.textMuted,
       icon: isGood ? Icons.check_rounded : null,
     );
   }
@@ -232,7 +239,9 @@ class AnalysisDataSource extends DataTableSource {
   DataRow getRow(int index) {
     final item = analysis[index];
     final qty = item['cantidad_saldo_actual'];
-    final qtyNum = qty is num ? qty.toDouble() : double.tryParse(qty?.toString() ?? '') ?? 0.0;
+    final qtyNum = qty is num
+        ? qty.toDouble()
+        : double.tryParse(qty?.toString() ?? '') ?? 0.0;
     final isNegative = qtyNum < 0;
 
     return DataRow(
@@ -268,7 +277,8 @@ class AnalysisDataSource extends DataTableSource {
         DataCell(
           Text(
             item['grupo'] ?? '',
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary),
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -283,7 +293,7 @@ class AnalysisDataSource extends DataTableSource {
                   )
                 : null,
             child: Text(
-              qtyNum.toStringAsFixed(0),
+              qtyNum.toStringAsFixed(3),
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: isNegative ? FontWeight.bold : FontWeight.normal,
@@ -307,7 +317,8 @@ class AnalysisDataSource extends DataTableSource {
         DataCell(
           Text(
             CurrencyFormatter.format(item['costo_unitario'] ?? 0),
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ),
         // Estancado — badge amarillo/gris

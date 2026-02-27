@@ -22,7 +22,7 @@ class AppColors {
   static const Color accentLighter = Color(0xFFEAF8EC);
 
   // ── Superficies ────────────────────────────────────────────────────────────
-  static const Color background = Color(0xFFF4F7FB);
+  static const Color background = Color.fromARGB(255, 226, 226, 226);
   static const Color surface = Color(0xFFFFFFFF);
   static const Color surfaceVariant = Color(0xFFEEF3F8);
   static const Color surfaceBlue = Color(0xFFEAF2FF);
