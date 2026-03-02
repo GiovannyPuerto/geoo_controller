@@ -306,39 +306,140 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             height: chartH,
             child: SfCartesianChart(
               primaryXAxis: const CategoryAxis(
-                labelStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                axisLine: AxisLine(width: 1, color: AppColors.border),
+                labelStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                axisLine: AxisLine(width: 0),
                 majorTickLines: MajorTickLines(size: 0),
                 majorGridLines: MajorGridLines(width: 0),
+                labelIntersectAction: AxisLabelIntersectAction.rotate45,
               ),
               primaryYAxis: NumericAxis(
-                numberFormat: NumberFormat.currency(locale: 'es_CO', symbol: '\$'),
-                labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                axisLine: const AxisLine(width: 1, color: AppColors.border),
+                axisLine: const AxisLine(width: 0),
                 majorTickLines: const MajorTickLines(size: 0),
-                majorGridLines: MajorGridLines(
-                  width: 0.5,
+                labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                majorGridLines: const MajorGridLines(
+                  width: 1,
                   color: AppColors.border,
-                  dashArray: const [5, 5],
+                  dashArray: [4, 4],
                 ),
-                title: const AxisTitle(
-                  text: 'Valor (\$)',
-                  textStyle: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                axisLabelFormatter: (AxisLabelRenderDetails details) {
+                  final v = details.value.toDouble();
+                  String label;
+                  if (v.abs() >= 1000000) {
+                    label = '\$${(v / 1000000).toStringAsFixed(1)}M';
+                  } else if (v.abs() >= 1000) {
+                    label = '\$${(v / 1000).toStringAsFixed(0)}K';
+                  } else {
+                    label = '\$${v.toStringAsFixed(0)}';
+                  }
+                  return ChartAxisLabel(label, details.textStyle);
+                },
               ),
               plotAreaBorderWidth: 0,
               legend: const Legend(
                 isVisible: true,
-                textStyle: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                position: LegendPosition.bottom,
+                textStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                overflowMode: LegendItemOverflowMode.wrap,
               ),
-              tooltipBehavior: TooltipBehavior(
+              trackballBehavior: TrackballBehavior(
                 enable: true,
-                color: AppColors.dark,
-                textStyle: const TextStyle(color: Colors.white, fontSize: 12),
+                activationMode: ActivationMode.singleTap,
+                lineType: TrackballLineType.vertical,
+                lineColor: AppColors.textMuted,
+                lineWidth: 1,
+                lineDashArray: const [4, 3],
+                tooltipDisplayMode: TrackballDisplayMode.groupAllPoints,
+                tooltipSettings: const InteractiveTooltip(
+                  enable: true,
+                  color: Color(0xFF1E293B),
+                  textStyle: TextStyle(color: Colors.white, fontSize: 11),
+                  borderWidth: 0,
+                ),
+                builder: (context, details) {
+                  final points = details.groupingModeInfo?.points ?? [];
+                  if (points.isEmpty) return const SizedBox.shrink();
+                  final xLabel = points.first.x?.toString() ?? '';
+                  const seriesNames = ['Entradas', 'Salidas', 'Saldo'];
+                  const seriesColors = [
+                    AppColors.chartPositive,
+                    AppColors.chartNegative,
+                    AppColors.chartBalance,
+                  ];
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          xLabel,
+                          style: const TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        ...points.asMap().entries.map((e) {
+                          final idx = e.key;
+                          final p = e.value;
+                          final yVal = p.y;
+                          final dotColor = idx < seriesColors.length
+                              ? seriesColors[idx]
+                              : Colors.white;
+                          final label = idx < seriesNames.length
+                              ? seriesNames[idx]
+                              : 'Serie ${idx + 1}';
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: dotColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '$label: ',
+                                  style: const TextStyle(
+                                    color: Color(0xFF94A3B8),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  yVal != null
+                                      ? CurrencyFormatter.format(yVal.toDouble())
+                                      : '—',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  );
+                },
               ),
               series: <CartesianSeries>[
                 ColumnSeries<MonthlyMovement, String>(
@@ -348,12 +449,13 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.totalEntries,
                   name: 'Entradas',
-                  color: AppColors.chartPositive,
+                  color: AppColors.chartPositive.withValues(alpha: 0.75),
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(3),
-                    topRight: Radius.circular(3),
+                    topLeft: Radius.circular(4),
+                    topRight: Radius.circular(4),
                   ),
-                  width: 0.6,
+                  width: 0.55,
+                  spacing: 0.1,
                 ),
                 ColumnSeries<MonthlyMovement, String>(
                   dataSource: monthlyMovements,
@@ -362,12 +464,13 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           .format(DateTime.parse('${data.month}-01')),
                   yValueMapper: (MonthlyMovement data, _) => data.totalExits,
                   name: 'Salidas',
-                  color: AppColors.chartNegative,
+                  color: AppColors.chartNegative.withValues(alpha: 0.75),
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(3),
-                    topRight: Radius.circular(3),
+                    topLeft: Radius.circular(4),
+                    topRight: Radius.circular(4),
                   ),
-                  width: 0.6,
+                  width: 0.55,
+                  spacing: 0.1,
                 ),
                 LineSeries<MonthlyMovement, String>(
                   dataSource: monthlyMovements,

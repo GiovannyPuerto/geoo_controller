@@ -586,6 +586,10 @@ class _UploadResultDialog extends StatelessWidget {
         summary['duplicates_update']) as int?;
     final totalProcessed = summary['total_processed'] as int?;
 
+    // Desglose de duplicados de actualización
+    final updateDupesInFile = summary['duplicates_update_in_file'] as int?;
+    final updateDupesInDb = summary['duplicates_update_in_db'] as int?;
+
     // Lista de archivos individuales (actualizaciones múltiples)
     final updateFiles = summary['update_files'] is List
         ? (summary['update_files'] as List).whereType<Map>().toList()
@@ -596,6 +600,31 @@ class _UploadResultDialog extends StatelessWidget {
         updateRegistered != null ||
         updateRepeated != null ||
         totalProcessed != null;
+
+    // Determina si todos los registros eran duplicados (nada nuevo importado).
+    // Prioriza el flag explícito del servidor; como fallback usa los contadores del summary.
+    final allDuplicates = result.ok &&
+        (result.allDuplicates ||
+            ((totalProcessed == 0) &&
+                ((updateRepeated ?? 0) + (baseRepeated ?? 0) > 0)));
+
+    final headerGradient = !result.ok
+        ? AppGradients.errorCard
+        : allDuplicates
+            ? AppGradients.warningCard
+            : AppGradients.successCard;
+
+    final headerIcon = !result.ok
+        ? Icons.error_rounded
+        : allDuplicates
+            ? Icons.content_copy_rounded
+            : Icons.check_circle_rounded;
+
+    final headerSubtitle = !result.ok
+        ? 'Se encontraron errores'
+        : allDuplicates
+            ? 'Sin registros nuevos — archivo ya cargado'
+            : 'Procesado exitosamente';
 
     return Dialog(
       shape: RoundedRectangleBorder(
@@ -613,9 +642,7 @@ class _UploadResultDialog extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
-                gradient: result.ok
-                    ? AppGradients.successCard
-                    : AppGradients.errorCard,
+                gradient: headerGradient,
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(AppRadius.xl),
                   topRight: Radius.circular(AppRadius.xl),
@@ -630,9 +657,7 @@ class _UploadResultDialog extends StatelessWidget {
                       borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
                     child: Icon(
-                      result.ok
-                          ? Icons.check_circle_rounded
-                          : Icons.error_rounded,
+                      headerIcon,
                       color: Colors.white,
                       size: 28,
                     ),
@@ -651,9 +676,7 @@ class _UploadResultDialog extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          result.ok
-                              ? 'Procesado exitosamente'
-                              : 'Se encontraron errores',
+                          headerSubtitle,
                           style: const TextStyle(
                             fontSize: 12,
                             color: Colors.white70,
@@ -711,7 +734,32 @@ class _UploadResultDialog extends StatelessWidget {
                               value: '$updateRegistered',
                               valueColor: AppColors.success,
                             ),
-                          if (updateRepeated != null)
+                          if (updateRepeated != null && updateRepeated > 0) ...[
+                            _MetricRow(
+                              icon: Icons.content_copy_rounded,
+                              label: 'Registros duplicados',
+                              value: '$updateRepeated',
+                              valueColor: AppColors.warning,
+                            ),
+                            // Desglose del origen de los duplicados
+                            if (updateDupesInFile != null &&
+                                updateDupesInFile > 0)
+                              _MetricRow(
+                                icon: Icons.file_copy_outlined,
+                                label: '\u2514 Repetidos en el archivo',
+                                value: '$updateDupesInFile',
+                                valueColor: AppColors.textSecondary,
+                                indent: true,
+                              ),
+                            if (updateDupesInDb != null && updateDupesInDb > 0)
+                              _MetricRow(
+                                icon: Icons.storage_rounded,
+                                label: '\u2514 Ya importados antes',
+                                value: '$updateDupesInDb',
+                                valueColor: AppColors.textSecondary,
+                                indent: true,
+                              ),
+                          ] else if (updateRepeated != null)
                             _MetricRow(
                               icon: Icons.content_copy_rounded,
                               label: 'Registros duplicados',
@@ -750,6 +798,9 @@ class _UploadResultDialog extends StatelessWidget {
                                 (entry['file_name'] ?? 'archivo').toString(),
                             registered: (entry['rows_registered'] ?? 0) as int,
                             repeated: (entry['rows_repeated'] ?? 0) as int,
+                            repeatedInFile:
+                                entry['rows_repeated_in_file'] as int?,
+                            repeatedInDb: entry['rows_repeated_in_db'] as int?,
                           )),
                     ],
 
@@ -876,6 +927,7 @@ class _MetricRow extends StatelessWidget {
     required this.value,
     required this.valueColor,
     this.bold = false,
+    this.indent = false,
   });
 
   final IconData icon;
@@ -883,39 +935,45 @@ class _MetricRow extends StatelessWidget {
   final String value;
   final Color valueColor;
   final bool bold;
+  final bool indent;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: AppColors.textMuted),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+    final effectiveColor = indent ? AppColors.textDisabled : valueColor;
+    return Padding(
+      padding: EdgeInsets.only(left: indent ? 16.0 : 0.0),
+      child: Row(
+        children: [
+          Icon(icon, size: indent ? 14 : 16, color: effectiveColor),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: indent ? 12 : 13,
+                color:
+                    indent ? AppColors.textDisabled : AppColors.textSecondary,
+                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
           ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-          decoration: BoxDecoration(
-            color: valueColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(AppRadius.full),
-          ),
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: valueColor,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: effectiveColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadius.full),
+            ),
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: indent ? 12 : 13,
+                fontWeight: FontWeight.bold,
+                color: effectiveColor,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -926,14 +984,22 @@ class _FileDetailRow extends StatelessWidget {
     required this.fileName,
     required this.registered,
     required this.repeated,
+    this.repeatedInFile,
+    this.repeatedInDb,
   });
 
   final String fileName;
   final int registered;
   final int repeated;
+  final int? repeatedInFile;
+  final int? repeatedInDb;
 
   @override
   Widget build(BuildContext context) {
+    final showBreakdown = repeated > 0 &&
+        (repeatedInFile != null || repeatedInDb != null) &&
+        ((repeatedInFile ?? 0) + (repeatedInDb ?? 0) > 0);
+
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -963,11 +1029,12 @@ class _FileDetailRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          Row(
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
             children: [
               _SmallBadge(
                   label: '$registered registrados', color: AppColors.success),
-              const SizedBox(width: AppSpacing.sm),
               _SmallBadge(
                 label: '$repeated duplicados',
                 color:
@@ -975,6 +1042,26 @@ class _FileDetailRow extends StatelessWidget {
               ),
             ],
           ),
+          // Desglose de la causa de los duplicados
+          if (showBreakdown) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              children: [
+                if ((repeatedInFile ?? 0) > 0)
+                  _SmallBadge(
+                    label: '$repeatedInFile en el archivo',
+                    color: AppColors.textSecondary,
+                  ),
+                if ((repeatedInDb ?? 0) > 0)
+                  _SmallBadge(
+                    label: '$repeatedInDb ya importados',
+                    color: AppColors.info,
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );

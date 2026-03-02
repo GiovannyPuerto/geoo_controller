@@ -517,8 +517,9 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
+          if (monthlyCuts.isNotEmpty) ...[_buildChartKpis(), const SizedBox(height: AppSpacing.md)],
           SizedBox(
-            height: 300,
+            height: 380,
             child: monthlyCuts.isEmpty
                 ? _buildEmptyState(
                     Icons.show_chart_rounded,
@@ -527,6 +528,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                   )
                 : SfCartesianChart(
                     plotAreaBorderWidth: 0,
+                    plotAreaBackgroundColor: Colors.transparent,
                     primaryXAxis: const CategoryAxis(
                       majorGridLines: MajorGridLines(width: 0),
                       axisLine: AxisLine(width: 0),
@@ -534,11 +536,10 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         fontSize: 11,
                         color: AppColors.textMuted,
                       ),
+                      labelIntersectAction: AxisLabelIntersectAction.rotate45,
                     ),
                     primaryYAxis: NumericAxis(
-                      numberFormat:
-                          NumberFormat.currency(locale: 'es_CO', symbol: r'$'),
-                      axisLine: AxisLine(width: 0),
+                      axisLine: const AxisLine(width: 0),
                       majorGridLines: const MajorGridLines(
                         width: 1,
                         color: AppColors.border,
@@ -548,49 +549,296 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         fontSize: 10,
                         color: AppColors.textMuted,
                       ),
+                      // Formato compacto: $1.2M, $450K, etc.
+                      axisLabelFormatter: (AxisLabelRenderDetails details) {
+                        final v = details.value.toDouble();
+                        String label;
+                        if (v.abs() >= 1000000) {
+                          label = '\$${(v / 1000000).toStringAsFixed(1)}M';
+                        } else if (v.abs() >= 1000) {
+                          label = '\$${(v / 1000).toStringAsFixed(0)}K';
+                        } else {
+                          label = '\$${v.toStringAsFixed(0)}';
+                        }
+                        return ChartAxisLabel(label, details.textStyle);
+                      },
                     ),
                     legend: const Legend(
                       isVisible: true,
                       position: LegendPosition.bottom,
-                      textStyle: TextStyle(fontSize: 12),
+                      textStyle: TextStyle(fontSize: 11),
+                      overflowMode: LegendItemOverflowMode.wrap,
                     ),
-                    tooltipBehavior: TooltipBehavior(
+                    // Trackball: muestra las 3 series simultáneamente al hacer hover
+                    trackballBehavior: TrackballBehavior(
                       enable: true,
-                      format: 'point.x: point.y',
+                      activationMode: ActivationMode.singleTap,
+                      lineType: TrackballLineType.vertical,
+                      lineColor: AppColors.textMuted,
+                      lineWidth: 1,
+                      lineDashArray: const [4, 3],
+                      tooltipSettings: const InteractiveTooltip(
+                        enable: true,
+                        color: Color(0xFF1E293B),
+                        textStyle: TextStyle(color: Colors.white, fontSize: 11),
+                        borderWidth: 0,
+                      ),
+                      tooltipDisplayMode: TrackballDisplayMode.groupAllPoints,
+                      builder: (context, details) {
+                        // Formateador moneda compacto dentro del tooltip
+                        String fmt(num v) {
+                          return CurrencyFormatter.format(v.toDouble());
+                        }
+                        final points = details.groupingModeInfo?.points ?? [];
+                        if (points.isEmpty) return const SizedBox.shrink();
+                        // x está directamente en CartesianChartPoint
+                        final xLabel = points.first.x?.toString() ?? '';
+                        const seriesNames = [
+                          'Corte Promedio',
+                          'Corte Final',
+                          'Promedio período',
+                        ];
+                        const seriesColors = [
+                          AppColors.chartCutAverage,
+                          AppColors.chartCutFinal,
+                          AppColors.chartPositive,
+                        ];
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.25),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                xLabel,
+                                style: const TextStyle(
+                                  color: Color(0xFF94A3B8),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              ...points.asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final p = entry.value;
+                                // y está directamente en CartesianChartPoint
+                                final yVal = p.y;
+                                final dotColor = idx < seriesColors.length
+                                    ? seriesColors[idx]
+                                    : Colors.white;
+                                final label = idx < seriesNames.length
+                                    ? seriesNames[idx]
+                                    : 'Serie ${idx + 1}';
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: dotColor,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '$label: ',
+                                        style: const TextStyle(
+                                          color: Color(0xFF94A3B8),
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      Text(
+                                        yVal != null ? fmt(yVal) : '—',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                     series: <CartesianSeries>[
+                      // Barras semi-transparentes para no tapar las líneas
                       ColumnSeries<MonthlyCut, String>(
                         dataSource: monthlyCuts,
                         xValueMapper: (d, _) =>
                           MonthlyCutsFiltrosService.formatMonth(d.month),
                         yValueMapper: (d, _) => d.averageBalanceGeneral,
                         name: 'Corte Promedio General',
-                        color: AppColors.chartCutAverage,
+                        color: AppColors.chartCutAverage
+                            .withValues(alpha: 0.55),
                         borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(4)),
+                        width: 0.55,
+                        spacing: 0.1,
                         dataLabelSettings: const DataLabelSettings(
                           isVisible: false,
                         ),
                       ),
+                      // Línea de corte final con marcadores destacados
                       LineSeries<MonthlyCut, String>(
                         dataSource: monthlyCuts,
                         xValueMapper: (d, _) =>
                           MonthlyCutsFiltrosService.formatMonth(d.month),
                         yValueMapper: (d, _) => d.closingBalance,
-                        name: 'Corte Final General',
+                        name: 'Corte Final',
                         color: AppColors.chartCutFinal,
-                        width: 2,
+                        width: 2.5,
                         markerSettings: const MarkerSettings(
                           isVisible: true,
-                          height: 6,
-                          width: 6,
+                          height: 7,
+                          width: 7,
                           color: AppColors.chartCutFinal,
+                          borderColor: Colors.white,
+                          borderWidth: 1.5,
+                        ),
+                        dataLabelMapper: (d, _) {
+                          final v = d.closingBalance;
+                          if (v.abs() >= 1000000) return '\$${(v / 1000000).toStringAsFixed(2)}M';
+                          if (v.abs() >= 1000) return '\$${(v / 1000).toStringAsFixed(0)}K';
+                          return '\$${v.toStringAsFixed(0)}';
+                        },
+                        dataLabelSettings: DataLabelSettings(
+                          isVisible: true,
+                          textStyle: TextStyle(
+                            fontSize: 9,
+                            color: AppColors.chartCutFinal,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
+                      // Línea de promedio del período (punteada)
+                      if (periodAverageGeneral > 0)
+                        LineSeries<MonthlyCut, String>(
+                          dataSource: monthlyCuts,
+                          xValueMapper: (d, _) =>
+                            MonthlyCutsFiltrosService.formatMonth(d.month),
+                          yValueMapper: (d, _) => periodAverageGeneral,
+                          name: 'Promedio $monthsWindow meses',
+                          color: AppColors.chartPositive,
+                          width: 2,
+                          dashArray: const [10, 6],
+                          markerSettings: const MarkerSettings(
+                            isVisible: false,
+                          ),
+                        ),
                     ],
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ─── KPIs de resumen del período para la gráfica ──────────────────────────
+
+  Widget _buildChartKpis() {
+    final opening = monthlyCuts.first.openingBalance;
+    final totalEntries = monthlyCuts.fold(0.0, (s, c) => s + c.totalEntries);
+    final totalExits = monthlyCuts.fold(0.0, (s, c) => s + c.totalExits);
+    final closing = monthlyCuts.last.closingBalance;
+    return Row(
+      children: [
+        _kpiCard(
+          label: 'Apertura período',
+          value: opening,
+          icon: Icons.start_rounded,
+          color: AppColors.primary,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        _kpiCard(
+          label: 'Entradas totales',
+          value: totalEntries,
+          icon: Icons.add_circle_outline_rounded,
+          color: AppColors.success,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        _kpiCard(
+          label: 'Salidas totales',
+          value: totalExits,
+          icon: Icons.remove_circle_outline_rounded,
+          color: AppColors.error,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        _kpiCard(
+          label: 'Cierre período',
+          value: closing,
+          icon: Icons.flag_rounded,
+          color: AppColors.chartCutFinal,
+        ),
+      ],
+    );
+  }
+
+  Widget _kpiCard({
+    required String label,
+    required double value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 13, color: color),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              CurrencyFormatter.format(value),
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }

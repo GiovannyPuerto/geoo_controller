@@ -11,12 +11,17 @@ class UploadOperationResult {
   final int? statusCode;
   final Map<String, dynamic>? summary;
 
+  /// true cuando el servidor reportó explícitamente que todos los registros
+  /// del archivo ya existían en la base de datos (ninguno nuevo fue importado).
+  final bool allDuplicates;
+
   const UploadOperationResult({
     required this.ok,
     required this.message,
     this.error,
     this.statusCode,
     this.summary,
+    this.allDuplicates = false,
   });
 }
 
@@ -97,6 +102,7 @@ class ExcelUploadService {
 
       final response = await _apiService.uploadBaseFile(fileBytes, file.name);
       final ok = response['ok'] == true;
+      final allDuplicates = response['all_duplicates'] == true;
       final summary = response['summary'] is Map<String, dynamic>
           ? response['summary'] as Map<String, dynamic>
           : null;
@@ -110,6 +116,7 @@ class ExcelUploadService {
 
       return UploadOperationResult(
         ok: ok,
+        allDuplicates: allDuplicates,
         message:
             rawMessage.isNotEmpty ? rawMessage : (ok ? fallbackMessage : ''),
         error: ok
@@ -161,6 +168,7 @@ class ExcelUploadService {
       try {
         final jsonResponse = json.decode(rawBody) as Map<String, dynamic>;
         final ok = jsonResponse['ok'] == true;
+        final allDuplicates = jsonResponse['all_duplicates'] == true;
         final successMessage = _buildUpdateSuccessMessage(jsonResponse);
         final summary = jsonResponse['summary'] is Map<String, dynamic>
             ? jsonResponse['summary'] as Map<String, dynamic>
@@ -168,6 +176,7 @@ class ExcelUploadService {
         final rawMessage = (jsonResponse['message'] ?? '').toString().trim();
         return UploadOperationResult(
           ok: ok,
+          allDuplicates: allDuplicates,
           message: rawMessage.isNotEmpty
               ? rawMessage
               : (ok ? successMessage : 'Error al procesar archivos'),

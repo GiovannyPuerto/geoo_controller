@@ -109,6 +109,10 @@ class InventoryRecord(models.Model):
     # Centro de costo (clave para permitir múltiples salidas del mismo documento)
     cost_center = models.CharField(max_length=64, null=True, blank=True)
 
+    # Huella SHA-256 del contenido del movimiento (32 hex chars).
+    # Permite detectar duplicados cuando source_record no es fiable.
+    row_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+
     class Meta:
         """
         Un registro se identifica por su línea de origen (`source_document` + `source_record`)

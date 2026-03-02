@@ -192,6 +192,8 @@ def _clean_number_cached(raw):
 def _normalize_signature_value(value):
     """
     Normaliza valores para crear firmas estables de deduplicación.
+    Los Decimales se normalizan (sin ceros insignificantes).
+    Cadenas se dejan tal cual para compatibilidad con historial de BD.
     """
     if value is None:
         return ''
@@ -220,10 +222,51 @@ def _build_row_signature(*values):
 def _build_source_record_fallback(*values):
     """
     Construye un identificador estable cuando el archivo no trae REGISTRO.
+
+    IMPORTANTE: usa el mismo algoritmo que la migración 0015 para que los
+    registros históricos en BD sean detectados correctamente como duplicados.
+    No modificar el algoritmo sin actualizar todos los source_record en BD.
     """
     normalized_parts = [_normalize_signature_value(v) for v in values]
     base = '|'.join(normalized_parts).encode('utf-8')
     return hashlib.sha1(base).hexdigest()[:24]
+
+
+def _build_row_hash(product_id, date_value, doc_type, doc_number,
+                   source_document, quantity, unit_cost,
+                   warehouse, cost_center, lote=''):
+    """
+    SHA-256 (32 hex chars) del contenido del movimiento.
+
+    Actúa como 3ª capa de deduplicación: detecta el mismo movimiento
+    aunque source_record haya cambiado entre cargas o document_number sea nulo.
+    Usa casefold en strings para comparación case-insensitive (bodega == BODEGA).
+
+    Campos incluidos:
+    - product_id, date_value        identidad del producto y fecha
+    - doc_type, doc_number          tipo y número de documento
+    - source_document               documento fuente normalizado
+    - quantity, unit_cost           magnitudes del movimiento
+      (total se EXCLUYE: puede diferir por redondeo entre exportaciones del ERP,
+       causando que el mismo movimiento físico genere hashes distintos)
+    - warehouse, cost_center, lote  atributos de almacén y lote
+    """
+    def _norm(v):
+        n = _normalize_signature_value(v)
+        return n.casefold() if isinstance(n, str) else n
+    parts = [
+        str(product_id),
+        str(date_value),
+        _norm(doc_type),
+        _norm(doc_number),
+        _norm(source_document),
+        _normalize_signature_value(quantity),   # Decimal: no casefold
+        _normalize_signature_value(unit_cost),  # Decimal: no casefold
+        _norm(warehouse),
+        _norm(cost_center),
+        _norm(lote),
+    ]
+    return hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:32]
 
 
 @lru_cache(maxsize=512)
@@ -1016,103 +1059,47 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 inventory_name
             )
 
-        # ── Validación de continuidad de fechas ───────────────────────────────
-        # Regla de negocio:
-        #   1. La fecha mínima del archivo a subir debe ser igual a la última
-        #      fecha registrada (re-carga) o al día siguiente.
-        #   2. Si la fecha mínima del archivo == la fecha máxima en BD (mismo día),
-        #      se permite la re-carga: se eliminan primero los registros de ese día
-        #      y se reemplazan con los datos nuevos.
-        #   3. Si la fecha mínima del archivo > fecha máxima + 1 día, hay un hueco
-        #      → se rechaza la carga con mensaje explicativo.
+        # ── Validación de fechas ──────────────────────────────────────────────
+        # El sistema acepta archivos con cualquier rango de fechas, incluyendo
+        # rangos que ya existen en BD (fechas repetidas).
+        # La detección de duplicados (por row_signature y unique_key) se encarga
+        # de ignorar los movimientos que ya fueron importados previamente.
+        # Solo se rechaza si no se detectan fechas válidas en el archivo.
         if update_files_data:
             from ..models import InventoryRecord as _IR
             from django.db.models import Max as _Max
             import datetime as _dt
 
-            # Fecha máxima ya existente en BD para este inventario
-            last_date_in_db = _IR.objects.filter(
-                product__inventory_name=inventory_name
-            ).aggregate(max_date=_Max('date'))['max_date']
+            has_valid_dates = False
+            for _fname, _fcontent in update_files_data:
+                try:
+                    _df_tmp = _read_update_dataframe(_fcontent, _fname)
+                    _df_tmp = _normalize_update_dataframe(_df_tmp)
+                    _dates = _df_tmp['fecha'].apply(_parse_date_fast).dropna()
+                    if not _dates.empty:
+                        has_valid_dates = True
+                    del _df_tmp
+                except Exception as _exc:
+                    logger.warning(f"No se pudo leer fecha mínima de '{_fname}': {_exc}")
 
-            if last_date_in_db is not None:
-                # Fecha mínima en los archivos que se van a subir
-                min_file_date = None
-                for _fname, _fcontent in update_files_data:
-                    try:
-                        _df_tmp = _read_update_dataframe(_fcontent, _fname)
-                        _df_tmp = _normalize_update_dataframe(_df_tmp)
-                        _dates = _df_tmp['fecha'].apply(_parse_date_fast).dropna()
-                        if not _dates.empty:
-                            _file_min = _dates.min()
-                            if isinstance(_file_min, _dt.datetime):
-                                _file_min = _file_min.date()
-                            if min_file_date is None or _file_min < min_file_date:
-                                min_file_date = _file_min
-                        del _df_tmp
-                    except Exception as _exc:
-                        logger.warning(f"No se pudo leer fecha mínima de '{_fname}': {_exc}")
-
-                if min_file_date is None:
-                    return JsonResponse(
-                        {
-                            'ok': False,
-                            'error': (
-                                'No se detectaron fechas válidas en los archivos de actualización. '
-                                'Verifique la columna FECHA y el formato del archivo.'
-                            ),
-                        },
-                        status=400,
-                    )
-
-                if isinstance(last_date_in_db, _dt.datetime):
-                    last_date_in_db = last_date_in_db.date()
-
-                if min_file_date < last_date_in_db:
-                    # Retroceso de fecha: rechazo total.
-                    return JsonResponse({
+            if not has_valid_dates:
+                return JsonResponse(
+                    {
                         'ok': False,
                         'error': (
-                            f'El archivo contiene movimientos desde {min_file_date.strftime("%d/%m/%Y")}, '
-                            f'pero ya existen registros hasta {last_date_in_db.strftime("%d/%m/%Y")}. '
-                            f'Los archivos de actualización deben empezar desde '
-                            f'{last_date_in_db.strftime("%d/%m/%Y")} en adelante '
-                            f'para no dejar vacíos en el inventario.'
-                        )
-                    }, status=400)
-
-                expected_next_day = last_date_in_db + _dt.timedelta(days=1)
-                if min_file_date > expected_next_day:
-                    return JsonResponse(
-                        {
-                            'ok': False,
-                            'error': (
-                                f'Se detectó un hueco de fechas: el último movimiento cargado es '
-                                f'{last_date_in_db.strftime("%d/%m/%Y")} y el archivo inicia en '
-                                f'{min_file_date.strftime("%d/%m/%Y")}. '
-                                f'La actualización debe comenzar en '
-                                f'{last_date_in_db.strftime("%d/%m/%Y")} (repetido para reemplazo) '
-                                f'o en {expected_next_day.strftime("%d/%m/%Y")}.'
-                            ),
-                        },
-                        status=400,
-                    )
-
-                if min_file_date == last_date_in_db:
-                    # Re-carga del último día: eliminar registros de ese día para reemplazarlos.
-                    deleted_count, _ = _IR.objects.filter(
-                        product__inventory_name=inventory_name,
-                        date=last_date_in_db
-                    ).delete()
-                    logger.info(
-                        f"Re-carga del día {last_date_in_db}: "
-                        f"eliminados {deleted_count} registros previos de ese día."
-                    )
-        # ── Fin validación de continuidad ─────────────────────────────────────
+                            'No se detectaron fechas válidas en los archivos de actualización. '
+                            'Verifique la columna FECHA y el formato del archivo.'
+                        ),
+                    },
+                    status=400,
+                )
+        # ── Fin validación de fechas ───────────────────────────────────────────
 
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0
         total_duplicates = 0
+        total_dupes_update_file = 0   # repetidos dentro del propio Excel
+        total_dupes_update_db   = 0   # ya existían en BD de carga anterior
         update_rows = 0
         update_files_summary = []
         seen_update_unique_keys = set()
@@ -1131,7 +1118,7 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                         status=400
                     )
 
-                records_count, duplicates_count = _process_update_dataframe(
+                records_count, duplicates_count, dupes_file, dupes_db = _process_update_dataframe(
                     batch,
                     update_df,
                     inventory_name,
@@ -1140,21 +1127,81 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 )
                 del update_df
                 update_records_count += records_count
-                total_duplicates += duplicates_count
+                total_duplicates      += duplicates_count
+                total_dupes_update_file += dupes_file
+                total_dupes_update_db   += dupes_db
                 skipped_count = max(file_rows - records_count - duplicates_count, 0)
                 update_files_summary.append({
                     'file_name': file_name,
                     'rows_input': file_rows,
                     'rows_registered': records_count,
                     'rows_repeated': duplicates_count,
+                    'rows_repeated_in_file': dupes_file,
+                    'rows_repeated_in_db':   dupes_db,
                     'rows_skipped': skipped_count,
                 })
 
         total_imported = base_records_count + update_records_count
+        total_dupes_all = base_duplicates_count + total_duplicates
 
         if total_imported == 0:
-            # Si no se importaron los registros mandamos alerta
-            raise ValueError('No se importaron registros válidos')
+            # Guardamos el lote para mantener historial del intento
+            batch.rows_imported = 0
+            batch.rows_total = base_rows + update_rows
+            batch.processed_at = timezone.now()
+            batch.save()
+
+            if total_dupes_all > 0:
+                # Todos los movimientos ya existían — respuesta exitosa con aviso
+                return JsonResponse({
+                    'ok': True,
+                    'all_duplicates': True,
+                    'inventory_name': inventory_name,
+                    'batch_id': batch.id,
+                    'summary': {
+                        'base_records': 0,
+                        'update_records': 0,
+                        'total_processed': 0,
+                        'duplicates_base': base_duplicates_count,
+                        'duplicates_update': total_duplicates,
+                        'duplicates_update_in_file': total_dupes_update_file,
+                        'duplicates_update_in_db':   total_dupes_update_db,
+                        'duplicates_total': total_dupes_all,
+                        'update_input_rows': update_rows,
+                        'update_registered_records': 0,
+                        'update_repeated_records': total_duplicates,
+                        'update_files': update_files_summary,
+                    },
+                    'message': (
+                        f'Todos los movimientos del archivo ya estaban registrados '
+                        f'({total_dupes_all} duplicado(s) ignorado(s)). '
+                        'No se agregaron registros nuevos.'
+                    ),
+                })
+            else:
+                # El archivo no tenía filas válidas (columnas vacías, producto desconocido, etc.)
+                return JsonResponse({
+                    'ok': True,
+                    'all_duplicates': False,
+                    'inventory_name': inventory_name,
+                    'batch_id': batch.id,
+                    'summary': {
+                        'base_records': 0,
+                        'update_records': 0,
+                        'total_processed': 0,
+                        'duplicates_base': 0,
+                        'duplicates_update': 0,
+                        'duplicates_total': 0,
+                        'update_input_rows': update_rows,
+                        'update_registered_records': 0,
+                        'update_repeated_records': 0,
+                        'update_files': update_files_summary,
+                    },
+                    'message': (
+                        'El archivo no contenía movimientos válidos para importar. '
+                        'Verifique que tenga registros con fecha, producto y cantidad correctos.'
+                    ),
+                })
 
         # Cargamos la informacion del lote
         batch.rows_imported = total_imported
@@ -1166,6 +1213,7 @@ def procesar_importacion_inventario(request, inventory_name='default'):
 
         return JsonResponse({
             'ok': True,
+            'all_duplicates': False,
             'inventory_name': inventory_name,
             'batch_id': batch.id,
             'summary': {
@@ -1174,6 +1222,8 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 'total_processed': total_imported,
                 'duplicates_base': base_duplicates_count,
                 'duplicates_update': total_duplicates,
+                'duplicates_update_in_file': total_dupes_update_file,
+                'duplicates_update_in_db':   total_dupes_update_db,
                 'duplicates_total': base_duplicates_count + total_duplicates,
                 'update_input_rows': update_rows,
                 'update_registered_records': update_records_count,
@@ -1421,6 +1471,8 @@ def _process_update_csv(
     """
     total_processed = 0
     total_duplicates = 0
+    total_dupes_file = 0
+    total_dupes_db   = 0
     if seen_unique_keys is None:
         seen_unique_keys = set()
     if seen_row_signatures is None:
@@ -1430,7 +1482,7 @@ def _process_update_csv(
         if chunk_df.empty:
             continue
 
-        records_count, duplicates_count = _process_update_file(
+        records_count, duplicates_count, dupes_file, dupes_db = _process_update_file(
             batch,
             chunk_df,
             inventory_name,
@@ -1439,8 +1491,10 @@ def _process_update_csv(
         )
         total_processed += records_count
         total_duplicates += duplicates_count
+        total_dupes_file += dupes_file
+        total_dupes_db   += dupes_db
 
-    return total_processed, total_duplicates
+    return total_processed, total_duplicates, total_dupes_file, total_dupes_db
 
 
 def _process_update_dataframe(
@@ -1455,6 +1509,8 @@ def _process_update_dataframe(
     """
     total_processed = 0
     total_duplicates = 0
+    total_dupes_file = 0
+    total_dupes_db   = 0
     if seen_unique_keys is None:
         seen_unique_keys = set()
     if seen_row_signatures is None:
@@ -1464,7 +1520,7 @@ def _process_update_dataframe(
         if chunk_df.empty:
             continue
 
-        records_count, duplicates_count = _process_update_file(
+        records_count, duplicates_count, dupes_file, dupes_db = _process_update_file(
             batch,
             chunk_df,
             inventory_name,
@@ -1473,8 +1529,10 @@ def _process_update_dataframe(
         )
         total_processed += records_count
         total_duplicates += duplicates_count
+        total_dupes_file += dupes_file
+        total_dupes_db   += dupes_db
 
-    return total_processed, total_duplicates
+    return total_processed, total_duplicates, total_dupes_file, total_dupes_db
 
 
 def _process_update_file(
@@ -1497,6 +1555,8 @@ def _process_update_file(
     records_to_create = []
     records_processed = 0
     duplicates_count = 0
+    dupes_in_file = 0   # repetidos dentro del propio archivo Excel o entre chunks
+    dupes_in_db   = 0   # ya existían en BD de una carga anterior
     errors = 0
     if seen_unique_keys is None:
         seen_unique_keys = set()
@@ -1507,7 +1567,7 @@ def _process_update_file(
     required_columns = UPDATE_REQUIRED_COLUMNS
     if not all(col in df.columns for col in required_columns):
         logger.error(f"Faltan columnas requeridas en el archivo de actualización: {required_columns}")
-        return 0, 0
+        return 0, 0, 0, 0
 
     # Limpiamos y validamos los datos del dataframe
     df = df.dropna(subset=['item', 'fecha', 'documento']).copy()
@@ -1524,10 +1584,12 @@ def _process_update_file(
     initial_rows = len(df)
     dedupe_subset = [col for col in UPDATE_FILE_COLUMNS if col in df.columns]
     df = df.drop_duplicates(subset=dedupe_subset, keep='first').copy()
-    duplicates_count += max(initial_rows - len(df), 0)
+    early_file_dupes = max(initial_rows - len(df), 0)
+    duplicates_count += early_file_dupes
+    dupes_in_file    += early_file_dupes
 
     if df.empty:
-        return 0, duplicates_count
+        return 0, duplicates_count, dupes_in_file, dupes_in_db
 
     # Traemos todos los códigos de los productos existentes en una sola consulta
     product_codes = df['item'].unique().tolist()
@@ -1668,6 +1730,12 @@ def _process_update_file(
                 row_lote,
             )
 
+            row_hash = _build_row_hash(
+                product.id, date_value, doc_type, doc_number,
+                source_document, quantity, unit_cost,
+                warehouse, cost_center, lote=row_lote,
+            )
+
             # Duplicado de contenido exacto (misma fila de movimiento).
             row_signature = _build_row_signature(
                 codigo,
@@ -1689,7 +1757,9 @@ def _process_update_file(
                 row_cp,
             )
             if row_signature in seen_row_signatures:
+                # Capa 1: duplicado interno del archivo (fila repetida en el Excel)
                 duplicates_count += 1
+                dupes_in_file += 1
                 continue
             seen_row_signatures.add(row_signature)
 
@@ -1704,6 +1774,7 @@ def _process_update_file(
 
             prepared_rows.append({
                 'key': unique_key,
+                'row_hash': row_hash,
                 'product': product,
                 'warehouse': warehouse,
                 'date': date_value,
@@ -1729,15 +1800,17 @@ def _process_update_file(
 
     # Cargamos duplicados existentes en una sola consulta acotada
     existing_keys = set()
+    existing_row_hashes = set()
     if candidate_product_ids and candidate_dates:
         min_date = min(candidate_dates)
         max_date = max(candidate_dates)
+        qs = InventoryRecord.objects.filter(
+            product_id__in=candidate_product_ids,
+            date__gte=min_date,
+            date__lte=max_date
+        )
         existing_keys = set(
-            InventoryRecord.objects.filter(
-                product_id__in=candidate_product_ids,
-                date__gte=min_date,
-                date__lte=max_date
-            ).values_list(
+            qs.values_list(
                 'source_document',
                 'source_record',
                 'product_id',
@@ -1746,21 +1819,35 @@ def _process_update_file(
                 'warehouse'
             )
         )
+        # Row-hash de registros existentes: 3ª capa de dedup por contenido
+        existing_row_hashes = set(
+            qs.exclude(row_hash=None)
+              .exclude(row_hash='')
+              .values_list('row_hash', flat=True)
+        )
 
     # Procesamos filas preparadas y evitamos duplicados en BD y dentro del mismo archivo
     seen_new_keys = set()
+    seen_new_hashes = set()
     for prepared in prepared_rows:
         unique_key = prepared['key']
-        if (
-            unique_key in existing_keys
-            or unique_key in seen_new_keys
-            or unique_key in seen_unique_keys
-        ):
+        row_hash   = prepared['row_hash']
+
+        if unique_key in seen_new_keys or unique_key in seen_unique_keys or row_hash in seen_new_hashes:
+            # Duplicado dentro del mismo lote de importación (anterior en este archivo/sesión)
             duplicates_count += 1
+            dupes_in_file += 1
+            continue
+
+        if unique_key in existing_keys or row_hash in existing_row_hashes:
+            # Capa 2/3: movimiento ya importado en una carga anterior (está en BD)
+            duplicates_count += 1
+            dupes_in_db += 1
             continue
 
         seen_new_keys.add(unique_key)
         seen_unique_keys.add(unique_key)
+        seen_new_hashes.add(row_hash)
         records_to_create.append(InventoryRecord(
             batch=batch,
             product=prepared['product'],
@@ -1776,7 +1863,8 @@ def _process_update_file(
             category=prepared['category'],
             lote=prepared['lote'],
             final_quantity=prepared['final_quantity'],
-            cost_center=prepared['cost_center']
+            cost_center=prepared['cost_center'],
+            row_hash=prepared['row_hash'],
         ))
 
         records_processed += 1
@@ -1799,6 +1887,10 @@ def _process_update_file(
                         continue
                 records_to_create = []
 
+    # Medimos cuántos registros hay en este batch ANTES de insertar.
+    # El delta después del bulk_create nos dice cuántos se insertaron realmente.
+    batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
+
     # INSERTAMOS LOS REGISTROS RESTANTES
     if records_to_create:
         try:
@@ -1817,5 +1909,25 @@ def _process_update_file(
                     logger.error(f"Error saving final individual record: {str(e2)}")
                     continue
 
-    logger.info(f"Procesados {records_processed} registros de movimientos ({duplicates_count} duplicados, {errors} errores)")
-    return records_processed, duplicates_count
+    # ─── Reconciliación post-inserción ──────────────────────────────────────────
+    # bulk_create(ignore_conflicts=True) descarta silenciosamente registros que
+    # violan el constraint UNIQUE (ya existían de una carga anterior).
+    # Medimos el delta real en este batch para detectar esos drops.
+    batch_count_after = InventoryRecord.objects.filter(batch=batch).count()
+    actually_inserted = batch_count_after - batch_count_before
+    if actually_inserted < records_processed:
+        silent_drops = records_processed - actually_inserted
+        logger.warning(
+            f"Reconciliación: {silent_drops} fila(s) descartadas por constraint de BD "
+            f"— ya existían de una carga anterior "
+            f"(esperadas={records_processed}, reales={actually_inserted})"
+        )
+        duplicates_count += silent_drops
+        dupes_in_db      += silent_drops
+        records_processed = actually_inserted
+
+    logger.info(
+        f"Procesados {records_processed} registros de movimientos "
+        f"({duplicates_count} duplicados: {dupes_in_file} en_archivo / {dupes_in_db} en_bd, {errors} errores)"
+    )
+    return records_processed, duplicates_count, dupes_in_file, dupes_in_db
