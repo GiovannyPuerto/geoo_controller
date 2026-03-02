@@ -1029,16 +1029,44 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         if update_files:
             batch_file_names.extend([f.name for f in update_files])
 
-        # Si existe un lote igual, se reemplaza para permitir reimportación.
+        # Si ya existe un lote con el mismo checksum, todos los movimientos de ese
+        # archivo ya fueron registrados (o el archivo es idéntico byte a byte).
+        # En lugar de borrar y reinsertar, respondemos directamente como duplicados.
         existing_batch = ImportBatch.objects.filter(
             checksum=checksum,
             inventory_name=inventory_name
         ).first()
         if existing_batch:
-            logger.info(f"Eliminando lote existente {existing_batch.id} para reimportación")
-            # Eliminar primero los movimientos asociados al lote previo.
-            InventoryRecord.objects.filter(batch=existing_batch).delete()
-            existing_batch.delete()
+            logger.info(
+                f"Checksum duplicado: lote {existing_batch.id} ya contiene estos archivos. "
+                f"Se responde all_duplicates sin reimportar."
+            )
+            already_imported = existing_batch.rows_imported or 0
+            return JsonResponse({
+                'ok': True,
+                'all_duplicates': True,
+                'inventory_name': inventory_name,
+                'batch_id': existing_batch.id,
+                'summary': {
+                    'base_records': 0,
+                    'update_records': 0,
+                    'total_processed': 0,
+                    'duplicates_base': 0,
+                    'duplicates_update': already_imported,
+                    'duplicates_update_in_file': 0,
+                    'duplicates_update_in_db': already_imported,
+                    'duplicates_total': already_imported,
+                    'update_input_rows': already_imported,
+                    'update_registered_records': 0,
+                    'update_repeated_records': already_imported,
+                    'update_files': [],
+                },
+                'message': (
+                    f'Este archivo ya fue importado previamente '
+                    f'({already_imported} movimiento(s) registrado(s) en lote #{existing_batch.id}). '
+                    'No se agregaron registros nuevos.'
+                ),
+            })
 
         batch = ImportBatch.objects.create(
             file_name=' + '.join(batch_file_names) if batch_file_names else 'no-files',

@@ -534,139 +534,232 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         children: [
           chartsRow,
           const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Valor Total por Grupo',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  LayoutBuilder(builder: (ctx3, cons3) {
-                    final h3 = cons3.maxWidth < 480 ? 260.0 : 380.0;
-                    return SizedBox(
-                      height: h3,
-                      child: SfCartesianChart(
-                        primaryXAxis: const CategoryAxis(
-                          labelStyle: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          axisLine: AxisLine(width: 1, color: AppColors.border),
-                          majorTickLines: MajorTickLines(size: 0),
-                          majorGridLines: MajorGridLines(width: 0),
-                          labelRotation: 20,
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
+              boxShadow: AppShadows.card,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Icon(Icons.bar_chart_rounded,
+                        size: 18, color: AppColors.primary),
+                    SizedBox(width: AppSpacing.sm),
+                    Text(
+                      'Valor Total por Grupo',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                const Divider(height: 1),
+                const SizedBox(height: AppSpacing.md),
+                LayoutBuilder(builder: (ctx3, cons3) {
+                  final h3 = cons3.maxWidth < 480 ? 280.0 : 380.0;
+                  return SizedBox(
+                    height: h3,
+                    child: SfCartesianChart(
+                      primaryXAxis: const CategoryAxis(
+                        labelStyle: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 10,
                         ),
-                        primaryYAxis: NumericAxis(
-                          numberFormat: NumberFormat.compactCurrency(
-                            locale: 'es_CO',
-                            symbol: '\$',
-                          ),
-                          labelStyle: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          axisLine:
-                              const AxisLine(width: 1, color: AppColors.border),
-                          majorTickLines: const MajorTickLines(size: 0),
-                          majorGridLines: const MajorGridLines(
-                            width: 0.5,
-                            color: AppColors.borderLight,
-                            dashArray: [5, 5],
-                          ),
-                          title: const AxisTitle(
-                            text: 'Valor (\$)',
-                            textStyle: TextStyle(
+                        axisLine: AxisLine(width: 0),
+                        majorTickLines: MajorTickLines(size: 0),
+                        majorGridLines: MajorGridLines(width: 0),
+                        labelIntersectAction: AxisLabelIntersectAction.rotate45,
+                      ),
+                      primaryYAxis: NumericAxis(
+                        axisLine: const AxisLine(width: 0),
+                        majorTickLines: const MajorTickLines(size: 0),
+                        labelStyle: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 10,
+                        ),
+                        majorGridLines: const MajorGridLines(
+                          width: 1,
+                          color: AppColors.border,
+                          dashArray: [4, 4],
+                        ),
+                        axisLabelFormatter: (AxisLabelRenderDetails details) {
+                          final v = details.value.toDouble();
+                          String label;
+                          if (v.abs() >= 1000000000) {
+                            label = '\$${(v / 1000000000).toStringAsFixed(1)}B';
+                          } else if (v.abs() >= 1000000) {
+                            label = '\$${(v / 1000000).toStringAsFixed(1)}M';
+                          } else if (v.abs() >= 1000) {
+                            label = '\$${(v / 1000).toStringAsFixed(0)}K';
+                          } else {
+                            label = '\$${v.toStringAsFixed(0)}';
+                          }
+                          return ChartAxisLabel(label, details.textStyle);
+                        },
+                      ),
+                      plotAreaBorderWidth: 0,
+                      legend: const Legend(isVisible: false),
+                      trackballBehavior: TrackballBehavior(
+                        enable: true,
+                        activationMode: ActivationMode.singleTap,
+                        lineType: TrackballLineType.vertical,
+                        lineColor: AppColors.textMuted,
+                        lineWidth: 1,
+                        lineDashArray: const [4, 3],
+                        tooltipDisplayMode: TrackballDisplayMode.groupAllPoints,
+                        tooltipSettings: const InteractiveTooltip(
+                          enable: true,
+                          color: Color(0xFF1E293B),
+                          textStyle:
+                              TextStyle(color: Colors.white, fontSize: 11),
+                          borderWidth: 0,
+                        ),
+                        builder: (context, details) {
+                          final points = details.groupingModeInfo?.points ?? [];
+                          if (points.isEmpty) return const SizedBox.shrink();
+                          final point = points.first;
+                          final xLabel = point.x?.toString() ?? '';
+                          final yVal = point.y;
+                          final idx = sortedGroupData.indexWhere(
+                            (e) => _getShortGroupName(e.key) == xLabel,
+                          );
+                          final barColor = groupColors[
+                              (idx >= 0 ? idx : 0) % groupColors.length];
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E293B),
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.25),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  xLabel,
+                                  style: const TextStyle(
+                                    color: Color(0xFF94A3B8),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: barColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    const Text(
+                                      'Valor: ',
+                                      style: TextStyle(
+                                        color: Color(0xFF94A3B8),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                    Text(
+                                      yVal != null
+                                          ? CurrencyFormatter.format(
+                                              yVal.toDouble())
+                                          : '—',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      series: <CartesianSeries>[
+                        ColumnSeries<MapEntry<String, double>, String>(
+                          dataSource: sortedGroupData,
+                          xValueMapper: (MapEntry<String, double> data, _) =>
+                              _getShortGroupName(data.key),
+                          yValueMapper: (MapEntry<String, double> data, _) =>
+                              data.value,
+                          pointColorMapper:
+                              (MapEntry<String, double> data, int index) =>
+                                  groupColors[index % groupColors.length]
+                                      .withValues(alpha: 0.82),
+                          dataLabelSettings: DataLabelSettings(
+                            isVisible: true,
+                            labelAlignment: ChartDataLabelAlignment.top,
+                            textStyle: const TextStyle(
                               color: AppColors.textSecondary,
-                              fontSize: 12,
+                              fontSize: 9,
                               fontWeight: FontWeight.w600,
                             ),
+                            builder: (dynamic dataPoint,
+                                dynamic point,
+                                dynamic series,
+                                int pointIndex,
+                                int seriesIndex) {
+                              final entry =
+                                  dataPoint as MapEntry<String, double>;
+                              final v = entry.value;
+                              String label;
+                              if (v.abs() >= 1000000000) {
+                                label =
+                                    '\$${(v / 1000000000).toStringAsFixed(1)}B';
+                              } else if (v.abs() >= 1000000) {
+                                label =
+                                    '\$${(v / 1000000).toStringAsFixed(1)}M';
+                              } else if (v.abs() >= 1000) {
+                                label = '\$${(v / 1000).toStringAsFixed(0)}K';
+                              } else {
+                                label = '\$${v.toStringAsFixed(0)}';
+                              }
+                              return Text(
+                                label,
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              );
+                            },
                           ),
+                          width: 0.55,
+                          spacing: 0.1,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(5),
+                            topRight: Radius.circular(5),
+                          ),
+                          animationDuration: 1200,
+                          enableTooltip: true,
                         ),
-                        plotAreaBorderWidth: 0,
-                        legend: const Legend(isVisible: false),
-                        tooltipBehavior: TooltipBehavior(
-                          enable: true,
-                          header: '',
-                          format: 'point.x\nTotal: \$point.y',
-                          textStyle: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                          ),
-                          color: AppColors.dark,
-                          borderColor: AppColors.border,
-                          borderWidth: 1,
-                        ),
-                        series: <CartesianSeries>[
-                          ColumnSeries<MapEntry<String, double>, String>(
-                            dataSource: sortedGroupData,
-                            xValueMapper: (MapEntry<String, double> data, _) =>
-                                _getShortGroupName(data.key),
-                            yValueMapper: (MapEntry<String, double> data, _) =>
-                                data.value,
-                            pointColorMapper:
-                                (MapEntry<String, double> data, int index) =>
-                                    groupColors[index % groupColors.length],
-                            dataLabelSettings: DataLabelSettings(
-                              isVisible: true,
-                              builder: (dynamic dataPoint,
-                                  dynamic point,
-                                  dynamic series,
-                                  int pointIndex,
-                                  int seriesIndex) {
-                                final entry =
-                                    dataPoint as MapEntry<String, double>;
-                                final formatted =
-                                    CurrencyFormatter.format(entry.value);
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.surface,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                        color: AppColors.border, width: 1),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                        color: Color(0x14000000),
-                                        blurRadius: 4,
-                                        offset: Offset(0, 1),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Text(
-                                    formatted,
-                                    style: const TextStyle(
-                                      color: AppColors.textPrimary,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                );
-                              },
-                              labelAlignment: ChartDataLabelAlignment.top,
-                              useSeriesColor: false,
-                            ),
-                            width: 0.65,
-                            spacing: 0.1,
-                            borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(5),
-                              topRight: Radius.circular(5),
-                            ),
-                            animationDuration: 1500,
-                            enableTooltip: true,
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-              ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
             ),
           ),
         ],
