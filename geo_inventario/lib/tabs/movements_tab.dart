@@ -33,6 +33,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   List<Map<String, dynamic>> filteredMovements = [];
   List<MonthlyMovement> monthlyMovements = [];
   bool isLoading = true;
+  bool _isRefreshing = false;
 
   // filtros
   DateTime? dateFrom;
@@ -43,6 +44,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   List<String> availableGroups = [];
   String? searchQuery;
   String? docNumberSearch;
+  String? selectedDocType;
 
   @override
   void initState() {
@@ -67,6 +69,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       selectedGroup = null;
       searchQuery = null;
       docNumberSearch = null;
+      selectedDocType = null;
     });
     _loadAllMovementsData();
   }
@@ -108,6 +111,8 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   Future<void> _loadMovementsData() async {
     if (!mounted) return;
 
+    setState(() => _isRefreshing = true);
+
     try {
       final results = await Future.wait([
         _apiService.getMovements(
@@ -115,6 +120,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           category: selectedGroup,
           search: searchQuery,
           documentNumber: docNumberSearch,
+          documentType: selectedDocType,
           dateFrom: dateFrom,
           dateTo: dateTo,
         ),
@@ -134,10 +140,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           movements = filteredMovementsData;
           filteredMovements = movements;
           monthlyMovements = filteredMonthlyMovementsData;
+          _isRefreshing = false;
         });
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isRefreshing = false);
         context.showErrorSnackBar('Error al cargar movimientos: ${e.toString()}');
       }
     }
@@ -162,7 +170,9 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     }
 
     return Scaffold(
-      body: RefreshIndicator(
+      body: Stack(
+        children: [
+          RefreshIndicator(
         color: AppColors.primary,
         onRefresh: _loadAllMovementsData,
         child: SingleChildScrollView(
@@ -220,8 +230,45 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             ],
           ),
         ),
-      ),
-    );
+      ), // RefreshIndicator
+          if (_isRefreshing)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.12),
+                child: const Center(
+                  child: Card(
+                    elevation: 8,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: AppColors.primary,
+                              strokeWidth: 2.5,
+                            ),
+                          ),
+                          SizedBox(width: 14),
+                          Text(
+                            'Aplicando filtros…',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ], // Stack.children
+      ), // Stack
+    ); // Scaffold
   }
 
   Widget _buildMovementsChart() {
@@ -593,6 +640,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       selectedGroup != null ||
       (searchQuery != null && searchQuery!.isNotEmpty) ||
       (docNumberSearch != null && docNumberSearch!.isNotEmpty) ||
+      selectedDocType != null ||
       dateFrom != null ||
       dateTo != null;
 
@@ -638,6 +686,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         _loadMovementsData();
       });
     }
+    if (selectedDocType != null) {
+      addChip('Tipo doc: $selectedDocType', () {
+        setState(() => selectedDocType = null);
+        _loadMovementsData();
+      });
+    }
     if (dateFrom != null || dateTo != null) {
       final from = dateFrom != null ? fmt.format(dateFrom!) : '∅';
       final to = dateTo != null ? fmt.format(dateTo!) : 'hoy';
@@ -669,6 +723,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 selectedGroup = null;
                 searchQuery = null;
                 docNumberSearch = null;
+                selectedDocType = null;
                 dateFrom = null;
                 dateTo = null;
               });
@@ -815,6 +870,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     String? localGroup = selectedGroup;
     String? localSearch = searchQuery;
     String? localDocNumber = docNumberSearch;
+    String? localDocType = selectedDocType;
 
     final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
     final warehouses = <String>{
@@ -825,6 +881,10 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       'Todos',
       ...MovementsFilterService.obtenerValoresUnicos(allMovements, 'category'),
     }.toList();
+    final docTypes = <String>{
+      'Todos',
+      ...MovementsFilterService.obtenerValoresUnicos(allMovements, 'document_type'),
+    }.toList()..sort();
 
     showDialog(
       context: context,
@@ -991,6 +1051,26 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           .toList(),
                       onChanged: (v) => setDlgState(() => localGroup = v == 'Todos' ? null : v),
                     ),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // ── Tipo de documento ──────────────────────────────────
+                    const Text('Tipo de documento',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                    const SizedBox(height: AppSpacing.xs),
+                    DropdownButtonFormField<String>(
+                      initialValue: localDocType == null || !docTypes.contains(localDocType)
+                          ? 'Todos'
+                          : localDocType,
+                      isDense: true,
+                      decoration: const InputDecoration(isDense: true),
+                      items: docTypes
+                          .map((v) => DropdownMenuItem(
+                                value: v,
+                                child: Text(v, style: const TextStyle(fontSize: 14, fontFamily: 'monospace')),
+                              ))
+                          .toList(),
+                      onChanged: (v) => setDlgState(() => localDocType = v == 'Todos' ? null : v),
+                    ),
                   ],
                 ),
               ),
@@ -1003,6 +1083,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     selectedGroup = null;
                     searchQuery = null;
                     docNumberSearch = null;
+                    selectedDocType = null;
                     dateFrom = null;
                     dateTo = null;
                   });
@@ -1022,6 +1103,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     selectedGroup = localGroup;
                     searchQuery = localSearch;
                     docNumberSearch = localDocNumber;
+                    selectedDocType = localDocType;
                     dateFrom = localFrom;
                     dateTo = localTo;
                   });

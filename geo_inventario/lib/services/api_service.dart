@@ -164,6 +164,7 @@ class ApiService {
     String? category,
     String? search,
     String? documentNumber,
+    String? documentType,
     DateTime? dateFrom,
     DateTime? dateTo,
     DateTime? specificDate,
@@ -184,6 +185,9 @@ class ApiService {
       }
       if (documentNumber != null && documentNumber.isNotEmpty) {
         params['document_number'] = documentNumber;
+      }
+      if (documentType != null && documentType.isNotEmpty) {
+        params['document_type'] = documentType;
       }
       if (specificDate != null) {
         params['date'] = _toIsoDate(specificDate);

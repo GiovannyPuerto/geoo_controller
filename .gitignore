@@ -16,8 +16,10 @@ dist/
 .eggs/
 
 # Base de datos local
-db.sqlite3
+db.sqlite
 *.sqlite3
+
+
 
 # Variables de entorno / secretos
 .env

@@ -24,15 +24,17 @@ from ..services.resumen_inventario_service import obtener_resumen_inventario
 
 logger = logging.getLogger(__name__)
 
-API_CACHE_RAPIDO_SEGUNDOS = 15
-API_CACHE_PESADO_SEGUNDOS = 30
+API_CACHE_RAPIDO_SEGUNDOS = 300   # 5 minutos
+API_CACHE_PESADO_SEGUNDOS = 600   # 10 minutos
 
 
 def _ordenar_por_documento_desc(qs):
+    """Ordena por última fecha primero y, dentro de la misma fecha, por número
+    de documento mayor (más dígitos → mayor valor lexicográfico)."""
     return qs.annotate(
         _doc_number_text=Coalesce('document_number', Value('')),
         _doc_number_len=Length(Coalesce('document_number', Value(''))),
-    ).order_by('-_doc_number_len', '-_doc_number_text', '-date', '-id')
+    ).order_by('-date', '-_doc_number_len', '-_doc_number_text', '-id')
 
 
 @cache_page(API_CACHE_RAPIDO_SEGUNDOS)

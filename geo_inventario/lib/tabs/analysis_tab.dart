@@ -27,6 +27,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   List<Map<String, dynamic>> analysis = [];
   List<Map<String, dynamic>> filteredAnalysis = [];
   bool isLoading = true;
+  bool _isRefreshing = false;
   int _analysisRequestEpoch = 0;
 
   // Filters
@@ -71,7 +72,14 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     final requestEpoch = ++_analysisRequestEpoch;
 
     setState(() {
-      isLoading = true;
+      // Solo mostrar spinner completo si aún no hay datos cargados.
+      // En re-filtrado se muestra overlay translúcido sobre los datos existentes.
+      if (analysis.isEmpty) {
+        isLoading = true;
+        _isRefreshing = false;
+      } else {
+        _isRefreshing = true;
+      }
     });
 
     try {
@@ -96,12 +104,14 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           analysis = sorted;
           filteredAnalysis = sorted;
           isLoading = false;
+          _isRefreshing = false;
         });
       }
     } catch (e) {
       if (mounted && requestEpoch == _analysisRequestEpoch) {
         setState(() {
           isLoading = false;
+          _isRefreshing = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading analysis: $e')),
@@ -128,8 +138,10 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       );
     }
 
+    // Contenido principal (datos o estado vacío).
+    Widget content;
     if (filteredAnalysis.isEmpty) {
-      return Center(
+      content = Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxxl),
           child: Column(
@@ -165,69 +177,112 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           ),
         ),
       );
-    }
-
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: _loadAnalysisData,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Banner de sección ────────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-              decoration: BoxDecoration(
-                gradient: AppGradients.hero,
-                borderRadius: BorderRadius.circular(AppRadius.lg),
-                boxShadow: AppShadows.elevated,
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadius.md),
+    } else {
+      content = RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: _loadAnalysisData,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Banner de sección ────────────────────────────────────
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+                decoration: BoxDecoration(
+                  gradient: AppGradients.hero,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  boxShadow: AppShadows.elevated,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                      child: const Icon(Icons.analytics_rounded,
+                          color: Colors.white, size: 24),
                     ),
-                    child: const Icon(Icons.analytics_rounded,
-                        color: Colors.white, size: 24),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Análisis de Productos',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 0.3,
+                    const SizedBox(width: AppSpacing.md),
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Análisis de Productos',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            letterSpacing: 0.3,
+                          ),
                         ),
-                      ),
-                      Text(
-                        'Valor, rotación y alertas del inventario',
-                        style:
-                            TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
-                      ),
-                    ],
+                        Text(
+                          'Valor, rotación y alertas del inventario',
+                          style:
+                              TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              _buildAnalysisCharts(),
+              const SizedBox(height: AppSpacing.lg),
+              _buildNegativeStockAlerts(),
+              const SizedBox(height: AppSpacing.lg),
+              _buildAnalysisTable(),
+            ],
+          ),
+        ),
+      );
+    } // else
+
+    // Envuelve el contenido en un Stack para mostrar el overlay de recarga
+    // cuando el usuario aplica filtros (sin blanquear la pantalla entera).
+    return Stack(
+      children: [
+        content,
+        if (_isRefreshing)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.12),
+              child: const Center(
+                child: Card(
+                  elevation: 8,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: AppColors.primary,
+                            strokeWidth: 2.5,
+                          ),
+                        ),
+                        SizedBox(width: 14),
+                        Text(
+                          'Aplicando filtros…',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
-            const SizedBox(height: AppSpacing.lg),
-            _buildAnalysisCharts(),
-            const SizedBox(height: AppSpacing.lg),
-            _buildNegativeStockAlerts(),
-            const SizedBox(height: AppSpacing.lg),
-            _buildAnalysisTable(),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 

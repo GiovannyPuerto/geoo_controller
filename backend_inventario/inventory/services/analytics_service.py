@@ -744,7 +744,7 @@ def get_product_analysis_data(
 
     products_list = list(products_qs)
     if not products_list:
-        cache.set(cache_key, [], timeout=20)
+        cache.set(cache_key, [], timeout=300)
         return []
 
     product_ids = [p["id"] for p in products_list]
@@ -839,15 +839,17 @@ def get_product_analysis_data(
         rotation_year = latest_scope_date.year if latest_scope_date else datetime.now().year
 
         if latest_scope_date:
+            _ry_start = datetime(rotation_year, 1, 1).date()
+            _ry_end = datetime(rotation_year, 12, 31).date()
             months_in_latest_year = (
-                records_calendar_scope.filter(date__year=rotation_year)
+                records_calendar_scope.filter(date__range=(_ry_start, _ry_end))
                 .values("date__month")
                 .distinct()
                 .count()
             )
             if months_in_latest_year < 3:
                 previous_year_last_date = (
-                    records_calendar_scope.filter(date__year__lt=rotation_year)
+                    records_calendar_scope.filter(date__lt=_ry_start)
                     .aggregate(max_date=Max("date"))["max_date"]
                 )
                 if previous_year_last_date:
@@ -859,11 +861,11 @@ def get_product_analysis_data(
         evaluation_end_date = latest_scope_date
     else:
         evaluation_end_date = datetime(rotation_year, 12, 31).date()
-    pre_year_filter = Q(product_id__in=product_ids)
-    if target_date:
-        pre_year_filter &= Q(date__lt=target_date.replace(day=1, month=1))
-    else:
-        pre_year_filter &= Q(date__year__lt=rotation_year)
+
+    # Punto de corte del año de rotación — usado en todos los filtros siguientes.
+    rotation_year_start = datetime(rotation_year, 1, 1).date()
+
+    pre_year_filter = Q(product_id__in=product_ids, date__lt=rotation_year_start)
     if warehouse_filter:
         pre_year_filter &= Q(warehouse__icontains=warehouse_filter)
 
@@ -874,10 +876,13 @@ def get_product_analysis_data(
         .annotate(total=Sum("quantity"))
     }
 
-    #  5. Movimientos del año de rotación (evaluación diaria)
-    monthly_filter = Q(product_id__in=product_ids, date__year=rotation_year)
-    if target_date:
-        monthly_filter &= Q(date__lte=target_date)
+    #  5. Movimientos del año de rotación (evaluación mensual optimizada)
+    # Usamos date__range en lugar de date__year para que MySQL pueda usar el
+    # índice B-tree sobre la columna `date` (YEAR() es non-sargable).
+    monthly_filter = Q(
+        product_id__in=product_ids,
+        date__range=(rotation_year_start, evaluation_end_date),
+    )
     if warehouse_filter:
         monthly_filter &= Q(warehouse__icontains=warehouse_filter)
 
@@ -990,44 +995,45 @@ def get_product_analysis_data(
             balance_pre_year = initial_base + pre_year_sum
             daily_movements = daily_movements_by_product.get(pid, {})
 
-            period_start = datetime(rotation_year, 1, 1).date()
+            # ── Loop de rotación optimizado: mes a mes en lugar de día a día ──
+            # Agrupa los días con movimientos por mes para evitar iterar N=365
+            # veces por producto. El costo es O(meses + días_con_movimiento).
+            period_start = rotation_year_start
             period_end = evaluation_end_date
+
+            _movements_by_month: dict[int, list] = {}
+            for _day, _qty in daily_movements.items():
+                if period_start <= _day <= period_end:
+                    _movements_by_month.setdefault(_day.month, []).append((_day, _qty))
+            for _ml in _movements_by_month.values():
+                _ml.sort()
+
             monthly_balances = []
             monthly_changed = []
             month_numbers = []
             month_has_daily_changes: dict[int, bool] = {}
             running = balance_pre_year
-            previous_day_balance = balance_pre_year
             had_positive_stock = balance_pre_year > 0
             all_daily_zero = balance_pre_year == 0
 
-            day_cursor = period_start
-            while day_cursor <= period_end:
-                running += daily_movements.get(day_cursor, Decimal("0"))
-
-                day_changed = running != previous_day_balance
-                month_has_daily_changes[day_cursor.month] = (
-                    month_has_daily_changes.get(day_cursor.month, False) or day_changed
-                )
-
-                if running > 0:
-                    had_positive_stock = True
-                if running != 0:
-                    all_daily_zero = False
-
-                is_period_end = day_cursor == period_end
-                next_day = day_cursor + timedelta(days=1)
-                is_month_end = is_period_end or next_day.month != day_cursor.month
-                if is_month_end:
-                    previous_month_balance = (
-                        monthly_balances[-1] if monthly_balances else balance_pre_year
-                    )
-                    monthly_balances.append(running)
-                    monthly_changed.append(running != previous_month_balance)
-                    month_numbers.append(day_cursor.month)
-
-                previous_day_balance = running
-                day_cursor = next_day
+            for _month_num in range(1, period_end.month + 1):
+                _month_movements = _movements_by_month.get(_month_num, [])
+                _has_change = False
+                _prev_running = running
+                for _, _qty in _month_movements:
+                    running += _qty
+                    if running != _prev_running:
+                        _has_change = True
+                    _prev_running = running
+                    if running > 0:
+                        had_positive_stock = True
+                    if running != 0:
+                        all_daily_zero = False
+                month_has_daily_changes[_month_num] = _has_change
+                previous_month_balance = monthly_balances[-1] if monthly_balances else balance_pre_year
+                monthly_balances.append(running)
+                monthly_changed.append(running != previous_month_balance)
+                month_numbers.append(_month_num)
 
             if not monthly_balances:
                 monthly_balances = [balance_pre_year]
@@ -1166,7 +1172,7 @@ def get_product_analysis_data(
             )
             continue
 
-    cache.set(cache_key, analysis_data, timeout=20)
+    cache.set(cache_key, analysis_data, timeout=300)
     return analysis_data
 
 

@@ -33,7 +33,7 @@ def get_inventory_summary_data(inventory_name="default"):
             "total_value": 0.0,
             "negative_stock_alerts": [],
         }
-        cache.set(cache_key, payload, timeout=20)
+        cache.set(cache_key, payload, timeout=300)
         return payload
 
     product_meta = {
@@ -144,5 +144,5 @@ def get_inventory_summary_data(inventory_name="default"):
         "total_value": float(total_value),
         "negative_stock_alerts": negative_stock_alerts,
     }
-    cache.set(cache_key, payload, timeout=20)
+    cache.set(cache_key, payload, timeout=300)
     return payload
