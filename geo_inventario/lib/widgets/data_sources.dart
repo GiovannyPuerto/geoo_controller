@@ -10,7 +10,7 @@ Color _rowColor(int index) =>
     index.isEven ? AppColors.surface : AppColors.surfaceVariant;
 
 /// Badge de estado con color de fondo y texto.
-Widget _StatusBadge({
+Widget _statusBadge({
   required String label,
   required Color bg,
   required Color fg,
@@ -108,7 +108,7 @@ class MovementsDataSource extends DataTableSource {
         ),
         // Tipo Doc — con badge de color
         DataCell(
-          _StatusBadge(
+          _statusBadge(
             label: docType.isEmpty ? '—' : docType,
             bg: _typeColor(docType).withValues(alpha: 0.12),
             fg: _typeColor(docType),
@@ -188,35 +188,35 @@ class AnalysisDataSource extends DataTableSource {
   Widget _rotationBadge(String rotation) {
     switch (rotation) {
       case 'Activo':
-        return _StatusBadge(
+        return _statusBadge(
           label: 'Activo',
           bg: AppColors.successLight,
           fg: AppColors.successDark,
           icon: Icons.check_circle_rounded,
         );
       case 'Estancado':
-        return _StatusBadge(
+        return _statusBadge(
           label: 'Estancado',
           bg: AppColors.warningLight,
           fg: AppColors.warningDark,
           icon: Icons.hourglass_bottom_rounded,
         );
       case 'Obsoleto':
-        return _StatusBadge(
+        return _statusBadge(
           label: 'Obsoleto',
           bg: AppColors.errorLight,
           fg: AppColors.errorDark,
           icon: Icons.cancel_rounded,
         );
       case 'Inactivo':
-        return _StatusBadge(
+        return _statusBadge(
           label: 'Inactivo',
           bg: AppColors.surfaceVariant,
           fg: AppColors.textMuted,
           icon: Icons.pause_circle_rounded,
         );
       default:
-        return _StatusBadge(
+        return _statusBadge(
           label: rotation,
           bg: AppColors.surfaceVariant,
           fg: AppColors.textMuted,
@@ -227,7 +227,7 @@ class AnalysisDataSource extends DataTableSource {
   Widget _boolBadge(String value, {required bool positiveIsGood}) {
     final isYes = value == 'Sí';
     final isGood = positiveIsGood ? isYes : !isYes;
-    return _StatusBadge(
+    return _statusBadge(
       label: value,
       bg: isGood ? AppColors.successLight : AppColors.surfaceVariant,
       fg: isGood ? AppColors.successDark : AppColors.textMuted,

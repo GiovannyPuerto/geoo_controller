@@ -4,28 +4,38 @@
 import 'package:flutter/material.dart';
 
 /// Paleta de colores corporativa Geoflora.
-/// Azul petróleo (primario), Verde naturaleza (acento), Neutros claros.
+/// Extraída directamente de logo_geoflora.png e icono.png.
+/// Azul profundo #005286 (primario), Cian #00AFD4 (acento), Neutros claros.
 class AppColors {
   AppColors._();
 
-  // ── Primario: Azul corporativo ─────────────────────────────────────────────
-  static const Color primary = Color(0xFF1E5AA8);
-  static const Color primaryDark = Color(0xFF154178);
-  static const Color primaryDarker = Color(0xFF102F59);
-  static const Color primaryLight = Color(0xFFD9E7FB);
-  static const Color primaryLighter = Color(0xFFEEF4FF);
+  // ── Primario: Azul corporativo Geoflora (#005286) ─────────────────────────
+  static const Color primary = Color(0xFF005286);
+  static const Color primaryDark = Color(0xFF003D66);
+  static const Color primaryDarker = Color(0xFF002444);
+  static const Color primaryLight = Color(0xFFCCE4F0);
+  static const Color primaryLighter = Color(0xFFEBF5FA);
 
-  // ── Acento: Verde naturaleza ───────────────────────────────────────────────
+  // ── Cian corporativo Geoflora (#00AFD4) ───────────────────────────────────
+  static const Color cyan = Color(0xFF00AFD4);
+  static const Color cyanDark = Color(0xFF007A96);
+  static const Color cyanLight = Color(0xFFE0F6FB);
+  static const Color cyanLighter = Color(0xFFF0FBFE);
+
+  // ── Azul medio (gradientes / hover) ───────────────────────────────────────
+  static const Color midBlue = Color(0xFF057CB2);
+
+  // ── Acento: Verde naturaleza (conservado para semántica) ──────────────────
   static const Color accent = Color(0xFF2E7D32);
   static const Color accentDark = Color(0xFF1F5B23);
   static const Color accentLight = Color(0xFFCDEDD1);
   static const Color accentLighter = Color(0xFFEAF8EC);
 
   // ── Superficies ────────────────────────────────────────────────────────────
-  static const Color background = Color.fromARGB(255, 226, 226, 226);
+  static const Color background = Color(0xFFF0F4F8);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceVariant = Color(0xFFEEF3F8);
-  static const Color surfaceBlue = Color(0xFFEAF2FF);
+  static const Color surfaceVariant = Color(0xFFEAF2F7);
+  static const Color surfaceBlue = Color(0xFFE0F3FA);
 
   // ── Textos ─────────────────────────────────────────────────────────────────
   static const Color textPrimary = Color(0xFF0F172A);
@@ -61,24 +71,24 @@ class AppColors {
   // ── Colores específicos para gráficas ─────────────────────────────────────
   static const Color chartPositive = Color(0xFF00A86B);
   static const Color chartNegative = Color(0xFFE53935);
-  static const Color chartBalance = Color(0xFF0057D9);
-  static const Color chartCutAverage = Color(0xFF0077CC);
+  static const Color chartBalance = Color(0xFF005286);
+  static const Color chartCutAverage = Color(0xFF057CB2);
   static const Color chartCutFinal = Color(0xFFFF8F00);
 
   // ── Paleta para gráficas ───────────────────────────────────────────────────
   static const List<Color> chartPalette = [
-    Color(0xFF0057D9), // azul eléctrico
+    Color(0xFF005286), // azul corporativo
+    Color(0xFF00AFD4), // cian corporativo
     Color(0xFF00A86B), // verde intenso
     Color(0xFFFF8F00), // naranja fuerte
     Color(0xFFE53935), // rojo intenso
-    Color(0xFF00ACC1), // cian fuerte
-    Color(0xFF6D4C41), // café
+    Color(0xFF057CB2), // azul medio
     Color(0xFF7CB342), // lima
     Color(0xFF263238), // grafito
   ];
 
   // ── Medallas de ranking ────────────────────────────────────────────────────
-  static const Color medalGold   = Color(0xFFFFC107);
+  static const Color medalGold = Color(0xFFFFC107);
   static const Color medalSilver = Color(0xFF9E9E9E);
   static const Color medalBronze = Color(0xFF8D6E63);
 }
@@ -140,14 +150,22 @@ class AppShadows {
 class AppGradients {
   AppGradients._();
 
+  /// Gradiente corporativo: azul profundo → cian (refleja el logo Geoflora).
   static const LinearGradient primary = LinearGradient(
-    colors: [AppColors.primary, AppColors.primaryDark],
+    colors: [AppColors.primary, AppColors.midBlue],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// Gradiente banner hero: navy → cian — identidad corporativa completa.
+  static const LinearGradient hero = LinearGradient(
+    colors: [AppColors.primary, AppColors.midBlue, AppColors.cyan],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient accent = LinearGradient(
-    colors: [AppColors.accent, AppColors.accentDark],
+    colors: [AppColors.cyan, AppColors.cyanDark],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -165,7 +183,10 @@ class AppGradients {
   );
 
   static const LinearGradient warningCard = LinearGradient(
-    colors: [Color.fromARGB(255, 255, 147, 65), Color.fromARGB(255, 185, 77, 10)],
+    colors: [
+      Color.fromARGB(255, 255, 147, 65),
+      Color.fromARGB(255, 185, 77, 10)
+    ],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -189,7 +210,7 @@ class AppTheme {
         brightness: Brightness.light,
         primary: AppColors.primary,
         onPrimary: Colors.white,
-        secondary: AppColors.accent,
+        secondary: AppColors.cyan,
         onSecondary: Colors.white,
         surface: AppColors.surface,
         surfaceContainerHighest: AppColors.background,
@@ -197,21 +218,21 @@ class AppTheme {
       fontFamily: 'Roboto',
       scaffoldBackgroundColor: AppColors.background,
 
-      // AppBar — blanco con acento verde
+      // AppBar — azul corporativo profundo con texto blanco
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.textPrimary,
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
         elevation: 0,
-        scrolledUnderElevation: 1,
+        scrolledUnderElevation: 2,
         centerTitle: false,
         titleTextStyle: TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
+          color: Colors.white,
           letterSpacing: 0.2,
         ),
-        iconTheme: IconThemeData(color: AppColors.textPrimary),
-        shadowColor: Color(0x22000000),
+        iconTheme: IconThemeData(color: Colors.white),
+        shadowColor: Color(0x44000000),
       ),
 
       // Card
@@ -320,13 +341,14 @@ class AppTheme {
         ),
       ),
 
-      // TabBar
+      // TabBar — etiquetas blancas, indicador cian corporativo
       tabBarTheme: const TabBarThemeData(
-        labelColor: AppColors.primary,
-        unselectedLabelColor: AppColors.textMuted,
-        indicatorColor: AppColors.accent,
+        labelColor: Colors.white,
+        unselectedLabelColor: Color(0xAAFFFFFF),
+        indicatorColor: AppColors.cyan,
         labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        unselectedLabelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+        unselectedLabelStyle:
+            TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
         indicatorSize: TabBarIndicatorSize.tab,
       ),
 

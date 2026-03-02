@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.db.models import Max, Sum
 
 from ..models import Product, InventoryRecord, ImportBatch, WarehouseDetail
@@ -10,17 +11,20 @@ def get_inventory_summary_data(inventory_name="default"):
     Construye el payload de resumen de inventario para la API.
     Usa queries SQL masivas para evitar loops lentos N+1.
     """
-    product_ids = list(
-        Product.objects.filter(inventory_name=inventory_name).values_list("id", flat=True)
-    )
-    total_products = len(product_ids)
+    cache_key = f"inventory:summary:{inventory_name}"
+    cached_value = cache.get(cache_key)
+    if cached_value is not None:
+        return cached_value
+
+    products_qs = Product.objects.filter(inventory_name=inventory_name)
+    total_products = products_qs.count()
     total_records = InventoryRecord.objects.filter(
         product__inventory_name=inventory_name
     ).count()
     total_batches = ImportBatch.objects.filter(inventory_name=inventory_name).count()
 
     if total_products == 0:
-        return {
+        payload = {
             "inventory_name": inventory_name,
             "total_products": 0,
             "total_records": total_records,
@@ -29,10 +33,20 @@ def get_inventory_summary_data(inventory_name="default"):
             "total_value": 0.0,
             "negative_stock_alerts": [],
         }
+        cache.set(cache_key, payload, timeout=20)
+        return payload
+
+    product_meta = {
+        p["id"]: p
+        for p in products_qs.values(
+            "id", "code", "description", "initial_balance", "initial_unit_cost"
+        )
+    }
+    product_ids = list(product_meta.keys())
 
     # Stock inicial agregado por (producto, almacén)
     initial_map: dict[int, dict[str, Decimal]] = {}
-    for row in WarehouseDetail.objects.filter(product_id__in=product_ids).values(
+    for row in WarehouseDetail.objects.filter(product__inventory_name=inventory_name).values(
         "product_id", "warehouse", "initial_quantity"
     ):
         initial_map.setdefault(row["product_id"], {})[row["warehouse"]] = Decimal(
@@ -42,14 +56,14 @@ def get_inventory_summary_data(inventory_name="default"):
     # Movimientos acumulados por (producto, almacén)
     movement_map: dict[tuple, Decimal] = {
         (row["product_id"], row["warehouse"]): row["qty"] or Decimal("0")
-        for row in InventoryRecord.objects.filter(product_id__in=product_ids)
+        for row in InventoryRecord.objects.filter(product__inventory_name=inventory_name)
         .values("product_id", "warehouse")
         .annotate(qty=Sum("quantity"))
     }
     latest_final_record_ids = [
         row["latest_id"]
         for row in InventoryRecord.objects.filter(
-            product_id__in=product_ids,
+            product__inventory_name=inventory_name,
             final_quantity__isnull=False,
         )
         .values("product_id", "warehouse")
@@ -73,7 +87,7 @@ def get_inventory_summary_data(inventory_name="default"):
     #  Último unit_cost por producto (MAX id = registro más reciente) 
     latest_ids = {
         row["product_id"]: row["lid"]
-        for row in InventoryRecord.objects.filter(product_id__in=product_ids)
+        for row in InventoryRecord.objects.filter(product__inventory_name=inventory_name)
         .values("product_id")
         .annotate(lid=Max("id"))
     }
@@ -81,14 +95,6 @@ def get_inventory_summary_data(inventory_name="default"):
         row["product_id"]: Decimal(row["unit_cost"] or 0)
         for row in InventoryRecord.objects.filter(id__in=latest_ids.values()).values(
             "product_id", "unit_cost"
-        )
-    }
-
-    # Datos de producto (code, description, initial_unit_cost)
-    product_meta = {
-        p["id"]: p
-        for p in Product.objects.filter(id__in=product_ids).values(
-            "id", "code", "description", "initial_balance", "initial_unit_cost"
         )
     }
 
@@ -129,7 +135,7 @@ def get_inventory_summary_data(inventory_name="default"):
                 }
             )
 
-    return {
+    payload = {
         "inventory_name": inventory_name,
         "total_products": total_products,
         "total_records": total_records,
@@ -138,3 +144,5 @@ def get_inventory_summary_data(inventory_name="default"):
         "total_value": float(total_value),
         "negative_stock_alerts": negative_stock_alerts,
     }
+    cache.set(cache_key, payload, timeout=20)
+    return payload

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/tabs/summary/resumen_analisis_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 
@@ -22,10 +23,12 @@ class _SummaryTabPageState extends State<SummaryTabPage>
   List<Map<String, dynamic>> _analysis = [];
   String? _welcomeMessage;
   bool _isLoading = true;
+  bool _isAnalysisLoading = false;
+  int _analysisRequestEpoch = 0;
+  ResumenAnalisisMetricas _metricas = const ResumenAnalisisMetricas();
 
   // Controlador para animar las barras de progreso al aparecer
   late AnimationController _progressCtrl;
-  late Animation<double> _progressAnim;
 
   // ─── Ciclo de vida ─────────────────────────────────────────────────────────
 
@@ -35,10 +38,6 @@ class _SummaryTabPageState extends State<SummaryTabPage>
     _progressCtrl = AnimationController(
       duration: const Duration(milliseconds: 900),
       vsync: this,
-    );
-    _progressAnim = CurvedAnimation(
-      parent: _progressCtrl,
-      curve: Curves.easeOutCubic,
     );
     inventoryRefreshNotifier.addListener(_onExternalRefresh);
     _loadData();
@@ -58,63 +57,60 @@ class _SummaryTabPageState extends State<SummaryTabPage>
 
   Future<void> _loadData() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    final requestEpoch = ++_analysisRequestEpoch;
+    setState(() {
+      _isLoading = true;
+      _isAnalysisLoading = true;
+    });
     _progressCtrl.reset();
 
     try {
       final results = await Future.wait([
         _apiService.getSummary(),
-        _apiService.getAnalysis(),
         _apiService.getWelcomeMessage(),
       ]);
 
       if (!mounted) return;
       setState(() {
         _summary = results[0] as Map<String, dynamic>?;
-        _analysis = results[1] as List<Map<String, dynamic>>;
-        _welcomeMessage = results[2] as String?;
+        _welcomeMessage = results[1] as String?;
         _isLoading = false;
       });
       _progressCtrl.forward();
+
+      final analysisData = await _apiService.getAnalysis();
+      if (!mounted || requestEpoch != _analysisRequestEpoch) return;
+      setState(() {
+        _analysis = analysisData;
+        _metricas = ResumenAnalisisService.calcular(analysisData);
+        _isAnalysisLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+        _isAnalysisLoading = false;
+      });
       context.showErrorSnackBar('Error al cargar el resumen: ${e.toString()}');
     }
   }
 
   // ─── Datos calculados ──────────────────────────────────────────────────────
 
-  int get _totalProducts => _summary?['total_products'] ?? 0;
-  double get _totalValue => (_summary?['total_value'] ?? 0.0).toDouble();
-  bool get _hasData => _totalProducts > 0;
+  int get _totalProducts => ResumenAnalisisService.totalProductos(_summary);
+  double get _totalValue => ResumenAnalisisService.valorTotal(_summary);
+  bool get _hasData => ResumenAnalisisService.tieneDatos(_summary);
 
-  int get _activeCount =>
-      _analysis.where((i) => i['rotacion'] == 'Activo').length;
-  int get _stagnantCount =>
-      _analysis.where((i) => i['rotacion'] == 'Estancado').length;
-  int get _obsoleteCount =>
-      _analysis.where((i) => i['rotacion'] == 'Obsoleto').length;
-  int get _highRotationCount =>
-      _analysis.where((i) => i['alta_rotacion'] == 'Sí').length;
-  int get _stagnantProductCount =>
-      _analysis.where((i) => i['estancado'] == 'Sí').length;
+  int get _activeCount => _metricas.activos;
+  int get _stagnantCount => _metricas.estancados;
+  int get _obsoleteCount => _metricas.obsoletos;
+  int get _highRotationCount => _metricas.altaRotacion;
+  int get _stagnantProductCount => _metricas.estancadoFlag;
 
-  /// Los 5 productos con mayor valor de saldo.
-  List<Map<String, dynamic>> get _topValueProducts {
-    final sorted = List<Map<String, dynamic>>.from(_analysis)
-      ..sort((a, b) {
-        final va = (a['valor_saldo_actual'] ?? 0.0) as num;
-        final vb = (b['valor_saldo_actual'] ?? 0.0) as num;
-        return vb.compareTo(va);
-      });
-    return sorted.take(5).toList();
-  }
+  List<Map<String, dynamic>> get _topValueProducts => _metricas.topValor;
 
-  /// Productos con saldo negativo (alertas).
-  List<Map<String, dynamic>> get _negativeStockProducts => _analysis
-      .where((i) => ((i['cantidad_saldo_actual'] ?? 0.0) as num) < 0)
-      .toList();
+  List<Map<String, dynamic>> get _negativeStockProducts =>
+      _metricas.stockNegativo;
 
   // ─── UI ────────────────────────────────────────────────────────────────────
 
@@ -158,18 +154,46 @@ class _SummaryTabPageState extends State<SummaryTabPage>
                   _buildKpiRow(),
                   const SizedBox(height: AppSpacing.md),
 
+                  if (_isAnalysisLoading) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Row(
+                          children: const [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: AppSpacing.sm),
+                            Text(
+                              'Cargando análisis detallado…',
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+
                   // ── Fila 2: Estado + Alertas rápidas ─────────────────────
-                  _buildMiddleRow(),
-                  const SizedBox(height: AppSpacing.md),
+                  if (!_isAnalysisLoading && _analysis.isNotEmpty) ...[
+                    _buildMiddleRow(),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
 
                   // ── Fila 3: Top productos por valor ──────────────────────
-                  if (_topValueProducts.isNotEmpty) ...[
+                  if (!_isAnalysisLoading && _topValueProducts.isNotEmpty) ...[
                     _buildTopProductsCard(),
                     const SizedBox(height: AppSpacing.md),
                   ],
 
                   // ── Fila 4: Alertas de stock negativo ────────────────────
-                  if (_negativeStockProducts.isNotEmpty)
+                  if (!_isAnalysisLoading && _negativeStockProducts.isNotEmpty)
                     _buildNegativeStockCard(),
                 ],
               ),
@@ -298,7 +322,7 @@ class _SummaryTabPageState extends State<SummaryTabPage>
 
   Widget _buildRotationQuickView() {
     final total = _analysis.length;
-    double pct(int n) => total > 0 ? n / total * 100 : 0;
+    double pct(int n) => ResumenAnalisisService.porcentaje(n, total);
 
     return _SectionCard(
       title: 'Rotación',
@@ -624,78 +648,6 @@ class _SectionCard extends StatelessWidget {
           child,
         ],
       ),
-    );
-  }
-}
-
-/// Barra de progreso animada con etiqueta, conteo y porcentaje.
-class _AnimatedStatusBar extends StatelessWidget {
-  const _AnimatedStatusBar({
-    required this.label,
-    required this.count,
-    required this.total,
-    required this.color,
-    required this.progress,
-  });
-
-  final String label;
-  final int count;
-  final int total;
-  final Color color;
-  final double progress; // 0.0 → 1.0 desde la animación externa
-
-  @override
-  Widget build(BuildContext context) {
-    final fraction = total > 0 ? count / total : 0.0;
-    final pct = (fraction * 100).toStringAsFixed(1);
-
-    return Column(
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Text(
-                label,
-                style: const TextStyle(
-                    fontSize: 13, color: AppColors.textSecondary),
-              ),
-            ),
-            // Badge con conteo + porcentaje
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppRadius.full),
-              ),
-              child: Text(
-                '$count · $pct%',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          child: LinearProgressIndicator(
-            // Multiplica por la animación para que arranque desde 0
-            value: fraction * progress,
-            minHeight: 8,
-            backgroundColor: AppColors.surfaceVariant,
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-          ),
-        ),
-      ],
     );
   }
 }

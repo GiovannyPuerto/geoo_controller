@@ -6,11 +6,14 @@ import 'dart:convert';
 import 'package:intl/date_symbol_data_local.dart';
 import 'dashboard.dart';
 import 'package:geo_inventario/services/excel_upload_service.dart';
+import 'package:geo_inventario/services/config_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
+import 'package:geo_inventario/widgets/server_settings_dialog.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('es_CO', null);
+  await ConfigService.instance.load(); // carga IP/puerto persistidos
   runApp(const GeoInventarioApp());
 }
 
@@ -92,8 +95,8 @@ class _WelcomePageState extends State<WelcomePage>
   /// Carga el historial de importaciones recientes desde la API.
   Future<void> _loadHistorial() async {
     try {
-      final response = await http
-          .get(Uri.parse('http://127.0.0.1:8000/api/inventory/batches/'));
+      final url = '${ConfigService.instance.baseUrl}/lotes/';
+      final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200 && mounted) {
         setState(() {
           _historial =
@@ -216,16 +219,25 @@ class _WelcomePageState extends State<WelcomePage>
       preferredSize: const Size.fromHeight(68),
       child: Container(
         decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(bottom: BorderSide(color: AppColors.border)),
-          boxShadow: AppShadows.card,
+          color: AppColors.primary,
+          boxShadow: AppShadows.elevated,
         ),
         child: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           title: Row(
             children: [
-              Image.asset('statics/images/logo_geoflora.png', height: 32),
+              // Logo en pastilla blanca para contraste sobre fondo navy
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child:
+                    Image.asset('statics/images/logo_geoflora.png', height: 26),
+              ),
               const SizedBox(width: AppSpacing.md),
               const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -236,19 +248,41 @@ class _WelcomePageState extends State<WelcomePage>
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
+                      color: Colors.white,
                       letterSpacing: 0.1,
                     ),
                   ),
                   Text(
                     'Geoflora SAS',
-                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                    style: TextStyle(fontSize: 11, color: Color(0xCCFFFFFF)),
                   ),
                 ],
               ),
             ],
           ),
           actions: [
+            // Indicador del servidor configurado
+            ServerIndicatorChip(
+              host: ConfigService.instance.host,
+              port: ConfigService.instance.port,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            // Botón de configuración del servidor
+            Tooltip(
+              message: 'Configurar servidor',
+              child: IconButton(
+                icon: const Icon(Icons.settings_ethernet_rounded,
+                    color: Color(0xCCFFFFFF), size: 22),
+                onPressed: () async {
+                  final changed = await ServerSettingsDialog.show(context);
+                  if (changed && mounted) {
+                    setState(() {}); // refresca indicador
+                    _loadHistorial();
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
             _AppBarButton(
               icon: Icons.dashboard_rounded,
               label: 'Dashboard',
@@ -274,11 +308,7 @@ class _WelcomePageState extends State<WelcomePage>
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppColors.primaryDark, AppColors.primary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: AppGradients.hero,
       ),
       padding: EdgeInsets.symmetric(
           vertical: heroPaddingV, horizontal: heroPaddingH),
@@ -299,7 +329,10 @@ class _WelcomePageState extends State<WelcomePage>
                 SizedBox(width: 6),
                 Text(
                   'Plataforma corporativa Geoflora',
-                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
                 ),
               ],
             ),
@@ -378,9 +411,12 @@ class _WelcomePageState extends State<WelcomePage>
               children: [
                 _HeroStat(label: 'Carga rápida', icon: Icons.bolt_rounded),
                 _HeroStatDivider(),
-                _HeroStat(label: 'Análisis completo', icon: Icons.analytics_rounded),
+                _HeroStat(
+                    label: 'Análisis completo', icon: Icons.analytics_rounded),
                 _HeroStatDivider(),
-                _HeroStat(label: 'Reportes PDF/Excel', icon: Icons.picture_as_pdf_rounded),
+                _HeroStat(
+                    label: 'Reportes PDF/Excel',
+                    icon: Icons.picture_as_pdf_rounded),
               ],
             ),
         ],
@@ -594,7 +630,8 @@ class _WelcomePageState extends State<WelcomePage>
             runSpacing: AppSpacing.lg,
             alignment: WrapAlignment.center,
             children: features
-                .map((f) => _FeatureCard(icon: f.$1, accentColor: f.$2, title: f.$3, body: f.$4))
+                .map((f) => _FeatureCard(
+                    icon: f.$1, accentColor: f.$2, title: f.$3, body: f.$4))
                 .toList(),
           ),
         ],
@@ -817,9 +854,10 @@ class _AppBarButton extends StatelessWidget {
       onPressed: onTap,
       icon: Icon(icon, color: Colors.white, size: 18),
       label: Text(label,
-          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          style: const TextStyle(
+              color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
       style: TextButton.styleFrom(
-        backgroundColor: AppColors.accent.withValues(alpha: 0.9),
+        backgroundColor: AppColors.cyan.withValues(alpha: 0.85),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.md)),
@@ -860,7 +898,9 @@ class _SectionHeader extends StatelessWidget {
         Text(
           subtitle,
           style: TextStyle(
-              fontSize: isMobile ? 14.0 : 16.0, color: AppColors.textMuted, height: 1.5),
+              fontSize: isMobile ? 14.0 : 16.0,
+              color: AppColors.textMuted,
+              height: 1.5),
           textAlign: TextAlign.center,
         ),
       ],

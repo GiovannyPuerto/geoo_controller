@@ -1,11 +1,11 @@
 import 'dart:io' as io;
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/tabs/tops/tops_calculo_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:intl/intl.dart';
@@ -21,7 +21,6 @@ class TopsTabPage extends StatefulWidget {
 
 class _TopsTabPageState extends State<TopsTabPage> {
   final ApiService _apiService = ApiService();
-  final NumberFormat _quantityFormat = NumberFormat('#,##0.000', 'es_CO');
 
   bool isLoading = true;
   List<Map<String, dynamic>> analysisCutoff = [];
@@ -34,6 +33,14 @@ class _TopsTabPageState extends State<TopsTabPage> {
   DateTime? selectedDate;
   DateTime? movementDateFrom;
   DateTime? movementDateTo;
+
+  Map<String, List<Map<String, dynamic>>> _cachedTopLists = const {};
+  List<Map<String, dynamic>>? _lastCutoffRef;
+  List<Map<String, dynamic>>? _lastRangeRef;
+  int? _lastTopLimit;
+  String? _lastTopGroup;
+  String? _lastTopRotation;
+  String? _lastTopSearch;
 
   @override
   void initState() {
@@ -54,20 +61,35 @@ class _TopsTabPageState extends State<TopsTabPage> {
     if (!mounted) return;
     setState(() => isLoading = true);
     try {
-      final results = await Future.wait([
-        _apiService.getAnalysis(
-          specificDate: selectedDate,
-        ),
-        _apiService.getAnalysis(
-          dateFrom: movementDateFrom,
-          dateTo: movementDateTo,
-        ),
-      ]);
+      final hasCutoff = selectedDate != null;
+      final hasMovementRange = movementDateFrom != null && movementDateTo != null;
+
+      List<Map<String, dynamic>> cutoffData;
+      List<Map<String, dynamic>> rangeData;
+
+      if (!hasCutoff && !hasMovementRange) {
+        final allData = await _apiService.getAnalysis();
+        cutoffData = allData;
+        rangeData = allData;
+      } else {
+        final results = await Future.wait([
+          _apiService.getAnalysis(specificDate: selectedDate),
+          _apiService.getAnalysis(
+            dateFrom: movementDateFrom,
+            dateTo: movementDateTo,
+          ),
+        ]);
+        cutoffData = results[0];
+        rangeData = results[1];
+      }
+
       if (!mounted) return;
       setState(() {
-        analysisCutoff = results[0];
-        analysisRange = results[1];
+        analysisCutoff = cutoffData;
+        analysisRange = rangeData;
         isLoading = false;
+        _lastCutoffRef = null;
+        _lastRangeRef = null;
       });
     } catch (_) {
       if (!mounted) return;
@@ -77,36 +99,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
   }
 
   double _asDouble(dynamic raw) {
-    if (raw is num) return raw.toDouble();
-    return double.tryParse(raw?.toString() ?? '') ?? 0.0;
-  }
-
-  List<Map<String, dynamic>> _getTopsBaseData(
-      List<Map<String, dynamic>> source) {
-    final query = (topsSearch ?? '').trim().toLowerCase();
-    return source.where((item) {
-      if (topsGroup != null && topsGroup!.isNotEmpty) {
-        if ((item['grupo'] ?? '').toString() != topsGroup) return false;
-      }
-      if (topsRotation != null && topsRotation!.isNotEmpty) {
-        if ((item['rotacion'] ?? '').toString() != topsRotation) return false;
-      }
-      if (query.isNotEmpty) {
-        final code = (item['codigo'] ?? '').toString().toLowerCase();
-        final name = (item['nombre_producto'] ?? '').toString().toLowerCase();
-        if (!code.contains(query) && !name.contains(query)) return false;
-      }
-      return true;
-    }).toList();
-  }
-
-  List<Map<String, dynamic>> _topBy(
-    List<Map<String, dynamic>> source,
-    double Function(Map<String, dynamic>) selector,
-  ) {
-    final sorted = List<Map<String, dynamic>>.from(source)
-      ..sort((a, b) => selector(b).compareTo(selector(a)));
-    return sorted.take(topsLimit).toList();
+    return TopsCalculoService.toDouble(raw);
   }
 
   Future<void> _pickCutoffDate() async {
@@ -179,38 +172,44 @@ class _TopsTabPageState extends State<TopsTabPage> {
 
   String _formatDate(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
 
-  String _formatQuantity(double value) => _quantityFormat.format(value);
-
   double _movementValueFor(
     Map<String, dynamic> item,
     String qtyKey,
     String valueKey,
   ) {
-    final rawValue = _asDouble(item[valueKey]);
-    if (rawValue != 0) return rawValue;
-    return _asDouble(item[qtyKey]) * _asDouble(item['costo_unitario']);
+    return TopsCalculoService.valorMovimiento(item, qtyKey, valueKey);
   }
 
   Map<String, List<Map<String, dynamic>>> _computeTopLists() {
-    final topsBaseCutoff = _getTopsBaseData(analysisCutoff);
-    final topsBaseRange = _getTopsBaseData(analysisRange);
+    return TopsCalculoService.computeTopLists(
+      analysisCutoff: analysisCutoff,
+      analysisRange: analysisRange,
+      topLimit: topsLimit,
+      group: topsGroup,
+      rotation: topsRotation,
+      search: topsSearch,
+    );
+  }
 
-    return {
-      'valor': _topBy(
-        topsBaseCutoff,
-        (item) => _asDouble(item['valor_saldo_actual']),
-      ),
-      'movimientos': _topBy(
-        topsBaseRange,
-        (item) =>
-            _asDouble(item['entradas_periodo']) +
-            _asDouble(item['salidas_periodo']),
-      ),
-      'entradas':
-          _topBy(topsBaseRange, (item) => _asDouble(item['entradas_periodo'])),
-      'salidas':
-          _topBy(topsBaseRange, (item) => _asDouble(item['salidas_periodo'])),
-    };
+  void _refreshTopListsCacheIfNeeded() {
+    final normalizedSearch = (topsSearch ?? '').trim();
+    final hasChanges =
+        !identical(_lastCutoffRef, analysisCutoff) ||
+        !identical(_lastRangeRef, analysisRange) ||
+        _lastTopLimit != topsLimit ||
+        _lastTopGroup != topsGroup ||
+        _lastTopRotation != topsRotation ||
+        _lastTopSearch != normalizedSearch;
+
+    if (!hasChanges) return;
+
+    _cachedTopLists = _computeTopLists();
+    _lastCutoffRef = analysisCutoff;
+    _lastRangeRef = analysisRange;
+    _lastTopLimit = topsLimit;
+    _lastTopGroup = topsGroup;
+    _lastTopRotation = topsRotation;
+    _lastTopSearch = normalizedSearch;
   }
 
   void _showExportDialog() {
@@ -318,9 +317,9 @@ class _TopsTabPageState extends State<TopsTabPage> {
       );
     }
 
-    final tops = _computeTopLists();
+    _refreshTopListsCacheIfNeeded();
+    final tops = _cachedTopLists;
     final topByValue = tops['valor'] ?? const <Map<String, dynamic>>[];
-    final topByMovements = tops['movimientos'] ?? const <Map<String, dynamic>>[];
     final topByEntries = tops['entradas'] ?? const <Map<String, dynamic>>[];
     final topByExits = tops['salidas'] ?? const <Map<String, dynamic>>[];
 
@@ -379,7 +378,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Tops de valor y movimientos',
+                          'Tops de valor, entradas y salidas',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -391,7 +390,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
                           'Corte valor: '
                           '${hasCutoffDateFilter ? _formatDate(selectedDate!) : 'sin fecha'}'
                           '  ·  '
-                          'Rango mov.: '
+                          'Rango ent/sal.: '
                           '${hasMovementRangeFilter ? '${_formatDate(movementDateFrom!)} — ${_formatDate(movementDateTo!)}' : 'sin rango'}',
                           style: TextStyle(
                             fontSize: 12,
@@ -582,24 +581,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
                             ),
                           ),
                         ),
-
-                        // Búsqueda
-                        SizedBox(
-                          width: 260,
-                          child: TextFormField(
-                            key: ValueKey(topsSearch ?? ''),
-                            initialValue: topsSearch,
-                            decoration: const InputDecoration(
-                              labelText: 'Buscar',
-                              hintText: 'Código o producto',
-                              prefixIcon: Icon(
-                                Icons.search_rounded,
-                                size: 18,
-                              ),
-                            ),
-                            onChanged: (v) => setState(() => topsSearch = v),
-                          ),
-                        ),
+                        
 
                         // Fecha de corte (solo valor inventario)
                         _DateRangeButton(
@@ -649,53 +631,31 @@ class _TopsTabPageState extends State<TopsTabPage> {
                             _asDouble(item['valor_saldo_actual']),
                         valueLabel: (item) =>
                             'Valor: ${CurrencyFormatter.format(item['valor_saldo_actual'] ?? 0)}',
-                        quantityLabel: (item) =>
-                            'Cantidad: ${_formatQuantity(_asDouble(item['cantidad_saldo_actual']))}',
                       ),
                     ),
                     SizedBox(
                       width: cardWidth,
                       child: _TopMetricCard(
-                        title: 'Top movimientos totales',
-                        icon: Icons.swap_horiz_rounded,
-                        accentColor: AppColors.info,
-                        items: topByMovements,
-                        valueSelector: (item) =>
-                            _asDouble(item['entradas_periodo']) +
-                            _asDouble(item['salidas_periodo']),
-                        valueLabel: (item) =>
-                            'Cantidad movida: ${_formatQuantity(_asDouble(item['entradas_periodo']) + _asDouble(item['salidas_periodo']))}',
-                        quantityLabel: (item) =>
-                            'Valor mov.: ${CurrencyFormatter.format(_movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo') + _movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'))}',
-                      ),
-                    ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _TopMetricCard(
-                        title: 'Más entradas en período',
+                        title: 'Más valor entradas en período',
                         icon: Icons.arrow_downward_rounded,
                         accentColor: AppColors.success,
                         items: topByEntries,
                         valueSelector: (item) =>
-                            _asDouble(item['entradas_periodo']),
+                          _movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo'),
                         valueLabel: (item) =>
-                            'Cantidad entrada: ${_formatQuantity(_asDouble(item['entradas_periodo']))}',
-                        quantityLabel: (item) =>
                             'Valor ent.: ${CurrencyFormatter.format(_movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo'))}',
                       ),
                     ),
                     SizedBox(
                       width: cardWidth,
                       child: _TopMetricCard(
-                        title: 'Más salidas en período',
+                        title: 'Más valor salidas en período',
                         icon: Icons.arrow_upward_rounded,
                         accentColor: AppColors.warning,
                         items: topByExits,
                         valueSelector: (item) =>
-                            _asDouble(item['salidas_periodo']),
+                          _movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'),
                         valueLabel: (item) =>
-                            'Cantidad salida: ${_formatQuantity(_asDouble(item['salidas_periodo']))}',
-                        quantityLabel: (item) =>
                             'Valor sal.: ${CurrencyFormatter.format(_movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'))}',
                       ),
                     ),
@@ -860,7 +820,6 @@ class _TopMetricCard extends StatelessWidget {
     required this.items,
     required this.valueSelector,
     required this.valueLabel,
-    required this.quantityLabel,
   });
 
   final String title;
@@ -869,7 +828,6 @@ class _TopMetricCard extends StatelessWidget {
   final List<Map<String, dynamic>> items;
   final double Function(Map<String, dynamic>) valueSelector;
   final String Function(Map<String, dynamic>) valueLabel;
-  final String Function(Map<String, dynamic>) quantityLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -984,7 +942,6 @@ class _TopMetricCard extends StatelessWidget {
                         index: index,
                         item: item,
                         valueLabel: valueLabel(item),
-                        quantityLabel: quantityLabel(item),
                         ratio: ratio,
                         accentColor: accentColor,
                       );
@@ -1003,7 +960,6 @@ class _TopRow extends StatelessWidget {
     required this.index,
     required this.item,
     required this.valueLabel,
-    required this.quantityLabel,
     required this.ratio,
     required this.accentColor,
   });
@@ -1011,7 +967,6 @@ class _TopRow extends StatelessWidget {
   final int index;
   final Map<String, dynamic> item;
   final String valueLabel;
-  final String quantityLabel;
   final double ratio;
   final Color accentColor;
 
@@ -1083,7 +1038,7 @@ class _TopRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                // Valor + cantidad
+                // Valor
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -1093,13 +1048,6 @@ class _TopRow extends StatelessWidget {
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         color: isMedal ? medalColor : accentColor,
-                      ),
-                    ),
-                    Text(
-                      quantityLabel,
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: AppColors.textMuted,
                       ),
                     ),
                   ],

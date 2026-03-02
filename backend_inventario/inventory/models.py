@@ -16,7 +16,7 @@ class ImportBatch(models.Model):
     checksum = models.CharField(max_length=64, null=True, blank=True)
 
     # Permite manejar múltiples inventarios independientes
-    inventory_name = models.CharField(max_length=128, default='default')
+    inventory_name = models.CharField(max_length=128, default='default', db_index=True)
 
     class Meta:
         # Evita subir el mismo archivo al mismo inventario más de una vez.
@@ -33,7 +33,7 @@ class Product(models.Model):
     code = models.CharField(max_length=64)
     description = models.CharField(max_length=512)
     group = models.CharField(max_length=128, blank=True)
-    inventory_name = models.CharField(max_length=128, default='default')
+    inventory_name = models.CharField(max_length=128, default='default', db_index=True)
 
     # Saldo inicial del inventario
     initial_balance = models.DecimalField(max_digits=15, decimal_places=3, default=0)

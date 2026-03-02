@@ -3,16 +3,56 @@ import 'package:http/http.dart' as http;
 import 'package:geo_inventario/models/monthly_cut.dart';
 import 'package:geo_inventario/models/monthly_product_cut.dart';
 import 'package:geo_inventario/models/monthly_movement.dart';
+import 'package:geo_inventario/services/config_service.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:8000/api/inventory';
+  /// URL base dinámica: se obtiene de ConfigService en cada llamada.
+  static String get baseUrl => ConfigService.instance.baseUrl;
+  static const Duration _analysisCacheTtl = Duration(seconds: 20);
+  static const int _analysisCacheMaxEntries = 64;
+  static final http.Client _httpClient = http.Client();
+  static final Map<String, _AnalysisCacheEntry> _analysisCache = {};
+  static final Map<String, Future<List<Map<String, dynamic>>>>
+      _analysisInFlight = {};
+
   String _toIsoDate(DateTime date) => date.toIso8601String().split('T')[0];
+
+  String _buildAnalysisCacheKey(Map<String, String> params) {
+    final ordered = params.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final qp = ordered.map((e) => '${e.key}=${e.value}').join('&');
+    return '$baseUrl/analisis-producto/?$qp';
+  }
+
+  List<Map<String, dynamic>> _cloneAnalysisData(
+      List<Map<String, dynamic>> data) {
+    return data.map((row) => Map<String, dynamic>.from(row)).toList();
+  }
+
+  void _pruneAnalysisCache() {
+    final now = DateTime.now();
+    _analysisCache.removeWhere((_, entry) => entry.expiresAt.isBefore(now));
+
+    if (_analysisCache.length <= _analysisCacheMaxEntries) return;
+
+    final entries = _analysisCache.entries.toList()
+      ..sort((a, b) => a.value.createdAt.compareTo(b.value.createdAt));
+    final removeCount = _analysisCache.length - _analysisCacheMaxEntries;
+    for (var i = 0; i < removeCount; i++) {
+      _analysisCache.remove(entries[i].key);
+    }
+  }
+
+  void _invalidateLocalCaches() {
+    _analysisCache.clear();
+    _analysisInFlight.clear();
+  }
 
   // Suamtoria endpoints
   Future<Map<String, dynamic>?> getSummary() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/summary/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/resumen/'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
 
@@ -37,6 +77,7 @@ class ApiService {
     DateTime? dateTo,
     DateTime? specificDate,
   }) async {
+    String cacheKey = '';
     try {
       final params = <String, String>{};
       if (warehouse != null && warehouse.isNotEmpty) {
@@ -68,20 +109,51 @@ class ApiService {
         }
       }
 
-      final uri =
-          Uri.parse('$baseUrl/analysis/').replace(queryParameters: params);
-      final response = await http.get(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return List<Map<String, dynamic>>.from(data);
+      cacheKey = _buildAnalysisCacheKey(params);
+      _pruneAnalysisCache();
+      final now = DateTime.now();
+      final cached = _analysisCache[cacheKey];
+      if (cached != null && cached.expiresAt.isAfter(now)) {
+        return _cloneAnalysisData(cached.data);
       }
-      return [];
+
+      final inFlight = _analysisInFlight[cacheKey];
+      if (inFlight != null) {
+        final shared = await inFlight;
+        return _cloneAnalysisData(shared);
+      }
+
+      final uri = Uri.parse('$baseUrl/analisis-producto/')
+          .replace(queryParameters: params);
+      final requestFuture = () async {
+        final response = await _httpClient.get(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+        ).timeout(const Duration(seconds: 30));
+
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body);
+          final parsed = List<Map<String, dynamic>>.from(data);
+          _analysisCache[cacheKey] = _AnalysisCacheEntry(
+            data: parsed,
+            createdAt: DateTime.now(),
+            expiresAt: DateTime.now().add(_analysisCacheTtl),
+          );
+          _pruneAnalysisCache();
+          return parsed;
+        }
+        return <Map<String, dynamic>>[];
+      }();
+
+      _analysisInFlight[cacheKey] = requestFuture;
+      final resolved = await requestFuture;
+      return _cloneAnalysisData(resolved);
     } catch (e) {
       throw Exception('Error al obtener análisis: $e');
+    } finally {
+      if (cacheKey.isNotEmpty) {
+        _analysisInFlight.remove(cacheKey);
+      }
     }
   }
 
@@ -120,8 +192,8 @@ class ApiService {
         }
       }
       final uri =
-          Uri.parse('$baseUrl/records/').replace(queryParameters: params);
-      final response = await http.get(
+          Uri.parse('$baseUrl/registros/').replace(queryParameters: params);
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
@@ -165,9 +237,9 @@ class ApiService {
         }
       }
 
-      final uri = Uri.parse('$baseUrl/monthly-movements/')
+      final uri = Uri.parse('$baseUrl/movimientos-mensuales/')
           .replace(queryParameters: params);
-      final response = await http.get(
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       );
@@ -201,9 +273,9 @@ class ApiService {
         params['search'] = search;
       }
 
-      final uri =
-          Uri.parse('$baseUrl/monthly-cuts/').replace(queryParameters: params);
-      final response = await http.get(
+      final uri = Uri.parse('$baseUrl/cortes-mensuales/')
+          .replace(queryParameters: params);
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
@@ -260,9 +332,9 @@ class ApiService {
         params['month'] = month;
       }
 
-      final uri = Uri.parse('$baseUrl/monthly-cuts-products/')
+      final uri = Uri.parse('$baseUrl/cortes-mensuales-productos/')
           .replace(queryParameters: params);
-      final response = await http.get(
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
@@ -327,8 +399,8 @@ class ApiService {
   // Última actualización
   Future<String?> getLastUpdateTime() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/last-update/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/ultima-actualizacion/'),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -348,8 +420,8 @@ class ApiService {
   // Mensaje de bienvenida para pruebas de conexion
   Future<String?> getWelcomeMessage() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/welcome/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/bienvenida/'),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -368,7 +440,7 @@ class ApiService {
       List<int> fileBytes, String fileName) async {
     try {
       var request =
-          http.MultipartRequest('POST', Uri.parse('$baseUrl/upload-base/'));
+          http.MultipartRequest('POST', Uri.parse('$baseUrl/subir-base/'));
 
       request.files.add(http.MultipartFile.fromBytes('base_file', fileBytes,
           filename: fileName));
@@ -378,6 +450,7 @@ class ApiService {
       var responseData = await streamedResponse.stream.bytesToString();
 
       if (streamedResponse.statusCode == 200) {
+        _invalidateLocalCaches();
         try {
           final jsonResponse = json.decode(responseData);
           return {
@@ -434,7 +507,7 @@ class ApiService {
       List<List<int>> filesBytes, List<String> fileNames) async {
     try {
       var request =
-          http.MultipartRequest('POST', Uri.parse('$baseUrl/update/'));
+          http.MultipartRequest('POST', Uri.parse('$baseUrl/actualizar/'));
 
       for (int i = 0; i < filesBytes.length; i++) {
         request.files.add(http.MultipartFile.fromBytes(
@@ -444,6 +517,10 @@ class ApiService {
 
       var response = await request.send();
       var responseData = await response.stream.bytesToString();
+
+      if (response.statusCode == 200) {
+        _invalidateLocalCaches();
+      }
 
       return {
         'statusCode': response.statusCode,
@@ -498,9 +575,9 @@ class ApiService {
         }
       }
 
-      final uri = Uri.parse('$baseUrl/export-analysis/')
+      final uri = Uri.parse('$baseUrl/exportar-analisis/')
           .replace(queryParameters: params);
-      final response = await http.get(
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 60));
@@ -541,9 +618,9 @@ class ApiService {
         }
       }
 
-      final uri = Uri.parse('$baseUrl/export-movements/')
+      final uri = Uri.parse('$baseUrl/exportar-movimientos/')
           .replace(queryParameters: params);
-      final response = await http.get(
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 60));
@@ -583,9 +660,9 @@ class ApiService {
         params['month'] = month;
       }
 
-      final uri = Uri.parse('$baseUrl/export-monthly-cuts/')
+      final uri = Uri.parse('$baseUrl/exportar-cortes-mensuales/')
           .replace(queryParameters: params);
-      final response = await http.get(
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 60));
@@ -640,8 +717,8 @@ class ApiService {
       }
 
       final uri =
-          Uri.parse('$baseUrl/export-tops/').replace(queryParameters: params);
-      final response = await http.get(
+          Uri.parse('$baseUrl/exportar-tops/').replace(queryParameters: params);
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 60));
@@ -660,15 +737,18 @@ class ApiService {
         payload['batch_id'] = batchId;
       }
 
-      final response = await http
+      final response = await _httpClient
           .post(
-            Uri.parse('$baseUrl/rollback/'),
+            Uri.parse('$baseUrl/revertir-lote/'),
             headers: {'Content-Type': 'application/json'},
             body: json.encode(payload),
           )
           .timeout(const Duration(seconds: 30));
 
       final data = json.decode(response.body) as Map<String, dynamic>;
+      if (data['ok'] == true) {
+        _invalidateLocalCaches();
+      }
       return data;
     } catch (e) {
       return {'ok': false, 'error': 'Error al revertir lote: $e'};
@@ -678,8 +758,8 @@ class ApiService {
   // Obtener lotes de importación
   Future<List<Map<String, dynamic>>> getBatches() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/batches/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/lotes/'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
 
@@ -696,8 +776,8 @@ class ApiService {
   // Obtenemos productos
   Future<List<Map<String, dynamic>>> getProducts() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/products/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/productos/'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
 
@@ -714,15 +794,16 @@ class ApiService {
   // Crear inventario
   Future<Map<String, dynamic>> createInventory(String inventoryName) async {
     try {
-      final response = await http
+      final response = await _httpClient
           .post(
-            Uri.parse('$baseUrl/create-inventory/'),
+            Uri.parse('$baseUrl/crear-inventario/'),
             headers: {'Content-Type': 'application/json'},
             body: json.encode({'inventory_name': inventoryName}),
           )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
+        _invalidateLocalCaches();
         return json.decode(response.body);
       }
       return {'ok': false, 'error': 'Failed to create inventory'};
@@ -735,8 +816,8 @@ class ApiService {
   Future<List<Map<String, dynamic>>> getProductHistory(
       String productCode) async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/product-history/$productCode/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/producto/$productCode/historial/'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
 
@@ -753,8 +834,8 @@ class ApiService {
   // Listar inventarios
   Future<List<String>> listInventories() async {
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/list-inventories/'),
+      final response = await _httpClient.get(
+        Uri.parse('$baseUrl/inventarios/'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
 
@@ -773,9 +854,9 @@ class ApiService {
     try {
       final params = <String, String>{'date': _toIsoDate(date)};
 
-      final uri = Uri.parse('$baseUrl/inventory-at-date/')
+      final uri = Uri.parse('$baseUrl/inventario-a-fecha/')
           .replace(queryParameters: params);
-      final response = await http.get(
+      final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 30));
@@ -791,4 +872,16 @@ class ApiService {
           'Error al obtener inventario en una fecha específica: $e');
     }
   }
+}
+
+class _AnalysisCacheEntry {
+  _AnalysisCacheEntry({
+    required this.data,
+    required this.createdAt,
+    required this.expiresAt,
+  });
+
+  final List<Map<String, dynamic>> data;
+  final DateTime createdAt;
+  final DateTime expiresAt;
 }

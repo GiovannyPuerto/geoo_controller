@@ -8,10 +8,13 @@ Este módulo centraliza cálculos de:
 """
 
 import logging
+import hashlib
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
+from django.core.cache import cache
 from django.db.models import (
     Case,
     Count,
@@ -685,6 +688,24 @@ def get_product_analysis_data(
     Construye el análisis agregado por producto con filtros de negocio.
     Usa queries SQL masivas para evitar N+1 y loops lentos.
     """
+    cache_payload = {
+        "inventory_name": inventory_name,
+        "category_filter": category_filter,
+        "warehouse_filter": warehouse_filter,
+        "rotation_filter": rotation_filter,
+        "stagnant_filter": stagnant_filter,
+        "high_rotation_filter": high_rotation_filter,
+        "date_from": date_from,
+        "date_to": date_to,
+        "search_filter": search_filter,
+        "limit": str(limit or ""),
+    }
+    cache_key_src = json.dumps(cache_payload, sort_keys=True, ensure_ascii=False)
+    cache_key = f"analysis:v1:{hashlib.sha256(cache_key_src.encode('utf-8')).hexdigest()}"
+    cached_value = cache.get(cache_key)
+    if cached_value is not None:
+        return cached_value
+
     start_date = None
     if date_from:
         try:
@@ -723,6 +744,7 @@ def get_product_analysis_data(
 
     products_list = list(products_qs)
     if not products_list:
+        cache.set(cache_key, [], timeout=20)
         return []
 
     product_ids = [p["id"] for p in products_list]
@@ -1110,6 +1132,7 @@ def get_product_analysis_data(
             )
             continue
 
+    cache.set(cache_key, analysis_data, timeout=20)
     return analysis_data
 
 

@@ -11,6 +11,7 @@ import 'package:geo_inventario/models/monthly_cut.dart';
 import 'package:geo_inventario/models/monthly_product_cut.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/tabs/monthly_cuts/monthly_cuts_filtros_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
@@ -55,7 +56,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
 
   List<String> _warehouseOptions = const [];
   List<String> _categoryOptions = const [];
-  List<MapEntry<String, String>> _searchOptions = const [];
 
   @override
   void initState() {
@@ -77,72 +77,36 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   Future<void> _loadSelectableFilterOptions() async {
     try {
       final rows = await _apiService.getMovements();
-      final warehouses = <String>{};
-      final categories = <String>{};
-      final searchMap = <String, String>{};
-
-      for (final row in rows) {
-        final warehouse = (row['warehouse'] ?? '').toString().trim();
-        final category = (row['category'] ?? '').toString().trim();
-        final code = (row['product_code'] ?? '').toString().trim();
-        final description = (row['product_description'] ?? '').toString().trim();
-
-        if (warehouse.isNotEmpty) warehouses.add(warehouse);
-        if (category.isNotEmpty) categories.add(category);
-
-        if (code.isNotEmpty || description.isNotEmpty) {
-          final value = code.isNotEmpty ? code : description;
-          final label = code.isNotEmpty && description.isNotEmpty
-              ? '$code - $description'
-              : value;
-          searchMap.putIfAbsent(value, () => label);
-        }
-      }
-
-      if (selectedWarehouse != null && selectedWarehouse!.isNotEmpty) {
-        warehouses.add(selectedWarehouse!);
-      }
-      if (selectedCategory != null && selectedCategory!.isNotEmpty) {
-        categories.add(selectedCategory!);
-      }
-      if (searchQuery != null && searchQuery!.isNotEmpty) {
-        searchMap.putIfAbsent(searchQuery!, () => searchQuery!);
-      }
-
-      final warehouseList = warehouses.toList()
-        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-      final categoryList = categories.toList()
-        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-      final searchList = searchMap.entries.toList()
-        ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+      final options = MonthlyCutsFiltrosService.buildSelectableOptions(
+        rows,
+        selectedWarehouse: selectedWarehouse,
+        selectedCategory: selectedCategory,
+      );
 
       if (!mounted) return;
       setState(() {
-        _warehouseOptions = warehouseList;
-        _categoryOptions = categoryList;
-        _searchOptions = searchList;
+        _warehouseOptions = options.warehouses;
+        _categoryOptions = options.categories;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _warehouseOptions = const [];
         _categoryOptions = const [];
-        _searchOptions = const [];
       });
     }
   }
 
   List<String> get _monthOptions {
-    final seen = <String>{};
-    final ordered = <String>[];
-    for (final item in monthlyCuts) {
-      if (item.month.isNotEmpty && seen.add(item.month)) ordered.add(item.month);
-    }
-    return ordered;
+    return MonthlyCutsFiltrosService.monthOptions(monthlyCuts);
   }
 
   bool get _hasActiveFilters =>
-      selectedWarehouse != null || selectedCategory != null || searchQuery != null;
+      MonthlyCutsFiltrosService.hasActiveFilters(
+        selectedWarehouse: selectedWarehouse,
+        selectedCategory: selectedCategory,
+        searchQuery: searchQuery,
+      );
 
   Future<void> _loadData() async {
     if (!mounted) return;
@@ -578,7 +542,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                     series: <CartesianSeries>[
                       ColumnSeries<MonthlyCut, String>(
                         dataSource: monthlyCuts,
-                        xValueMapper: (d, _) => _formatMonth(d.month),
+                        xValueMapper: (d, _) =>
+                          MonthlyCutsFiltrosService.formatMonth(d.month),
                         yValueMapper: (d, _) => d.averageBalanceGeneral,
                         name: 'Corte Promedio General',
                         color: AppColors.chartCutAverage,
@@ -590,7 +555,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                       ),
                       LineSeries<MonthlyCut, String>(
                         dataSource: monthlyCuts,
-                        xValueMapper: (d, _) => _formatMonth(d.month),
+                        xValueMapper: (d, _) =>
+                          MonthlyCutsFiltrosService.formatMonth(d.month),
                         yValueMapper: (d, _) => d.closingBalance,
                         name: 'Corte Final General',
                         color: AppColors.chartCutFinal,
@@ -702,7 +668,10 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                       i.isOdd ? AppColors.surfaceVariant : AppColors.surface,
                     ),
                     cells: [
-                      DataCell(Text(_formatMonth(row.month, longLabel: true))),
+                      DataCell(Text(MonthlyCutsFiltrosService.formatMonth(
+                        row.month,
+                        longLabel: true,
+                      ))),
                       DataCell(Text(CurrencyFormatter.format(row.openingBalance))),
                       DataCell(Text(
                         CurrencyFormatter.format(row.totalEntries),
@@ -779,7 +748,10 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                     items: options
                         .map((m) => DropdownMenuItem(
                               value: m,
-                              child: Text(_formatMonth(m, longLabel: true)),
+                              child: Text(MonthlyCutsFiltrosService.formatMonth(
+                                m,
+                                longLabel: true,
+                              )),
                             ))
                         .toList(),
                     onChanged: (value) {
@@ -1001,17 +973,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
         ),
       ),
     );
-  }
-
-  // ─── Utilidades ────────────────────────────────────────────────────────────
-
-  String _formatMonth(String month, {bool longLabel = false}) {
-    try {
-      final dt = DateTime.parse('$month-01');
-      return DateFormat(longLabel ? 'MMMM yyyy' : 'MMM yy', 'es_CO').format(dt);
-    } catch (_) {
-      return month;
-    }
   }
 
   // ─── Dialogs ───────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:geo_inventario/models/monthly_movement.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/tabs/movements/movements_filter_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
@@ -101,7 +102,6 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   }
 
   Future<void> _loadMovementsData() async {
-    final localContext = context;
     if (!mounted) return;
 
     try {
@@ -131,7 +131,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       }
     } catch (e) {
       if (mounted) {
-        localContext.showErrorSnackBar('Error al cargar movimientos: ${e.toString()}');
+        context.showErrorSnackBar('Error al cargar movimientos: ${e.toString()}');
       }
     }
   }
@@ -555,11 +555,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     );
   }
 
-  bool _hasActiveFilters() =>
-      selectedWarehouse != null ||
-      selectedGroup != null ||
-      (searchQuery != null && searchQuery!.isNotEmpty) ||
-      selectedDate != null;
+  bool _hasActiveFilters() => MovementsFilterService.tieneFiltrosActivos(
+        warehouse: selectedWarehouse,
+        group: selectedGroup,
+        search: searchQuery,
+        date: selectedDate,
+      );
 
   Widget _buildActiveFilterChips() {
     final chips = <Widget>[];
@@ -677,7 +678,6 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   }
 
   Future<void> _exportMovements(String format) async {
-    final localContext = context;
     try {
       final response = await _apiService.exportMovements(
         format: format,
@@ -707,7 +707,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           html.Url.revokeObjectUrl(url);
 
           if (mounted) {
-            localContext.showSuccessSnackBar('Movimientos exportados correctamente');
+            context.showSuccessSnackBar('Movimientos exportados correctamente');
           }
         } else {
           // For desktop, use FilePicker to get save path and write file
@@ -723,12 +723,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             await file.writeAsBytes(fileBytes);
 
             if (mounted) {
-              localContext.showSuccessSnackBar('Movimientos exportados a $path');
+              context.showSuccessSnackBar('Movimientos exportados a $path');
             }
           } else {
             // User cancelled the save dialog
             if (mounted) {
-              localContext.showErrorSnackBar('Exportación cancelada');
+              context.showErrorSnackBar('Exportación cancelada');
             }
           }
         }
@@ -737,7 +737,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       }
     } catch (e) {
       if (mounted) {
-        localContext.showErrorSnackBar('Error al exportar movimientos: ${e.toString()}');
+        context.showErrorSnackBar('Error al exportar movimientos: ${e.toString()}');
       }
     }
   }
@@ -760,10 +760,20 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         }
 
         // Get unique values from allMovements data
-        final warehouses =
-            ['Todos', ..._getUniqueValues('warehouse')].toSet().toList();
-        final groups =
-            ['Todos', ..._getUniqueValues('category')].toSet().toList();
+        final warehouses = <String>{
+          'Todos',
+          ...MovementsFilterService.obtenerValoresUnicos(
+            allMovements,
+            'warehouse',
+          ),
+        }.toList();
+        final groups = <String>{
+          'Todos',
+          ...MovementsFilterService.obtenerValoresUnicos(
+            allMovements,
+            'category',
+          ),
+        }.toList();
 
         return StatefulBuilder(
           builder: (context, setState) {
@@ -781,7 +791,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     DropdownButtonFormField<String>(
-                      value: selectedWarehouse == null ||
+                      initialValue: selectedWarehouse == null ||
                               !warehouses.contains(selectedWarehouse)
                           ? 'Todos'
                           : selectedWarehouse,
@@ -880,13 +890,5 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         );
       },
     );
-  }
-
-  List<String> _getUniqueValues(String field) {
-    var values = allMovements
-        .map((item) => item[field]?.toString() ?? '')
-        .where((value) => value.isNotEmpty);
-
-    return values.toSet().toList()..sort();
   }
 }

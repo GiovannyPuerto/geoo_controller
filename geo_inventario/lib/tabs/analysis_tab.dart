@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/tabs/analysis/analisis_catalogo_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
@@ -26,6 +27,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   List<Map<String, dynamic>> analysis = [];
   List<Map<String, dynamic>> filteredAnalysis = [];
   bool isLoading = true;
+  int _analysisRequestEpoch = 0;
 
   // Filters
   DateTime? selectedDate;
@@ -35,11 +37,6 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   String? selectedStagnant;
   String? selectedHighRotation;
   String? selectedWarehouse;
-
-  int topsLimit = 30;
-  String? topsGroup;
-  String? topsRotation;
-  String? topsSearch;
 
   @override
   void initState() {
@@ -71,6 +68,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
 
   Future<void> _loadAnalysisData() async {
     if (!mounted) return;
+    final requestEpoch = ++_analysisRequestEpoch;
 
     setState(() {
       isLoading = true;
@@ -87,7 +85,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         specificDate: selectedDate,
       );
 
-      if (mounted) {
+      if (mounted && requestEpoch == _analysisRequestEpoch) {
         setState(() {
           analysis = data;
           filteredAnalysis = data;
@@ -95,7 +93,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestEpoch == _analysisRequestEpoch) {
         setState(() {
           isLoading = false;
         });
@@ -187,298 +185,6 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
             _buildAnalysisTable(),
           ],
         ),
-      ),
-    );
-  }
-
-  double _asDouble(dynamic raw) {
-    if (raw is num) return raw.toDouble();
-    return double.tryParse(raw?.toString() ?? '') ?? 0.0;
-  }
-
-  List<Map<String, dynamic>> _getTopsBaseData() {
-    final query = (topsSearch ?? '').trim().toLowerCase();
-    return filteredAnalysis.where((item) {
-      if (topsGroup != null && topsGroup!.isNotEmpty) {
-        final group = (item['grupo'] ?? '').toString();
-        if (group != topsGroup) return false;
-      }
-
-      if (topsRotation != null && topsRotation!.isNotEmpty) {
-        final rotation = (item['rotacion'] ?? '').toString();
-        if (rotation != topsRotation) return false;
-      }
-
-      if (query.isNotEmpty) {
-        final code = (item['codigo'] ?? '').toString().toLowerCase();
-        final name = (item['nombre_producto'] ?? '').toString().toLowerCase();
-        if (!code.contains(query) && !name.contains(query)) return false;
-      }
-
-      return true;
-    }).toList();
-  }
-
-  List<Map<String, dynamic>> _topBy(
-    List<Map<String, dynamic>> source,
-    double Function(Map<String, dynamic>) selector,
-  ) {
-    final sorted = List<Map<String, dynamic>>.from(source)
-      ..sort((a, b) => selector(b).compareTo(selector(a)));
-    return sorted.take(topsLimit).toList();
-  }
-
-  Widget _buildTopsSection() {
-    final topsBase = _getTopsBaseData();
-    final topByValue =
-        _topBy(topsBase, (item) => _asDouble(item['valor_saldo_actual']));
-    final topByMovements = _topBy(
-      topsBase,
-      (item) =>
-          _asDouble(item['entradas_periodo']) +
-          _asDouble(item['salidas_periodo']),
-    );
-    final topByEntries =
-        _topBy(topsBase, (item) => _asDouble(item['entradas_periodo']));
-    final topByExits =
-        _topBy(topsBase, (item) => _asDouble(item['salidas_periodo']));
-
-    final groups = <String>{'Todos'};
-    for (final item in analysis) {
-      final value = (item['grupo'] ?? '').toString().trim();
-      if (value.isNotEmpty) groups.add(value);
-    }
-    final groupItems = groups.toList()..sort((a, b) => a.compareTo(b));
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Tops de valor y movimientos',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: [
-                SizedBox(
-                  width: 170,
-                  child: DropdownButtonFormField<int>(
-                    initialValue: topsLimit,
-                    decoration: const InputDecoration(labelText: 'Top'),
-                    items: const [10, 20, 30, 50]
-                        .map((value) => DropdownMenuItem<int>(
-                              value: value,
-                              child: Text('Top $value'),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => topsLimit = value);
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 220,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: (topsGroup != null && topsGroup!.isNotEmpty)
-                        ? topsGroup
-                        : 'Todos',
-                    decoration: const InputDecoration(labelText: 'Grupo'),
-                    items: groupItems
-                        .map((value) => DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(value),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      setState(
-                          () => topsGroup = value == 'Todos' ? null : value);
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 220,
-                  child: DropdownButtonFormField<String>(
-                    initialValue:
-                        (topsRotation != null && topsRotation!.isNotEmpty)
-                            ? topsRotation
-                            : 'Todos',
-                    decoration: const InputDecoration(labelText: 'Rotación'),
-                    items: const [
-                      'Todos',
-                      'Activo',
-                      'Estancado',
-                      'Obsoleto',
-                      'Inactivo'
-                    ]
-                        .map((value) => DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(value),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      setState(
-                          () => topsRotation = value == 'Todos' ? null : value);
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: TextFormField(
-                    initialValue: topsSearch,
-                    decoration: const InputDecoration(
-                      labelText: 'Buscar en tops',
-                      hintText: 'Código o producto',
-                      prefixIcon: Icon(Icons.search_rounded),
-                    ),
-                    onChanged: (value) => setState(() => topsSearch = value),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final cardWidth = constraints.maxWidth < 1100
-                    ? constraints.maxWidth
-                    : (constraints.maxWidth - AppSpacing.sm) / 2;
-
-                return Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    SizedBox(
-                      width: cardWidth,
-                      child: _buildTopMetricCard(
-                        title: 'Top valor',
-                        items: topByValue,
-                        valueLabel: (item) => CurrencyFormatter.format(
-                            item['valor_saldo_actual'] ?? 0),
-                      ),
-                    ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _buildTopMetricCard(
-                        title: 'Top movimientos',
-                        items: topByMovements,
-                        valueLabel: (item) =>
-                            (_asDouble(item['entradas_periodo']) +
-                                    _asDouble(item['salidas_periodo']))
-                                .toStringAsFixed(3),
-                      ),
-                    ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _buildTopMetricCard(
-                        title: 'Más entradas',
-                        items: topByEntries,
-                        valueLabel: (item) =>
-                            _asDouble(item['entradas_periodo'])
-                                .toStringAsFixed(3),
-                      ),
-                    ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _buildTopMetricCard(
-                        title: 'Más salidas',
-                        items: topByExits,
-                        valueLabel: (item) => _asDouble(item['salidas_periodo'])
-                            .toStringAsFixed(3),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopMetricCard({
-    required String title,
-    required List<Map<String, dynamic>> items,
-    required String Function(Map<String, dynamic>) valueLabel,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          if (items.isEmpty)
-            const Text(
-              'Sin datos para este top con los filtros actuales.',
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-            )
-          else
-            ...items.asMap().entries.map((entry) {
-              final index = entry.key;
-              final item = entry.value;
-              final code = (item['codigo'] ?? '').toString();
-              final name = (item['nombre_producto'] ?? '').toString();
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 24,
-                      child: Text(
-                        '${index + 1}.',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        '$code - $name',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textPrimary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      valueLabel(item),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primaryDark,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-        ],
       ),
     );
   }
@@ -1373,78 +1079,19 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   }
 
   List<String> _getUniqueValues(String field) {
-    var values = analysis
-        .map((item) => item[field]?.toString() ?? '')
-        .where((value) => value.isNotEmpty);
-
-    if (field == 'grupo') {
-      values = values.map(_getGroupName);
-    }
-
-    return values.toSet().toList()..sort();
+    return AnalisisCatalogoService.obtenerValoresUnicos(analysis, field);
   }
 
   String _getGroupName(String groupCodeOrName) {
-    const knownGroups = <String>{
-      'AGROQUIMICOS-FERTILIZANTES Y ABONOS',
-      'DOTACION Y SEGURIDAD',
-      'MANTENIMIENTO',
-      'MATERIAL DE EMPAQUE',
-      'PAPELERIA Y ASEO'
-    };
-    if (knownGroups.contains(groupCodeOrName)) {
-      return groupCodeOrName;
-    }
-
-    switch (groupCodeOrName) {
-      case '1':
-        return 'AGROQUIMICOS-FERTILIZZANTES Y ABONOS';
-      case '2':
-        return 'DOTACION Y SEGURIDAD';
-      case '3':
-        return 'MANTENIMIENTO';
-      case '4':
-        return 'MATERIAL DE EMPAQUE';
-      case '5':
-        return 'PAPELERIA Y ASEO';
-      default:
-        if (groupCodeOrName.isNotEmpty) {
-          return groupCodeOrName;
-        }
-        return 'SIN CATEGORÍA';
-    }
+    return AnalisisCatalogoService.normalizarNombreGrupo(groupCodeOrName);
   }
 
   String _getShortGroupName(String fullName) {
-    switch (fullName) {
-      case 'AGROQUIMICOS-FERTILIZANTES Y ABONOS':
-        return 'AGROQUIMICOS';
-      case 'DOTACION Y SEGURIDAD':
-        return 'DOTACION';
-      case 'MANTENIMIENTO':
-        return 'MANTENIMIENTO';
-      case 'MATERIAL DE EMPAQUE':
-        return 'EMPAQUE';
-      case 'PAPELERIA Y ASEO':
-        return 'PAPELERIA';
-      default:
-        return fullName;
-    }
+    return AnalisisCatalogoService.nombreGrupoCorto(fullName);
   }
 
   Color _getRotationColor(String rotation) {
-    switch (rotation) {
-      case 'Activo':
-        return AppColors.chartPositive;
-      case 'Estancado':
-        return AppColors.chartCutFinal;
-      case 'Obsoleto':
-        return AppColors.chartNegative;
-      case 'Inactivo':
-        return AppColors.textMuted;
-      default:
-        return AppColors.textDisabled;
-    }
+    return AnalisisCatalogoService.colorRotacion(rotation);
   }
 
   void _showExportDialog() {

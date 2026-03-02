@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:geo_inventario/services/api_service.dart';
+import 'package:geo_inventario/services/config_service.dart';
 import 'package:geo_inventario/services/excel_upload_service.dart';
 import 'package:geo_inventario/tabs/analysis_tab.dart';
 import 'package:geo_inventario/tabs/monthly_cuts_tab.dart';
@@ -9,6 +10,7 @@ import 'package:geo_inventario/tabs/summary_tab.dart';
 import 'package:geo_inventario/tabs/tops_tab.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
+import 'package:geo_inventario/widgets/server_settings_dialog.dart';
 import 'package:intl/intl.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -293,23 +295,33 @@ class _DashboardPageState extends State<DashboardPage>
       preferredSize: Size.fromHeight(isMobile ? 96 : 112),
       child: Container(
         decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(bottom: BorderSide(color: AppColors.border)),
-          boxShadow: AppShadows.card,
+          color: AppColors.primary,
+          boxShadow: AppShadows.elevated,
         ),
         child: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded,
-                color: AppColors.textPrimary),
+            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
             tooltip: 'Volver al inicio',
             onPressed: () => Navigator.pop(context),
           ),
           title: Row(
             children: [
-              Image.asset('statics/images/logo.png',
-                  height: isMobile ? 26 : 32),
+              // Ícono en círculo traslúcido blanco sobre fondo navy
+              Container(
+                width: isMobile ? 34 : 40,
+                height: isMobile ? 34 : 40,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+                ),
+                padding: const EdgeInsets.all(4),
+                child: Image.asset('statics/images/logo.png',
+                    height: isMobile ? 24 : 30),
+              ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
@@ -320,7 +332,7 @@ class _DashboardPageState extends State<DashboardPage>
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
+                        color: Colors.white,
                         letterSpacing: 0.1,
                       ),
                     ),
@@ -329,7 +341,7 @@ class _DashboardPageState extends State<DashboardPage>
                         'Actualizado el $_lastUpdateTime',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: AppColors.textMuted,
+                          color: Color(0xCCFFFFFF),
                         ),
                       ),
                   ],
@@ -338,6 +350,26 @@ class _DashboardPageState extends State<DashboardPage>
             ],
           ),
           actions: [
+            // Indicador del servidor + botón de configuración
+            ServerIndicatorChip(
+              host: ConfigService.instance.host,
+              port: ConfigService.instance.port,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Tooltip(
+              message: 'Configurar servidor',
+              child: IconButton(
+                icon: const Icon(Icons.settings_ethernet_rounded,
+                    color: Color(0xCCFFFFFF), size: 22),
+                onPressed: () async {
+                  final changed = await ServerSettingsDialog.show(context);
+                  if (changed && mounted) {
+                    setState(() {}); // refresca indicador en AppBar
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
             _UploadMenu(
               hasBaseData: _hasBaseData,
               onUploadBase: _pickAndUploadBaseFile,
@@ -350,15 +382,15 @@ class _DashboardPageState extends State<DashboardPage>
             controller: _tabController,
             isScrollable: true,
             tabAlignment: TabAlignment.start,
-            labelColor: AppColors.primary,
-            unselectedLabelColor: AppColors.textMuted,
+            labelColor: Colors.white,
+            unselectedLabelColor: const Color(0xAAFFFFFF),
             labelStyle:
                 const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
             unselectedLabelStyle:
                 const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
-            indicator: UnderlineTabIndicator(
-              borderSide: BorderSide(color: AppColors.accent, width: 3),
-              insets: const EdgeInsets.symmetric(horizontal: 8),
+            indicator: const UnderlineTabIndicator(
+              borderSide: BorderSide(color: AppColors.cyan, width: 3),
+              insets: EdgeInsets.symmetric(horizontal: 8),
             ),
             indicatorSize: TabBarIndicatorSize.tab,
             tabs: const [
@@ -500,9 +532,9 @@ class _UploadMenu extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: AppColors.accent,
+          color: AppColors.cyan,
           borderRadius: BorderRadius.circular(AppRadius.md),
-          boxShadow: AppShadows.colored(AppColors.accent),
+          boxShadow: AppShadows.colored(AppColors.cyan),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
