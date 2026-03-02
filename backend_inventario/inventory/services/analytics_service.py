@@ -902,10 +902,13 @@ def get_product_analysis_data(
         if target_date:
             movement_stats_filter &= Q(date__lte=target_date)
 
+    value_output = DecimalField(max_digits=28, decimal_places=6)
     movement_stats_by_product: dict[int, dict[str, Decimal | int]] = {
         row["product_id"]: {
             "entries_qty": row["entries_qty"] or Decimal("0"),
             "exits_qty": row["exits_qty"] or Decimal("0"),
+            "entries_value": row["entries_value"] or Decimal("0"),
+            "exits_value": row["exits_value"] or Decimal("0"),
             "movement_count": row["movement_count"] or 0,
         }
         for row in InventoryRecord.objects.filter(movement_stats_filter)
@@ -923,6 +926,26 @@ def get_product_analysis_data(
                     When(quantity__lt=0, then=ExpressionWrapper(-1 * F("quantity"), output_field=qty_output)),
                     default=Value(Decimal("0"), output_field=qty_output),
                     output_field=qty_output,
+                )
+            ),
+            entries_value=Sum(
+                Case(
+                    When(
+                        quantity__gt=0,
+                        then=ExpressionWrapper(F("quantity") * F("unit_cost"), output_field=value_output),
+                    ),
+                    default=Value(Decimal("0"), output_field=value_output),
+                    output_field=value_output,
+                )
+            ),
+            exits_value=Sum(
+                Case(
+                    When(
+                        quantity__lt=0,
+                        then=ExpressionWrapper(-1 * F("quantity") * F("unit_cost"), output_field=value_output),
+                    ),
+                    default=Value(Decimal("0"), output_field=value_output),
+                    output_field=value_output,
                 )
             ),
             movement_count=Count("id"),
@@ -1016,6 +1039,8 @@ def get_product_analysis_data(
             movement_stats = movement_stats_by_product.get(pid, {})
             entries_qty = movement_stats.get("entries_qty", Decimal("0"))
             exits_qty = movement_stats.get("exits_qty", Decimal("0"))
+            entries_value = movement_stats.get("entries_value", Decimal("0"))
+            exits_value = movement_stats.get("exits_value", Decimal("0"))
             movement_count = movement_stats.get("movement_count", 0)
 
             has_movements = bool(movement_count)
@@ -1037,7 +1062,6 @@ def get_product_analysis_data(
             zero_by_depletion = False
             zero_by_inactivity = False
             year_end_balance = monthly_balances[-1] if monthly_balances else Decimal("0")
-            is_zero_stock = current_stock == 0 or all_zero_year
 
             if current_stock <= 0 or all_zero_year:
                 if all_zero_year:
@@ -1061,13 +1085,21 @@ def get_product_analysis_data(
             is_stagnant = all_same_year and year_end_balance != 0
 
             # Columna Rotación
-            # - Obsoleto: mismo saldo todo el año y no cero.
-            # - Estancado: mismo saldo en últimos 3 meses y no cero (sin caer en Obsoleto).
+            # - Inactivo: stock actual <= 0 (sin existencias reales).
+            # - Obsoleto: mismo saldo todo el año y no cero, O balance simulado
+            #             siempre en cero pero stock real positivo (discrepancia
+            #             simulación vs. Siesa: producto sin actividad registrada).
+            # - Estancado: mismo saldo en últimos 3 meses y no cero.
             # - Activo: variaciones durante el año.
             rotation_rule = ""
-            if is_zero_stock:
+            if current_stock <= 0:
                 rotation = "Inactivo"
-                rotation_rule = "stock_en_cero"
+                rotation_rule = "stock_real_en_cero_o_negativo"
+            elif all_zero_year:
+                # Stock real > 0 pero la simulación de saldo del año estuvo
+                # siempre en cero: sin actividad registrada → Obsoleto.
+                rotation = "Obsoleto"
+                rotation_rule = "saldo_simulado_cero_stock_real_positivo"
             elif all_same_year and year_end_balance != 0:
                 rotation = "Obsoleto"
                 rotation_rule = "saldo_constante_todo_el_anio_no_cero"
@@ -1120,6 +1152,8 @@ def get_product_analysis_data(
                     "cero_por_inactividad": "Sí" if zero_by_inactivity else "No",
                     "entradas_periodo": float(entries_qty),
                     "salidas_periodo": float(exits_qty),
+                    "valor_entradas_periodo": float(entries_value),
+                    "valor_salidas_periodo": float(exits_value),
                     "alta_rotacion": high_rotation,
                     "almacen": warehouses_str.get(pid, "Todos"),
                     "negative_stock_alert": negative_stock_alert,

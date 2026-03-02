@@ -1,2 +1,47 @@
-#entorno virtual
+# ── Entornos virtuales Python ────────────────────────────────────────────────
+.venv/
+.venv310/
 venv/
+env/
+
+# ── Python / Django ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+.eggs/
+
+# Base de datos local
+db.sqlite3
+*.sqlite3
+
+# Variables de entorno / secretos
+.env
+.env.*
+!.env.example
+secrets.py
+
+# Django collected static / media
+/backend_inventario/staticfiles/
+/backend_inventario/media/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+build_installer.log
+
+# ── Artefactos de build e instalador ─────────────────────────────────────────
+installer_output/
+build_windows_exe.bat
+
+# ── VS Code ──────────────────────────────────────────────────────────────────
+.vscode/
+
+# ── Misceláneos ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak

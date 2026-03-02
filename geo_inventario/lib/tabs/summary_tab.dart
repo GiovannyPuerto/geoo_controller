@@ -104,6 +104,7 @@ class _SummaryTabPageState extends State<SummaryTabPage>
   int get _activeCount => _metricas.activos;
   int get _stagnantCount => _metricas.estancados;
   int get _obsoleteCount => _metricas.obsoletos;
+  int get _inactivoCount => _metricas.inactivos;
   int get _highRotationCount => _metricas.altaRotacion;
   int get _stagnantProductCount => _metricas.estancadoFlag;
 
@@ -143,6 +144,51 @@ class _SummaryTabPageState extends State<SummaryTabPage>
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── Banner corporativo de sección ──────────────────────
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+                    decoration: BoxDecoration(
+                      gradient: AppGradients.hero,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      boxShadow: AppShadows.elevated,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                          ),
+                          child: const Icon(Icons.dashboard_rounded,
+                              color: Colors.white, size: 24),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Resumen del Inventario',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                            Text(
+                              'Estado general, rotación y alertas',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xCCFFFFFF)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
                   // Banner de bienvenida (opcional)
                   if (_welcomeMessage != null &&
                       _welcomeMessage!.isNotEmpty) ...[
@@ -355,6 +401,15 @@ class _SummaryTabPageState extends State<SummaryTabPage>
             bgColor: AppColors.errorLight,
             icon: Icons.cancel_rounded,
           ),
+          const SizedBox(height: AppSpacing.sm),
+          _RotationTile(
+            label: 'Inactivos',
+            count: _inactivoCount,
+            percentage: pct(_inactivoCount),
+            color: AppColors.textMuted,
+            bgColor: AppColors.surfaceVariant,
+            icon: Icons.remove_circle_outline_rounded,
+          ),
         ],
       ),
     );
@@ -540,6 +595,7 @@ class _KpiCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
+      constraints: const BoxConstraints(minHeight: 130),
       decoration: BoxDecoration(
         gradient: gradient,
         borderRadius: BorderRadius.circular(AppRadius.lg),

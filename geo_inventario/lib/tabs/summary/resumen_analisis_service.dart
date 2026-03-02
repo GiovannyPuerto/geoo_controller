@@ -3,6 +3,7 @@ class ResumenAnalisisMetricas {
     this.activos = 0,
     this.estancados = 0,
     this.obsoletos = 0,
+    this.inactivos = 0,
     this.altaRotacion = 0,
     this.estancadoFlag = 0,
     this.topValor = const [],
@@ -12,6 +13,7 @@ class ResumenAnalisisMetricas {
   final int activos;
   final int estancados;
   final int obsoletos;
+  final int inactivos;
   final int altaRotacion;
   final int estancadoFlag;
   final List<Map<String, dynamic>> topValor;
@@ -26,6 +28,7 @@ class ResumenAnalisisService {
     int activos = 0;
     int estancados = 0;
     int obsoletos = 0;
+    int inactivos = 0;
     int altaRotacion = 0;
     int estancadoFlag = 0;
     final stockNegativo = <Map<String, dynamic>>[];
@@ -39,6 +42,7 @@ class ResumenAnalisisService {
       if (rotacion == 'Activo') activos++;
       if (rotacion == 'Estancado') estancados++;
       if (rotacion == 'Obsoleto') obsoletos++;
+      if (rotacion == 'Inactivo') inactivos++;
       if (isAltaRotacion) altaRotacion++;
       if (isEstancado) estancadoFlag++;
       if (cantidadSaldo < 0) stockNegativo.add(item);
@@ -54,6 +58,7 @@ class ResumenAnalisisService {
       activos: activos,
       estancados: estancados,
       obsoletos: obsoletos,
+      inactivos: inactivos,
       altaRotacion: altaRotacion,
       estancadoFlag: estancadoFlag,
       topValor: topValor.take(topLimit).toList(),

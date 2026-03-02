@@ -12,6 +12,7 @@ class RecordFilterParams:
     date_from: str = ''
     date_to: str = ''
     search_filter: str = ''
+    document_number_filter: str = ''  # filtro por número de documento (contains)
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ def record_filters_from_request(request, inventory_name: str = 'default') -> Rec
         date_from=request.GET.get('date_from', ''),
         date_to=request.GET.get('date_to', ''),
         search_filter=request.GET.get('search', ''),
+        document_number_filter=request.GET.get('document_number', ''),
     )
 
 
@@ -73,6 +75,11 @@ def apply_record_filters(queryset: QuerySet, filters: RecordFilterParams) -> Que
         filtered = filtered.filter(
             Q(product__code__icontains=filters.search_filter)
             | Q(product__description__icontains=filters.search_filter)
+        )
+
+    if filters.document_number_filter:
+        filtered = filtered.filter(
+            document_number__icontains=filters.document_number_filter
         )
 
     return filtered

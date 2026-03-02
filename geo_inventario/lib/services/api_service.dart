@@ -163,6 +163,7 @@ class ApiService {
     String? warehouse,
     String? category,
     String? search,
+    String? documentNumber,
     DateTime? dateFrom,
     DateTime? dateTo,
     DateTime? specificDate,
@@ -180,6 +181,9 @@ class ApiService {
       }
       if (search != null && search.isNotEmpty) {
         params['search'] = search;
+      }
+      if (documentNumber != null && documentNumber.isNotEmpty) {
+        params['document_number'] = documentNumber;
       }
       if (specificDate != null) {
         params['date'] = _toIsoDate(specificDate);

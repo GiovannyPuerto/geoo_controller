@@ -88,6 +88,7 @@ def get_monthly_product_cuts(request):
     search_filter = request.GET.get('search', '')
     month = request.GET.get('month', '')
     limit = request.GET.get('limit', '')
+    offset = request.GET.get('offset', '')
     page_size = request.GET.get('page_size', '')
 
     try:
@@ -98,6 +99,7 @@ def get_monthly_product_cuts(request):
             category_filter=category_filter,
             search_filter=search_filter,
             limit=limit,
+            offset=offset,
             page_size=page_size,
         )
         return JsonResponse(result_data)
@@ -196,19 +198,22 @@ def get_records(request):
     try:
         records_query = aplicar_filtros_registros(InventoryRecord.objects.all(), filters)
 
+        # Los campos que ya existen en el modelo se listan como args posicionales.
+        # Solo los traversals FK se pasan como kwargs (renombrados).
+        # Esto evita el conflicto de anotación con campos del modelo.
         records = _ordenar_por_documento_desc(records_query).values(
             'id',
+            'warehouse',
+            'date',
+            'document_type',
+            'document_number',
+            'quantity',
+            'unit_cost',
+            'total',
+            'category',
+            'batch_id',
             product_code=F('product__code'),
             product_description=F('product__description'),
-            warehouse=F('warehouse'),
-            date=F('date'),
-            document_type=F('document_type'),
-            document_number=F('document_number'),
-            quantity=F('quantity'),
-            unit_cost=F('unit_cost'),
-            total=F('total'),
-            category=F('category'),
-            batch_id=F('batch_id'),
         )[slice_params.offset:slice_params.offset + slice_params.limit]
 
         records_data = [{

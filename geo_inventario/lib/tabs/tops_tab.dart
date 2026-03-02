@@ -68,10 +68,18 @@ class _TopsTabPageState extends State<TopsTabPage> {
       List<Map<String, dynamic>> rangeData;
 
       if (!hasCutoff && !hasMovementRange) {
+        // Sin ningún filtro de fecha: una sola llamada, se usa para ambas vistas.
         final allData = await _apiService.getAnalysis();
         cutoffData = allData;
         rangeData = allData;
+      } else if (hasCutoff && !hasMovementRange) {
+        // Solo fecha de corte: las entradas/salidas deben acotarse a esa misma
+        // fecha para que los tres tops sean coherentes entre sí.
+        final data = await _apiService.getAnalysis(specificDate: selectedDate);
+        cutoffData = data;
+        rangeData = data;
       } else {
+        // Hay rango de movimientos (con o sin fecha de corte de valor).
         final results = await Future.wait([
           _apiService.getAnalysis(specificDate: selectedDate),
           _apiService.getAnalysis(
@@ -133,33 +141,180 @@ class _TopsTabPageState extends State<TopsTabPage> {
   }
 
   Future<void> _pickMovementDateRange() async {
-    final now = DateTime.now();
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: now,
-      initialDateRange: (movementDateFrom != null && movementDateTo != null)
-          ? DateTimeRange(start: movementDateFrom!, end: movementDateTo!)
-          : null,
-      locale: const Locale('es', 'CO'),
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: AppColors.primary,
-            onPrimary: Colors.white,
-            surface: AppColors.surface,
+    DateTime? localFrom = movementDateFrom;
+    DateTime? localTo = movementDateTo;
+    final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
+
+    Widget dateRow(
+      BuildContext ctx,
+      String label,
+      DateTime? value,
+      VoidCallback onTap,
+      VoidCallback onClear,
+    ) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: value != null ? AppColors.info : AppColors.border,
+              width: value != null ? 1.8 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.calendar_today_rounded,
+                  size: 16,
+                  color: value != null
+                      ? AppColors.info
+                      : AppColors.textDisabled),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  value != null ? fmt.format(value) : label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: value != null
+                        ? AppColors.textPrimary
+                        : AppColors.textDisabled,
+                  ),
+                ),
+              ),
+              if (value != null)
+                GestureDetector(
+                  onTap: onClear,
+                  child: const Icon(Icons.close_rounded,
+                      size: 16, color: AppColors.textMuted),
+                ),
+            ],
           ),
         ),
-        child: child!,
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.infoLight,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: const Icon(Icons.timeline_rounded,
+                    color: AppColors.info, size: 18),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('Rango de movimientos',
+                  style:
+                      TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Desde',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                dateRow(
+                  ctx,
+                  'Fecha desde (opcional)',
+                  localFrom,
+                  () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      firstDate: DateTime(2020),
+                      lastDate: localTo ?? DateTime.now(),
+                      initialDate: localFrom ??
+                          DateTime.now()
+                              .subtract(const Duration(days: 30)),
+                      locale: const Locale('es', 'CO'),
+                    );
+                    if (picked != null) {
+                      setDlgState(() => localFrom = picked);
+                    }
+                  },
+                  () => setDlgState(() => localFrom = null),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                const Text(
+                  'Hasta',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                dateRow(
+                  ctx,
+                  'Fecha hasta (opcional)',
+                  localTo,
+                  () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      firstDate: localFrom ?? DateTime(2020),
+                      lastDate: DateTime.now(),
+                      initialDate: localTo ?? DateTime.now(),
+                      locale: const Locale('es', 'CO'),
+                    );
+                    if (picked != null) {
+                      setDlgState(() => localTo = picked);
+                    }
+                  },
+                  () => setDlgState(() => localTo = null),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  movementDateFrom = null;
+                  movementDateTo = null;
+                });
+                Navigator.of(dialogCtx).pop();
+                _loadData();
+              },
+              child: const Text('Limpiar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  movementDateFrom = localFrom;
+                  movementDateTo = localTo;
+                });
+                Navigator.of(dialogCtx).pop();
+                _loadData();
+              },
+              icon: const Icon(Icons.check_rounded, size: 16),
+              label: const Text('Aplicar'),
+            ),
+          ],
+        ),
       ),
     );
-    if (picked != null) {
-      setState(() {
-        movementDateFrom = picked.start;
-        movementDateTo = picked.end;
-      });
-      _loadData();
-    }
   }
 
   void _clearMovementDateRange() {
@@ -216,7 +371,26 @@ class _TopsTabPageState extends State<TopsTabPage> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Exportar Tops'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.xl),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.primaryLight,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: const Icon(Icons.download_outlined,
+                  color: AppColors.primaryDark, size: 18),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            const Text('Exportar Tops',
+                style:
+                    TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          ],
+        ),
         content: const Text('Selecciona el formato del informe.'),
         actions: [
           TextButton(
@@ -350,11 +524,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
                 vertical: AppSpacing.md,
               ),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [AppColors.primaryDark, AppColors.primary],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                gradient: AppGradients.hero,
                 borderRadius: BorderRadius.circular(AppRadius.lg),
                 boxShadow: AppShadows.elevated,
               ),
@@ -414,6 +584,20 @@ class _TopsTabPageState extends State<TopsTabPage> {
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
                     ),
+                  const SizedBox(width: AppSpacing.xs),
+                  IconButton(
+                    icon: const Icon(Icons.download_outlined,
+                        size: 20, color: Colors.white),
+                    tooltip: 'Exportar',
+                    onPressed: _showExportDialog,
+                    style: IconButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -421,190 +605,10 @@ class _TopsTabPageState extends State<TopsTabPage> {
             const SizedBox(height: AppSpacing.md),
 
             // ── Filtros ──────────────────────────────────────────────────────
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.tune_rounded,
-                          size: 16,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: AppSpacing.xs),
-                        const Text(
-                          'Filtros',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textSecondary,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        OutlinedButton.icon(
-                          onPressed: _showExportDialog,
-                          icon: const Icon(Icons.download_outlined, size: 16),
-                          label: const Text('Exportar'),
-                          style: OutlinedButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (hasCutoffDateFilter ||
-                            hasMovementRangeFilter ||
-                            topsGroup != null ||
-                            topsRotation != null ||
-                            (topsSearch ?? '').isNotEmpty)
-                          TextButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                topsGroup = null;
-                                topsRotation = null;
-                                topsSearch = null;
-                                selectedDate = null;
-                                movementDateFrom = null;
-                                movementDateTo = null;
-                              });
-                              _loadData();
-                            },
-                            icon: const Icon(Icons.clear_all_rounded, size: 16),
-                            label: const Text('Limpiar'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: AppColors.error,
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.sm,
-                      crossAxisAlignment: WrapCrossAlignment.end,
-                      children: [
-                        // Top N
-                        SizedBox(
-                          width: 150,
-                          child: DropdownButtonFormField<int>(
-                            initialValue: topsLimit,
-                            decoration: const InputDecoration(
-                              labelText: 'Mostrar',
-                              prefixIcon: Icon(
-                                Icons.format_list_numbered_rounded,
-                                size: 18,
-                              ),
-                            ),
-                            items: const [10, 20, 30, 50]
-                                .map((v) => DropdownMenuItem(
-                                      value: v,
-                                      child: Text('Top $v'),
-                                    ))
-                                .toList(),
-                            onChanged: (v) {
-                              if (v != null) setState(() => topsLimit = v);
-                            },
-                          ),
-                        ),
-
-                        // Grupo
-                        SizedBox(
-                          width: 210,
-                          child: DropdownButtonFormField<String>(
-                            isExpanded: true,
-                            initialValue:
-                                (topsGroup != null && topsGroup!.isNotEmpty)
-                                    ? topsGroup
-                                    : 'Todos',
-                            decoration: const InputDecoration(
-                              labelText: 'Grupo',
-                              prefixIcon: Icon(
-                                Icons.category_rounded,
-                                size: 18,
-                              ),
-                            ),
-                            selectedItemBuilder: (context) => groupItems
-                                .map((v) => Text(
-                                      v,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ))
-                                .toList(),
-                            items: groupItems
-                                .map((v) => DropdownMenuItem(
-                                      value: v,
-                                      child: Text(
-                                        v,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ))
-                                .toList(),
-                            onChanged: (v) => setState(
-                              () => topsGroup = v == 'Todos' ? null : v,
-                            ),
-                          ),
-                        ),
-
-                        // Rotación
-                        SizedBox(
-                          width: 190,
-                          child: DropdownButtonFormField<String>(
-                            initialValue: (topsRotation != null &&
-                                    topsRotation!.isNotEmpty)
-                                ? topsRotation
-                                : 'Todos',
-                            decoration: const InputDecoration(
-                              labelText: 'Rotación',
-                              prefixIcon: Icon(
-                                Icons.autorenew_rounded,
-                                size: 18,
-                              ),
-                            ),
-                            items: const [
-                              'Todos',
-                              'Activo',
-                              'Estancado',
-                              'Obsoleto',
-                              'Inactivo',
-                            ]
-                                .map((v) => DropdownMenuItem(
-                                      value: v,
-                                      child: Text(v),
-                                    ))
-                                .toList(),
-                            onChanged: (v) => setState(
-                              () => topsRotation = v == 'Todos' ? null : v,
-                            ),
-                          ),
-                        ),
-                        
-
-                        // Fecha de corte (solo valor inventario)
-                        _DateRangeButton(
-                          selectedDate: selectedDate,
-                          onTap: _pickCutoffDate,
-                          onClear:
-                              hasCutoffDateFilter ? _clearCutoffDate : null,
-                        ),
-
-                        // Rango de fechas (solo movimientos/entradas/salidas)
-                        _MovementRangeButton(
-                          dateFrom: movementDateFrom,
-                          dateTo: movementDateTo,
-                          onTap: _pickMovementDateRange,
-                          onClear: hasMovementRangeFilter
-                              ? _clearMovementDateRange
-                              : null,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+            _buildFiltersPanel(
+              hasCutoffDateFilter: hasCutoffDateFilter,
+              hasMovementRangeFilter: hasMovementRangeFilter,
+              groupItems: groupItems,
             ),
 
             const SizedBox(height: AppSpacing.md),
@@ -612,59 +616,358 @@ class _TopsTabPageState extends State<TopsTabPage> {
             // ── Tablas de tops ───────────────────────────────────────────────
             LayoutBuilder(
               builder: (context, constraints) {
-                final cardWidth = constraints.maxWidth < 1100
-                    ? constraints.maxWidth
-                    : (constraints.maxWidth - AppSpacing.sm) / 2;
+                final threeCol = constraints.maxWidth >= 900;
+                final twoCol = !threeCol && constraints.maxWidth >= 580;
 
-                return Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    SizedBox(
-                      width: cardWidth,
-                      child: _TopMetricCard(
-                        title: 'Top valor en inventario',
-                        icon: Icons.attach_money_rounded,
-                        accentColor: AppColors.primary,
-                        items: topByValue,
-                        valueSelector: (item) =>
-                            _asDouble(item['valor_saldo_actual']),
-                        valueLabel: (item) =>
-                            'Valor: ${CurrencyFormatter.format(item['valor_saldo_actual'] ?? 0)}',
-                      ),
+                final cards = [
+                  _TopMetricCard(
+                    title: 'Top valor en inventario',
+                    icon: Icons.attach_money_rounded,
+                    accentColor: AppColors.primary,
+                    items: topByValue,
+                    valueSelector: (item) =>
+                        _asDouble(item['valor_saldo_actual']),
+                    valueLabel: (item) =>
+                        'Valor: ${CurrencyFormatter.format(item['valor_saldo_actual'] ?? 0)}',
+                  ),
+                  _TopMetricCard(
+                    title: 'Más valor entradas en período',
+                    icon: Icons.arrow_downward_rounded,
+                    accentColor: AppColors.success,
+                    items: topByEntries,
+                    valueSelector: (item) => _movementValueFor(
+                        item, 'entradas_periodo', 'valor_entradas_periodo'),
+                    valueLabel: (item) =>
+                        'Valor ent.: ${CurrencyFormatter.format(_movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo'))}',
+                  ),
+                  _TopMetricCard(
+                    title: 'Más valor salidas en período',
+                    icon: Icons.arrow_upward_rounded,
+                    accentColor: AppColors.warning,
+                    items: topByExits,
+                    valueSelector: (item) => _movementValueFor(
+                        item, 'salidas_periodo', 'valor_salidas_periodo'),
+                    valueLabel: (item) =>
+                        'Valor sal.: ${CurrencyFormatter.format(_movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'))}',
+                  ),
+                ];
+
+                if (threeCol) {
+                  return IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: cards
+                          .expand((c) => [
+                                Expanded(child: c),
+                                if (c != cards.last)
+                                  const SizedBox(width: AppSpacing.md),
+                              ])
+                          .toList(),
                     ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _TopMetricCard(
-                        title: 'Más valor entradas en período',
-                        icon: Icons.arrow_downward_rounded,
-                        accentColor: AppColors.success,
-                        items: topByEntries,
-                        valueSelector: (item) =>
-                          _movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo'),
-                        valueLabel: (item) =>
-                            'Valor ent.: ${CurrencyFormatter.format(_movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo'))}',
+                  );
+                }
+
+                if (twoCol) {
+                  return Column(
+                    children: [
+                      cards[0],
+                      const SizedBox(height: AppSpacing.md),
+                      IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(child: cards[1]),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: cards[2]),
+                          ],
+                        ),
                       ),
-                    ),
-                    SizedBox(
-                      width: cardWidth,
-                      child: _TopMetricCard(
-                        title: 'Más valor salidas en período',
-                        icon: Icons.arrow_upward_rounded,
-                        accentColor: AppColors.warning,
-                        items: topByExits,
-                        valueSelector: (item) =>
-                          _movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'),
-                        valueLabel: (item) =>
-                            'Valor sal.: ${CurrencyFormatter.format(_movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'))}',
-                      ),
-                    ),
-                  ],
+                    ],
+                  );
+                }
+
+                // Mobile: columna
+                return Column(
+                  children: cards
+                      .expand((c) => [
+                            c,
+                            if (c != cards.last)
+                              const SizedBox(height: AppSpacing.md),
+                          ])
+                      .toList(),
                 );
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Panel de filtros inline ──────────────────────────────────────────────
+
+  Widget _buildFiltersPanel({
+    required bool hasCutoffDateFilter,
+    required bool hasMovementRangeFilter,
+    required List<String> groupItems,
+  }) {
+    final hasAnyFilter = hasCutoffDateFilter ||
+        hasMovementRangeFilter ||
+        topsGroup != null ||
+        topsRotation != null ||
+        (topsSearch ?? '').isNotEmpty;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Cabecera ──────────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md, vertical: AppSpacing.sm + 2),
+            decoration: const BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(AppRadius.lg),
+                topRight: Radius.circular(AppRadius.lg),
+              ),
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryLight,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.tune_rounded,
+                      size: 15, color: AppColors.primary),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                const Text(
+                  'Filtros',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const Spacer(),
+                if (hasAnyFilter)
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        topsGroup = null;
+                        topsRotation = null;
+                        topsSearch = null;
+                        selectedDate = null;
+                        movementDateFrom = null;
+                        movementDateTo = null;
+                      });
+                      _loadData();
+                    },
+                    icon: const Icon(Icons.clear_all_rounded, size: 14),
+                    label:
+                        const Text('Limpiar', style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // ── Fila 1: Dropdowns + búsqueda ──────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+            child: Wrap(
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.md,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              children: [
+                // Top N
+                SizedBox(
+                  width: 130,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Mostrar',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: 4),
+                      DropdownButtonFormField<int>(
+                        initialValue: topsLimit,
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon: Icon(
+                              Icons.format_list_numbered_rounded,
+                              size: 16),
+                        ),
+                        items: const [10, 20, 30, 50]
+                            .map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text('Top $v',
+                                      style: const TextStyle(fontSize: 13)),
+                                ))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => topsLimit = v);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Grupo
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Grupo',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textMuted)),
+                    const SizedBox(height: 4),
+                    DropdownMenu<String>(
+                      width: 200,
+                      menuHeight: 280,
+                      initialSelection: (topsGroup != null &&
+                              groupItems.contains(topsGroup))
+                          ? topsGroup
+                          : 'Todos',
+                      leadingIcon: const Icon(
+                          Icons.category_rounded,
+                          size: 16),
+                      inputDecorationTheme: const InputDecorationTheme(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 8),
+                      ),
+                      textStyle: const TextStyle(fontSize: 13),
+                      menuStyle: MenuStyle(
+                        surfaceTintColor:
+                            WidgetStateProperty.all(Colors.transparent),
+                      ),
+                      dropdownMenuEntries: groupItems
+                          .map((v) => DropdownMenuEntry<String>(
+                                value: v,
+                                label: v,
+                                style: MenuItemButton.styleFrom(
+                                  textStyle:
+                                      const TextStyle(fontSize: 13),
+                                ),
+                              ))
+                          .toList(),
+                      onSelected: (v) => setState(
+                          () => topsGroup =
+                              (v == null || v == 'Todos') ? null : v),
+                    ),
+                  ],
+                ),
+
+                // Rotación
+                SizedBox(
+                  width: 170,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Rotación',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: 4),
+                      DropdownButtonFormField<String>(
+                        initialValue: (topsRotation != null &&
+                                topsRotation!.isNotEmpty)
+                            ? topsRotation
+                            : 'Todos',
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon:
+                              Icon(Icons.autorenew_rounded, size: 16),
+                        ),
+                        items: const [
+                          'Todos',
+                          'Activo',
+                          'Estancado',
+                          'Obsoleto',
+                          'Inactivo',
+                        ]
+                            .map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v,
+                                      style:
+                                          const TextStyle(fontSize: 13)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setState(
+                            () => topsRotation =
+                                v == 'Todos' ? null : v),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Divisor ───────────────────────────────────────────────────────
+          const Padding(
+            padding: EdgeInsets.symmetric(
+                horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+            child: Divider(height: 1, color: AppColors.border),
+          ),
+
+          // ── Fila 2: Filtros de fecha ───────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
+            child: Wrap(
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Text(
+                  'Filtros de fecha:',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted),
+                ),
+                _DateRangeButton(
+                  selectedDate: selectedDate,
+                  onTap: _pickCutoffDate,
+                  onClear: hasCutoffDateFilter ? _clearCutoffDate : null,
+                ),
+                _MovementRangeButton(
+                  dateFrom: movementDateFrom,
+                  dateTo: movementDateTo,
+                  onTap: _pickMovementDateRange,
+                  onClear: hasMovementRangeFilter
+                      ? _clearMovementDateRange
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

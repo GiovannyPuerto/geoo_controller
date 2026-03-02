@@ -43,7 +43,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   // Paginación de la tabla de productos
   MonthlyProductCutDataSource? _productDataSource;
   int _productPageRows = 10;
-  int _productCurrentPage = 0;
 
   String? selectedWarehouse;
   String? selectedCategory;
@@ -198,7 +197,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
           'average_quantity': ((totals['average_quantity'] as num?) ?? 0).toDouble(),
           'average_value': ((totals['average_value'] as num?) ?? 0).toDouble(),
         };
-        _productCurrentPage = 0;
         isProductLoading = false;
       });
     } catch (e) {
@@ -253,30 +251,28 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   // ─── Encabezado de página ──────────────────────────────────────────────────
 
   Widget _buildPageHeader() {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.card,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      children: [
+        // ── Banner gradiente corporativo ──────────────────────────────────
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+          decoration: BoxDecoration(
+            gradient: AppGradients.hero,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            boxShadow: AppShadows.elevated,
+          ),
+          child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(AppSpacing.sm),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryLight,
+                  color: Colors.white.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
-                child: const Icon(
-                  Icons.calendar_month_rounded,
-                  color: AppColors.primaryDark,
-                  size: 22,
-                ),
+                child: const Icon(Icons.calendar_month_rounded,
+                    color: Colors.white, size: 24),
               ),
               const SizedBox(width: AppSpacing.md),
               const Expanded(
@@ -286,75 +282,98 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                     Text(
                       'Cortes Mensuales',
                       style: TextStyle(
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
+                        color: Colors.white,
+                        letterSpacing: 0.3,
                       ),
                     ),
                     Text(
                       'Inventario promedio por período',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
-                      ),
+                      style: TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
                     ),
                   ],
                 ),
               ),
-              IconButton.outlined(
-                icon: const Icon(Icons.download_outlined, size: 18),
+              IconButton(
+                icon: const Icon(Icons.download_outlined,
+                    size: 20, color: Colors.white),
                 tooltip: 'Exportar',
                 onPressed: _showExportDialog,
                 style: IconButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: const BorderSide(color: AppColors.border),
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white.withValues(alpha: 0.15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
-              IconButton.outlined(
-                icon: const Icon(Icons.filter_list_rounded, size: 18),
+              IconButton(
+                icon: const Icon(Icons.filter_list_rounded,
+                    size: 20, color: Colors.white),
                 tooltip: 'Filtros',
                 onPressed: _showFiltersDialog,
                 style: IconButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: const BorderSide(color: AppColors.border),
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white.withValues(alpha: 0.15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        // ── KPI chips + filtros activos ───────────────────────────────────
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: AppSpacing.sm + 2),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: AppColors.border),
+            boxShadow: AppShadows.card,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _kpiChip(
-                Icons.bar_chart_rounded,
-                'Promedio general',
-                CurrencyFormatter.format(periodAverageGeneral),
-                AppColors.info,
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  _kpiChip(
+                    Icons.bar_chart_rounded,
+                    'Promedio general',
+                    CurrencyFormatter.format(periodAverageGeneral),
+                    AppColors.info,
+                  ),
+                  _kpiChip(
+                    Icons.inventory_2_outlined,
+                    'Productos base',
+                    '$productsCount',
+                    AppColors.warning,
+                  ),
+                  _kpiChip(
+                    Icons.date_range_rounded,
+                    'Período',
+                    '$monthsWindow meses',
+                    AppColors.textMuted,
+                  ),
+                ],
               ),
-              _kpiChip(
-                Icons.inventory_2_outlined,
-                'Productos base',
-                '$productsCount',
-                AppColors.warning,
-              ),
-              _kpiChip(
-                Icons.date_range_rounded,
-                'Período',
-                '$monthsWindow meses',
-                AppColors.textMuted,
-              ),
+              if (_hasActiveFilters) ...[
+                const SizedBox(height: AppSpacing.sm),
+                const Divider(height: 1),
+                const SizedBox(height: AppSpacing.sm),
+                _buildActiveFilterChips(),
+              ],
             ],
           ),
-          if (_hasActiveFilters) ...[
-            const SizedBox(height: AppSpacing.sm),
-            const Divider(height: 1),
-            const SizedBox(height: AppSpacing.sm),
-            _buildActiveFilterChips(),
-          ],
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -735,34 +754,53 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                   ),
                 ),
               ),
-              if (options.isNotEmpty)
-                SizedBox(
-                  width: 220,
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey(activeMonth ?? 'none'),
-                    initialValue: activeMonth,
-                    decoration: const InputDecoration(
-                      labelText: 'Mes del corte',
-                      isDense: true,
-                    ),
-                    items: options
-                        .map((m) => DropdownMenuItem(
-                              value: m,
-                              child: Text(MonthlyCutsFiltrosService.formatMonth(
-                                m,
-                                longLabel: true,
-                              )),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null || value == selectedMonth) return;
-                      setState(() => selectedMonth = value);
-                      _loadProductCuts(month: value);
-                    },
-                  ),
-                ),
             ],
           ),
+          if (options.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: options.asMap().entries.map((entry) {
+                  final m = entry.value;
+                  final isActive = m == activeMonth;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.xs),
+                    child: ChoiceChip(
+                      label: Text(
+                        MonthlyCutsFiltrosService.formatMonth(m),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isActive
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: isActive
+                              ? Colors.white
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                      selected: isActive,
+                      selectedColor: AppColors.primary,
+                      backgroundColor: AppColors.surfaceVariant,
+                      side: BorderSide(
+                        color: isActive
+                            ? AppColors.primary
+                            : AppColors.border,
+                        width: isActive ? 1.5 : 1.0,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm, vertical: 4),
+                      onSelected: (selected) {
+                        if (!selected || m == selectedMonth) return;
+                        setState(() => selectedMonth = m);
+                        _loadProductCuts(month: m);
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           Wrap(
             spacing: AppSpacing.sm,
@@ -843,96 +881,45 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   // ─── Tabla paginada de productos ───────────────────────────────────────────
 
   Widget _buildProductTable() {
-    final totalRows = productCuts.length;
-    final totalPages = (totalRows / _productPageRows).ceil().clamp(1, double.maxFinite).toInt();
-    final safePage = _productCurrentPage.clamp(0, totalPages - 1);
-    final start = safePage * _productPageRows;
-    final end = (start + _productPageRows).clamp(0, totalRows);
-    final pageRows = productCuts.sublist(start, end);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          height: 56 + (pageRows.length * 52.0),
-          child: DataTable2(
-            minWidth: 1100,
-            headingRowColor: WidgetStateProperty.all(AppColors.surfaceVariant),
-            headingTextStyle: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              color: AppColors.textSecondary,
-            ),
-            dataTextStyle: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textPrimary,
-            ),
-            columns: const [
-              DataColumn2(label: Text('Código')),
-              DataColumn2(label: Text('Nombre Producto'), size: ColumnSize.L),
-              DataColumn2(label: Text('Grupo')),
-              DataColumn2(label: Text('Cant. Promedio'), numeric: true),
-              DataColumn2(label: Text('Valor Promedio'), numeric: true),
-              DataColumn2(label: Text('Costo Unitario'), numeric: true),
-            ],
-            rows: pageRows.asMap().entries.map((entry) {
-              final globalIndex = start + entry.key;
-              return _productDataSource!.getRow(globalIndex);
-            }).toList(),
-          ),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        minHeight: 400,
+        maxHeight: 650,
+      ),
+      child: PaginatedDataTable2(
+        key: ValueKey(selectedMonth),
+        columnSpacing: 12,
+        horizontalMargin: 12,
+        minWidth: 1100,
+        scrollController: ScrollController(),
+        isHorizontalScrollBarVisible: true,
+        headingRowColor:
+            WidgetStateProperty.all(AppColors.surfaceVariant),
+        headingTextStyle: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+          color: AppColors.textSecondary,
         ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Text(
-              '${start + 1}–$end de $totalRows',
-              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-            ),
-            const SizedBox(width: 16),
-            const Text('Filas por página:', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            const SizedBox(width: 8),
-            DropdownButton<int>(
-              value: _productPageRows,
-              underline: const SizedBox(),
-              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-              items: const [
-                DropdownMenuItem(value: 10, child: Text('10')),
-                DropdownMenuItem(value: 25, child: Text('25')),
-                DropdownMenuItem(value: 50, child: Text('50')),
-              ],
-              onChanged: (value) {
-                if (value != null) setState(() { _productPageRows = value; _productCurrentPage = 0; });
-              },
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.first_page_rounded, size: 20),
-              tooltip: 'Primera página',
-              onPressed: safePage > 0 ? () => setState(() => _productCurrentPage = 0) : null,
-            ),
-            IconButton(
-              icon: const Icon(Icons.chevron_left_rounded, size: 20),
-              tooltip: 'Página anterior',
-              onPressed: safePage > 0 ? () => setState(() => _productCurrentPage = safePage - 1) : null,
-            ),
-            Text(
-              '${safePage + 1} / $totalPages',
-              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-            ),
-            IconButton(
-              icon: const Icon(Icons.chevron_right_rounded, size: 20),
-              tooltip: 'Página siguiente',
-              onPressed: safePage < totalPages - 1 ? () => setState(() => _productCurrentPage = safePage + 1) : null,
-            ),
-            IconButton(
-              icon: const Icon(Icons.last_page_rounded, size: 20),
-              tooltip: 'Última página',
-              onPressed: safePage < totalPages - 1 ? () => setState(() => _productCurrentPage = totalPages - 1) : null,
-            ),
-          ],
+        dataTextStyle: const TextStyle(
+          fontSize: 12,
+          color: AppColors.textPrimary,
         ),
-      ],
+        dividerThickness: 1,
+        rowsPerPage: _productPageRows,
+        availableRowsPerPage: const [10, 25, 50],
+        onRowsPerPageChanged: (value) {
+          if (value != null) setState(() => _productPageRows = value);
+        },
+        columns: const [
+          DataColumn2(label: Text('Código'), size: ColumnSize.S),
+          DataColumn2(label: Text('Nombre Producto'), size: ColumnSize.L),
+          DataColumn2(label: Text('Grupo')),
+          DataColumn2(label: Text('Cant. Promedio'), numeric: true),
+          DataColumn2(label: Text('Valor Promedio'), numeric: true),
+          DataColumn2(label: Text('Costo Unitario'), numeric: true),
+        ],
+        source: _productDataSource!,
+      ),
     );
   }
 
@@ -985,129 +972,201 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
 
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.xl),
-        ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppColors.primaryLight,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-              ),
-              child: const Icon(Icons.filter_list_rounded,
-                  color: AppColors.primaryDark, size: 16),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            const Text('Filtros'),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl),
+          ),
+          title: Row(
             children: [
-              DropdownButtonFormField<int>(
-                initialValue: localMonths,
-                decoration: const InputDecoration(
-                  labelText: 'Ventana mensual',
-                  prefixIcon: Icon(Icons.date_range_rounded, size: 18),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 6, child: Text('Últimos 6 meses')),
-                  DropdownMenuItem(value: 12, child: Text('Últimos 12 meses')),
-                  DropdownMenuItem(value: 18, child: Text('Últimos 18 meses')),
-                  DropdownMenuItem(value: 24, child: Text('Últimos 24 meses')),
-                ],
-                onChanged: (value) {
-                  if (value != null) localMonths = value;
-                },
+                child: const Icon(Icons.filter_alt_rounded,
+                    color: AppColors.primary, size: 20),
               ),
-              const SizedBox(height: AppSpacing.md),
-              DropdownButtonFormField<String>(
-                initialValue: localWarehouse,
-                decoration: const InputDecoration(
-                  labelText: 'Almacén',
-                  prefixIcon: Icon(Icons.warehouse_outlined, size: 18),
-                ),
-                items: [
-                  const DropdownMenuItem<String>(
-                    value: null,
-                    child: Text('Todos'),
-                  ),
-                  ..._warehouseOptions.map(
-                    (item) => DropdownMenuItem<String>(
-                      value: item,
-                      child: Text(item),
-                    ),
-                  ),
-                ],
-                onChanged: (value) => localWarehouse = value,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              DropdownButtonFormField<String>(
-                initialValue: localCategory,
-                decoration: const InputDecoration(
-                  labelText: 'Categoría',
-                  prefixIcon: Icon(Icons.category_outlined, size: 18),
-                ),
-                items: [
-                  const DropdownMenuItem<String>(
-                    value: null,
-                    child: Text('Todas'),
-                  ),
-                  ..._categoryOptions.map(
-                    (item) => DropdownMenuItem<String>(
-                      value: item,
-                      child: Text(item),
-                    ),
-                  ),
-                ],
-                onChanged: (value) => localCategory = value,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                initialValue: localSearch,
-                decoration: const InputDecoration(
-                  labelText: 'Producto o código',
-                  hintText: 'Escribe código o descripción',
-                  prefixIcon: Icon(Icons.search_rounded, size: 18),
-                ),
-                onChanged: (value) => localSearch = value,
-              ),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('Filtros — Cortes Mensuales',
+                  style:
+                      TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
             ],
           ),
+          content: SizedBox(
+            width: 380,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Ventana mensual ──────────────────────────────────
+                  const Text('Ventana de meses',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.xs),
+                  DropdownButtonFormField<int>(
+                    initialValue: localMonths,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon:
+                          Icon(Icons.date_range_rounded, size: 18),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                          value: 6,
+                          child: Text('Últimos 6 meses',
+                              style: TextStyle(fontSize: 14))),
+                      DropdownMenuItem(
+                          value: 12,
+                          child: Text('Últimos 12 meses',
+                              style: TextStyle(fontSize: 14))),
+                      DropdownMenuItem(
+                          value: 18,
+                          child: Text('Últimos 18 meses',
+                              style: TextStyle(fontSize: 14))),
+                      DropdownMenuItem(
+                          value: 24,
+                          child: Text('Últimos 24 meses',
+                              style: TextStyle(fontSize: 14))),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDlgState(() => localMonths = value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // ── Almacén ─────────────────────────────────────────
+                  const Text('Almacén',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.xs),
+                  DropdownButtonFormField<String>(
+                    initialValue: localWarehouse,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon:
+                          Icon(Icons.warehouse_outlined, size: 18),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('Todos',
+                              style: TextStyle(fontSize: 14))),
+                      ..._warehouseOptions.map(
+                        (item) => DropdownMenuItem<String>(
+                          value: item,
+                          child: Text(item,
+                              style: const TextStyle(fontSize: 14)),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setDlgState(() => localWarehouse = value),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // ── Categoría ────────────────────────────────────────
+                  const Text('Categoría',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.xs),
+                  DropdownButtonFormField<String>(
+                    initialValue: localCategory,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon:
+                          Icon(Icons.category_outlined, size: 18),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('Todas',
+                              style: TextStyle(fontSize: 14))),
+                      ..._categoryOptions.map(
+                        (item) => DropdownMenuItem<String>(
+                          value: item,
+                          child: Text(item,
+                              style: const TextStyle(fontSize: 14)),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setDlgState(() => localCategory = value),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // ── Búsqueda ─────────────────────────────────────────
+                  const Text('Producto o código',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.xs),
+                  TextFormField(
+                    initialValue: localSearch,
+                    decoration: const InputDecoration(
+                      hintText: 'Escribe código o descripción',
+                      prefixIcon:
+                          Icon(Icons.search_rounded, size: 18),
+                      isDense: true,
+                    ),
+                    onChanged: (value) =>
+                        setDlgState(() => localSearch = value),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  monthsWindow = 12;
+                  selectedWarehouse = null;
+                  selectedCategory = null;
+                  searchQuery = null;
+                  selectedMonth = null;
+                });
+                Navigator.of(dialogContext).pop();
+                _loadData();
+              },
+              child: const Text('Limpiar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  monthsWindow = localMonths;
+                  selectedWarehouse = localWarehouse;
+                  selectedCategory = localCategory;
+                  searchQuery = localSearch.trim().isEmpty
+                      ? null
+                      : localSearch.trim();
+                });
+                Navigator.of(dialogContext).pop();
+                _loadData();
+              },
+              icon: const Icon(Icons.check_rounded, size: 16),
+              label: const Text('Aplicar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              setState(() {
-                monthsWindow = 12;
-                selectedWarehouse = null;
-                selectedCategory = null;
-                searchQuery = null;
-                selectedMonth = null;
-              });
-              Navigator.of(dialogContext).pop();
-              _loadData();
-            },
-            child: const Text('Limpiar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                monthsWindow = localMonths;
-                selectedWarehouse = localWarehouse;
-                selectedCategory = localCategory;
-                searchQuery = localSearch.trim().isEmpty ? null : localSearch.trim();
-              });
-              Navigator.of(dialogContext).pop();
-              _loadData();
-            },
-            child: const Text('Aplicar'),
-          ),
-        ],
       ),
     );
   }
@@ -1122,16 +1181,18 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
         title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: AppColors.primaryLight,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
               child: const Icon(Icons.download_outlined,
-                  color: AppColors.primaryDark, size: 16),
+                  color: AppColors.primaryDark, size: 18),
             ),
             const SizedBox(width: AppSpacing.sm),
-            const Text('Exportar Cortes Mensuales'),
+            const Text('Exportar Cortes Mensuales',
+                style:
+                    TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
           ],
         ),
         content: const Text('Selecciona el formato del informe:'),

@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ── Instalador ───────────────────────────────────────────────────────────────
+installer_output/
+build_installer.log
+
+# ── VS Code ──────────────────────────────────────────────────────────────────
+.vscode/

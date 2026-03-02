@@ -675,14 +675,31 @@ class _WelcomePageState extends State<WelcomePage>
                 'Tres pasos sencillos para tener tu inventario actualizado.',
           ),
           const SizedBox(height: AppSpacing.xxl),
-          Wrap(
-            spacing: AppSpacing.lg,
-            runSpacing: AppSpacing.xl,
-            alignment: WrapAlignment.center,
-            children: steps
-                .map((s) => _StepCard(number: s.$1, title: s.$2, body: s.$3))
-                .toList(),
-          ),
+          if (isMobile)
+            Column(
+              children: steps
+                  .map((s) => Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+                        child: _StepCard(number: s.$1, title: s.$2, body: s.$3),
+                      ))
+                  .toList(),
+            )
+          else
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: steps
+                    .expand((s) => [
+                          Expanded(
+                            child: _StepCard(
+                                number: s.$1, title: s.$2, body: s.$3),
+                          ),
+                          if (s != steps.last)
+                            const SizedBox(width: AppSpacing.lg),
+                        ])
+                    .toList(),
+              ),
+            ),
         ],
       ),
     );
@@ -985,63 +1002,57 @@ class _StepCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
-    final cardWidth = isMobile ? screenWidth - AppSpacing.md * 2 : 260.0;
-
-    return SizedBox(
-      width: cardWidth,
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.border),
-          boxShadow: AppShadows.card,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    boxShadow: AppShadows.colored(AppColors.primary),
-                  ),
-                  child: Center(
-                    child: Text(
-                      number,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  boxShadow: AppShadows.colored(AppColors.primary),
+                ),
+                child: Center(
+                  child: Text(
+                    number,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
               ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
             ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              body,
-              style: const TextStyle(
-                  fontSize: 13, color: AppColors.textMuted, height: 1.55),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            body,
+            style: const TextStyle(
+                fontSize: 13, color: AppColors.textMuted, height: 1.55),
+          ),
+        ],
       ),
     );
   }

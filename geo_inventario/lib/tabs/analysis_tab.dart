@@ -86,9 +86,15 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       );
 
       if (mounted && requestEpoch == _analysisRequestEpoch) {
+        final sorted = List<Map<String, dynamic>>.from(data)
+          ..sort((a, b) {
+            final va = ((a['valor_saldo_actual'] as num?) ?? 0).toDouble();
+            final vb = ((b['valor_saldo_actual'] as num?) ?? 0).toDouble();
+            return vb.compareTo(va);
+          });
         setState(() {
-          analysis = data;
-          filteredAnalysis = data;
+          analysis = sorted;
+          filteredAnalysis = sorted;
           isLoading = false;
         });
       }
@@ -169,12 +175,48 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Análisis de Productos',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
+            // ── Banner de sección ────────────────────────────────────
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+              decoration: BoxDecoration(
+                gradient: AppGradients.hero,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                boxShadow: AppShadows.elevated,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                    ),
+                    child: const Icon(Icons.analytics_rounded,
+                        color: Colors.white, size: 24),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Análisis de Productos',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      Text(
+                        'Valor, rotación y alertas del inventario',
+                        style:
+                            TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -908,142 +950,266 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   void showFiltersDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogCtx) {
+        // Variables locales en el scope del showDialog (no dentro del
+        // StatefulBuilder.builder) para que no se reinicien en cada rebuild.
+        DateTime? localDate = selectedDate;
+        String? localGroup = selectedGroup;
+        String? localRotation = selectedRotation;
+        String? localStagnant = selectedStagnant;
+        String? localHighRotation = selectedHighRotation;
+        String? localSearch = searchQuery;
+
+        final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
+        final groups = {'Todos', ..._getUniqueValues('grupo')}.toList();
+
         return StatefulBuilder(
-          builder: (context, setState) {
-            DateTime? selectedDate = this.selectedDate;
-            String selectedDateText = 'Seleccionar fecha (opcional)';
-            if (selectedDate != null) {
-              selectedDateText =
-                  DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate);
+          builder: (ctx, setDlgState) {
+            Widget dateRow(
+              String label,
+              DateTime? value,
+              VoidCallback onTap,
+              VoidCallback onClear,
+            ) {
+              return GestureDetector(
+                onTap: onTap,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(
+                      color:
+                          value != null ? AppColors.primary : AppColors.border,
+                      width: value != null ? 1.8 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today_rounded,
+                          size: 16,
+                          color: value != null
+                              ? AppColors.primary
+                              : AppColors.textDisabled),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          value != null ? fmt.format(value) : label,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: value != null
+                                ? AppColors.textPrimary
+                                : AppColors.textDisabled,
+                          ),
+                        ),
+                      ),
+                      if (value != null)
+                        GestureDetector(
+                          onTap: onClear,
+                          child: const Icon(Icons.close_rounded,
+                              size: 16, color: AppColors.textMuted),
+                        ),
+                    ],
+                  ),
+                ),
+              );
             }
 
-            final groups = {'Todos', ..._getUniqueValues('grupo')}.toList();
-
             return AlertDialog(
-              title: const Row(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.xl),
+              ),
+              title: Row(
                 children: [
-                  Icon(Icons.filter_list_rounded,
-                      color: AppColors.primary, size: 22),
-                  SizedBox(width: AppSpacing.sm),
-                  Text('Filtros — Análisis'),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLight,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: const Icon(Icons.filter_alt_rounded,
+                        color: AppColors.primary, size: 20),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  const Text(
+                    'Filtros — Análisis',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
                 ],
               ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedGroup == null ||
-                              !groups.contains(selectedGroup)
-                          ? 'Todos'
-                          : selectedGroup,
-                      decoration: const InputDecoration(labelText: 'Grupo'),
-                      items: groups.map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() =>
-                            selectedGroup = value == 'Todos' ? null : value);
-                      },
-                    ),
-                    DropdownButtonFormField<String>(
-                      initialValue: (selectedRotation != null &&
-                              selectedRotation!.isNotEmpty)
-                          ? selectedRotation
-                          : 'Todos',
-                      decoration: const InputDecoration(labelText: 'Rotación'),
-                      items: [
-                        'Todos',
-                        'Activo',
-                        'Estancado',
-                        'Obsoleto',
-                        'Inactivo'
-                      ].map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() =>
-                            selectedRotation = value == 'Todos' ? null : value);
-                      },
-                    ),
-                    DropdownButtonFormField<String>(
-                      initialValue: (selectedStagnant != null &&
-                              selectedStagnant!.isNotEmpty)
-                          ? selectedStagnant
-                          : 'Todos',
-                      decoration: const InputDecoration(labelText: 'Estancado'),
-                      items: ['Todos', 'Sí', 'No'].map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() =>
-                            selectedStagnant = value == 'Todos' ? null : value);
-                      },
-                    ),
-                    DropdownButtonFormField<String>(
-                      initialValue: (selectedHighRotation != null &&
-                              selectedHighRotation!.isNotEmpty)
-                          ? selectedHighRotation
-                          : 'Todos',
-                      decoration:
-                          const InputDecoration(labelText: 'Alta Rotación'),
-                      items: ['Todos', 'Sí', 'No'].map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedHighRotation =
-                            value == 'Todos' ? null : value);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      initialValue: searchQuery,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar por código o descripción',
-                        hintText: 'Ingrese código o descripción del producto',
-                        prefixIcon: Icon(Icons.search_rounded),
+              content: SizedBox(
+                width: 380,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── Grupo ──────────────────────────────────────────
+                      const Text('Grupo',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: AppSpacing.xs),
+                      DropdownButtonFormField<String>(
+                        initialValue:
+                            localGroup == null || !groups.contains(localGroup)
+                                ? 'Todos'
+                                : localGroup,
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon: Icon(Icons.category_rounded, size: 18),
+                        ),
+                        items: groups
+                            .map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setDlgState(
+                            () => localGroup = v == 'Todos' ? null : v),
                       ),
-                      onChanged: (value) {
-                        setState(() => searchQuery = value);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Fecha',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime.now(),
-                          initialDate: selectedDate ?? DateTime.now(),
-                          locale: const Locale('es', 'CO'),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            this.selectedDate = picked;
-                          });
-                        }
-                      },
-                      child: Text(selectedDateText),
-                    ),
-                  ],
+                      const SizedBox(height: AppSpacing.md),
+
+                      // ── Rotación ───────────────────────────────────────
+                      const Text('Rotación',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: AppSpacing.xs),
+                      DropdownButtonFormField<String>(
+                        initialValue: (localRotation?.isNotEmpty == true)
+                            ? localRotation
+                            : 'Todos',
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon: Icon(Icons.autorenew_rounded, size: 18),
+                        ),
+                        items: [
+                          'Todos',
+                          'Activo',
+                          'Estancado',
+                          'Obsoleto',
+                          'Inactivo'
+                        ]
+                            .map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setDlgState(
+                            () => localRotation = v == 'Todos' ? null : v),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+
+                      // ── Estancado ──────────────────────────────────────
+                      const Text('Estancado',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: AppSpacing.xs),
+                      DropdownButtonFormField<String>(
+                        initialValue: (localStagnant?.isNotEmpty == true)
+                            ? localStagnant
+                            : 'Todos',
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon:
+                              Icon(Icons.hourglass_bottom_rounded, size: 18),
+                        ),
+                        items: ['Todos', 'Sí', 'No']
+                            .map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setDlgState(
+                            () => localStagnant = v == 'Todos' ? null : v),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+
+                      // ── Alta Rotación ──────────────────────────────────
+                      const Text('Alta Rotación',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: AppSpacing.xs),
+                      DropdownButtonFormField<String>(
+                        initialValue: (localHighRotation?.isNotEmpty == true)
+                            ? localHighRotation
+                            : 'Todos',
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          prefixIcon: Icon(Icons.trending_up_rounded, size: 18),
+                        ),
+                        items: ['Todos', 'Sí', 'No']
+                            .map((v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setDlgState(
+                            () => localHighRotation = v == 'Todos' ? null : v),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+
+                      // ── Búsqueda ───────────────────────────────────────
+                      const Text('Producto (código o descripción)',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: AppSpacing.xs),
+                      TextFormField(
+                        initialValue: localSearch,
+                        decoration: const InputDecoration(
+                          hintText: 'Ingrese código o descripción',
+                          prefixIcon: Icon(Icons.search_rounded, size: 18),
+                          isDense: true,
+                        ),
+                        onChanged: (v) => setDlgState(
+                            () => localSearch = v.isEmpty ? null : v),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+
+                      // ── Fecha de corte ─────────────────────────────────
+                      const Text('Fecha de corte',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted)),
+                      const SizedBox(height: AppSpacing.xs),
+                      dateRow(
+                        'Sin fecha (opcional)',
+                        localDate,
+                        () async {
+                          final picked = await showDatePicker(
+                            context: ctx,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now(),
+                            initialDate: localDate ?? DateTime.now(),
+                            locale: const Locale('es', 'CO'),
+                          );
+                          if (picked != null) {
+                            setDlgState(() => localDate = picked);
+                          }
+                        },
+                        () => setDlgState(() => localDate = null),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -1057,15 +1223,27 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       selectedDate = null;
                       searchQuery = null;
                     });
-                    Navigator.of(context).pop();
+                    Navigator.of(dialogCtx).pop();
                     _loadAnalysisData();
                   },
                   child: const Text('Limpiar'),
                 ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Cancelar'),
+                ),
                 ElevatedButton.icon(
                   onPressed: () {
+                    setState(() {
+                      selectedGroup = localGroup;
+                      selectedRotation = localRotation;
+                      selectedStagnant = localStagnant;
+                      selectedHighRotation = localHighRotation;
+                      selectedDate = localDate;
+                      searchQuery = localSearch;
+                    });
+                    Navigator.of(dialogCtx).pop();
                     _loadAnalysisData();
-                    Navigator.of(context).pop();
                   },
                   icon: const Icon(Icons.check_rounded, size: 16),
                   label: const Text('Aplicar'),
@@ -1097,13 +1275,25 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   void _showExportDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogCtx) {
         return AlertDialog(
-          title: const Row(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl),
+          ),
+          title: Row(
             children: [
-              Icon(Icons.download_outlined, color: AppColors.primary, size: 22),
-              SizedBox(width: AppSpacing.sm),
-              Text('Exportar Análisis'),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: const Icon(Icons.download_outlined,
+                    color: AppColors.primaryDark, size: 18),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('Exportar Análisis',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
             ],
           ),
           content: const Text(
@@ -1112,13 +1302,13 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           actions: [
             TextButton(
               child: const Text('Cancelar'),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogCtx).pop(),
             ),
             OutlinedButton.icon(
               icon: const Icon(Icons.table_chart_outlined, size: 16),
               label: const Text('Excel'),
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(dialogCtx).pop();
                 _exportAnalysis('excel');
               },
             ),
@@ -1126,7 +1316,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
               icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
               label: const Text('PDF'),
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(dialogCtx).pop();
                 _exportAnalysis('pdf');
               },
             ),

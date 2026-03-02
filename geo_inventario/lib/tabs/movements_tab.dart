@@ -35,12 +35,14 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   bool isLoading = true;
 
   // filtros
-  DateTime? selectedDate;
+  DateTime? dateFrom;
+  DateTime? dateTo;
   String? selectedWarehouse;
   String? selectedGroup;
   List<String> availableWarehouses = [];
   List<String> availableGroups = [];
   String? searchQuery;
+  String? docNumberSearch;
 
   @override
   void initState() {
@@ -59,10 +61,12 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   /// Resetea los filtros para mostrar todos los datos actualizados.
   void _onExternalRefresh() {
     setState(() {
-      selectedDate = null;
+      dateFrom = null;
+      dateTo = null;
       selectedWarehouse = null;
       selectedGroup = null;
       searchQuery = null;
+      docNumberSearch = null;
     });
     _loadAllMovementsData();
   }
@@ -110,13 +114,16 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           warehouse: selectedWarehouse,
           category: selectedGroup,
           search: searchQuery,
-          specificDate: selectedDate,
+          documentNumber: docNumberSearch,
+          dateFrom: dateFrom,
+          dateTo: dateTo,
         ),
         _apiService.getMonthlyMovements(
           warehouse: selectedWarehouse,
           category: selectedGroup,
           search: searchQuery,
-          specificDate: selectedDate,
+          dateFrom: dateFrom,
+          dateTo: dateTo,
         ),
       ]);
       final filteredMovementsData = results[0] as List<Map<String, dynamic>>;
@@ -163,19 +170,46 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Encabezado de sección ──────────────────────────────────
-              Text(
-                'Historial de Movimientos',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
+              // ── Banner corporativo de sección ──────────────────────────
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+                decoration: BoxDecoration(
+                  gradient: AppGradients.hero,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  boxShadow: AppShadows.elevated,
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              const Text(
-                'Vista detallada de todas las entradas y salidas de inventario',
-                style: TextStyle(fontSize: 14, color: AppColors.textMuted),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                      child: const Icon(Icons.swap_horiz_rounded,
+                          color: Colors.white, size: 24),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Historial de Movimientos',
+                          style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold,
+                            color: Colors.white, letterSpacing: 0.3,
+                          ),
+                        ),
+                        Text(
+                          'Entradas, salidas y saldos del inventario',
+                          style: TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: AppSpacing.lg),
               _buildMovementsChart(),
@@ -555,24 +589,25 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     );
   }
 
-  bool _hasActiveFilters() => MovementsFilterService.tieneFiltrosActivos(
-        warehouse: selectedWarehouse,
-        group: selectedGroup,
-        search: searchQuery,
-        date: selectedDate,
-      );
+  bool _hasActiveFilters() => selectedWarehouse != null ||
+      selectedGroup != null ||
+      (searchQuery != null && searchQuery!.isNotEmpty) ||
+      (docNumberSearch != null && docNumberSearch!.isNotEmpty) ||
+      dateFrom != null ||
+      dateTo != null;
 
   Widget _buildActiveFilterChips() {
     final chips = <Widget>[];
+    final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
 
     void addChip(String label, VoidCallback onDelete) {
       chips.add(
         Chip(
           label: Text(label, style: const TextStyle(fontSize: 11)),
           onDeleted: onDelete,
-          backgroundColor: AppColors.infoLight,
-          deleteIconColor: AppColors.infoDark,
-          side: const BorderSide(color: AppColors.info, width: 0.5),
+          backgroundColor: AppColors.cyanLight,
+          deleteIconColor: AppColors.cyanDark,
+          side: const BorderSide(color: AppColors.cyan, width: 0.5),
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           padding: const EdgeInsets.symmetric(horizontal: 4),
         ),
@@ -597,11 +632,20 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         _loadMovementsData();
       });
     }
-    if (selectedDate != null) {
-      final dateStr =
-          DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate!);
-      addChip('Fecha: $dateStr', () {
-        setState(() => selectedDate = null);
+    if (docNumberSearch != null && docNumberSearch!.isNotEmpty) {
+      addChip('Doc: $docNumberSearch', () {
+        setState(() => docNumberSearch = null);
+        _loadMovementsData();
+      });
+    }
+    if (dateFrom != null || dateTo != null) {
+      final from = dateFrom != null ? fmt.format(dateFrom!) : '∅';
+      final to = dateTo != null ? fmt.format(dateTo!) : 'hoy';
+      addChip('Fecha: $from → $to', () {
+        setState(() {
+          dateFrom = null;
+          dateTo = null;
+        });
         _loadMovementsData();
       });
     }
@@ -624,7 +668,9 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 selectedWarehouse = null;
                 selectedGroup = null;
                 searchQuery = null;
-                selectedDate = null;
+                docNumberSearch = null;
+                dateFrom = null;
+                dateTo = null;
               });
               _loadMovementsData();
             },
@@ -639,13 +685,26 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   void _showExportDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogCtx) {
         return AlertDialog(
-          title: const Row(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl),
+          ),
+          title: Row(
             children: [
-              Icon(Icons.download_outlined, color: AppColors.primary, size: 22),
-              SizedBox(width: AppSpacing.sm),
-              Text('Exportar Movimientos'),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: const Icon(Icons.download_outlined,
+                    color: AppColors.primaryDark, size: 18),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('Exportar Movimientos',
+                  style:
+                      TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
             ],
           ),
           content: const Text(
@@ -653,13 +712,13 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
           actions: [
             TextButton(
               child: const Text('Cancelar'),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogCtx).pop(),
             ),
             OutlinedButton.icon(
               icon: const Icon(Icons.table_chart_outlined, size: 16),
               label: const Text('Excel'),
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(dialogCtx).pop();
                 _exportMovements('excel');
               },
             ),
@@ -667,7 +726,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
               icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
               label: const Text('PDF'),
               onPressed: () {
-                Navigator.of(context).pop();
+                Navigator.of(dialogCtx).pop();
                 _exportMovements('pdf');
               },
             ),
@@ -684,7 +743,8 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         warehouse: selectedWarehouse,
         category: selectedGroup,
         search: searchQuery,
-        specificDate: selectedDate,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
       );
 
       if (response.statusCode == 200) {
@@ -743,152 +803,238 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
   }
 
   void showFiltersDialog() {
-    // Ensure data is loaded before showing filters
     if (allMovements.isEmpty && !isLoading) {
       _loadAllMovementsData();
       return;
     }
 
+    // Copias locales para el dialog
+    DateTime? localFrom = dateFrom;
+    DateTime? localTo = dateTo;
+    String? localWarehouse = selectedWarehouse;
+    String? localGroup = selectedGroup;
+    String? localSearch = searchQuery;
+    String? localDocNumber = docNumberSearch;
+
+    final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
+    final warehouses = <String>{
+      'Todos',
+      ...MovementsFilterService.obtenerValoresUnicos(allMovements, 'warehouse'),
+    }.toList();
+    final groups = <String>{
+      'Todos',
+      ...MovementsFilterService.obtenerValoresUnicos(allMovements, 'category'),
+    }.toList();
+
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        DateTime? selectedDate = this.selectedDate;
-        String selectedDateText = 'Seleccionar fecha (opcional)';
-        if (selectedDate != null) {
-          selectedDateText =
-              DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate);
-        }
-
-        // Get unique values from allMovements data
-        final warehouses = <String>{
-          'Todos',
-          ...MovementsFilterService.obtenerValoresUnicos(
-            allMovements,
-            'warehouse',
-          ),
-        }.toList();
-        final groups = <String>{
-          'Todos',
-          ...MovementsFilterService.obtenerValoresUnicos(
-            allMovements,
-            'category',
-          ),
-        }.toList();
-
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.filter_list_rounded,
-                      color: AppColors.primary, size: 22),
-                  SizedBox(width: AppSpacing.sm),
-                  Text('Filtros — Movimientos'),
-                ],
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          Widget dateRow(String label, DateTime? value, VoidCallback onTap, VoidCallback onClear) {
+            return GestureDetector(
+              onTap: onTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(
+                    color: value != null ? AppColors.primary : AppColors.border,
+                    width: value != null ? 1.8 : 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.calendar_today_rounded,
+                        size: 16,
+                        color: value != null ? AppColors.primary : AppColors.textDisabled),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        value != null ? fmt.format(value) : label,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: value != null ? AppColors.textPrimary : AppColors.textDisabled,
+                        ),
+                      ),
+                    ),
+                    if (value != null)
+                      GestureDetector(
+                        onTap: onClear,
+                        child: const Icon(Icons.close_rounded, size: 16, color: AppColors.textMuted),
+                      ),
+                  ],
+                ),
               ),
-              content: SingleChildScrollView(
+            );
+          }
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryLight,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.filter_alt_rounded, color: AppColors.primary, size: 20),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                const Text('Filtrar Movimientos',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              ],
+            ),
+            content: SizedBox(
+              width: 380,
+              child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedWarehouse == null ||
-                              !warehouses.contains(selectedWarehouse)
-                          ? 'Todos'
-                          : selectedWarehouse,
-                      decoration: const InputDecoration(labelText: 'Almacén'),
-                      items: warehouses.map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() => selectedWarehouse =
-                            value == 'Todos' ? null : value);
-                      },
-                    ),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedGroup == null ||
-                              !groups.contains(selectedGroup)
-                          ? 'Todos'
-                          : selectedGroup,
-                      decoration: const InputDecoration(labelText: 'Categoría'),
-                      items: groups.map((value) {
-                        return DropdownMenuItem<String>(
-                          value: value,
-                          child: Text(value),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() =>
-                            selectedGroup = value == 'Todos' ? null : value);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      initialValue: searchQuery,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar por código o descripción',
-                        hintText: 'Ingrese código o descripción del producto',
-                        prefixIcon: Icon(Icons.search_rounded),
-                      ),
-                      onChanged: (value) {
-                        setState(() => searchQuery = value);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Fecha',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: () async {
+                    // ── Rango de fechas ───────────────────────────────
+                    const Text('Rango de fechas',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                    const SizedBox(height: AppSpacing.xs),
+                    dateRow(
+                      'Desde (opcional)',
+                      localFrom,
+                      () async {
                         final picked = await showDatePicker(
-                          context: context,
+                          context: ctx,
                           firstDate: DateTime(2020),
-                          lastDate: DateTime.now(),
-                          initialDate: selectedDate ?? DateTime.now(),
+                          lastDate: localTo ?? DateTime.now(),
+                          initialDate: localFrom ?? DateTime.now().subtract(const Duration(days: 30)),
                           locale: const Locale('es', 'CO'),
                         );
-                        if (picked != null) {
-                          setState(() {
-                            this.selectedDate = picked;
-                          });
-                        }
+                        if (picked != null) setDlgState(() => localFrom = picked);
                       },
-                      child: Text(selectedDateText),
+                      () => setDlgState(() => localFrom = null),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    dateRow(
+                      'Hasta (opcional)',
+                      localTo,
+                      () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          firstDate: localFrom ?? DateTime(2020),
+                          lastDate: DateTime.now(),
+                          initialDate: localTo ?? DateTime.now(),
+                          locale: const Locale('es', 'CO'),
+                        );
+                        if (picked != null) setDlgState(() => localTo = picked);
+                      },
+                      () => setDlgState(() => localTo = null),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // ── Número de documento ───────────────────────────
+                    const Text('Número de documento',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                    const SizedBox(height: AppSpacing.xs),
+                    TextFormField(
+                      initialValue: localDocNumber,
+                      decoration: const InputDecoration(
+                        hintText: 'Ej. 00123456',
+                        prefixIcon: Icon(Icons.tag_rounded, size: 18),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => setDlgState(() => localDocNumber = v.isEmpty ? null : v),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // ── Búsqueda de producto ──────────────────────────
+                    const Text('Producto (código o descripción)',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                    const SizedBox(height: AppSpacing.xs),
+                    TextFormField(
+                      initialValue: localSearch,
+                      decoration: const InputDecoration(
+                        hintText: 'Ingrese código o descripción',
+                        prefixIcon: Icon(Icons.search_rounded, size: 18),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => setDlgState(() => localSearch = v.isEmpty ? null : v),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // ── Almacén ───────────────────────────────────────
+                    const Text('Almacén',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                    const SizedBox(height: AppSpacing.xs),
+                    DropdownButtonFormField<String>(
+                      initialValue: localWarehouse == null || !warehouses.contains(localWarehouse)
+                          ? 'Todos'
+                          : localWarehouse,
+                      isDense: true,
+                      decoration: const InputDecoration(isDense: true),
+                      items: warehouses
+                          .map((v) => DropdownMenuItem(value: v, child: Text(v, style: const TextStyle(fontSize: 14))))
+                          .toList(),
+                      onChanged: (v) => setDlgState(() => localWarehouse = v == 'Todos' ? null : v),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // ── Categoría ─────────────────────────────────────
+                    const Text('Categoría',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                    const SizedBox(height: AppSpacing.xs),
+                    DropdownButtonFormField<String>(
+                      initialValue: localGroup == null || !groups.contains(localGroup)
+                          ? 'Todos'
+                          : localGroup,
+                      isDense: true,
+                      decoration: const InputDecoration(isDense: true),
+                      items: groups
+                          .map((v) => DropdownMenuItem(value: v, child: Text(v, style: const TextStyle(fontSize: 14))))
+                          .toList(),
+                      onChanged: (v) => setDlgState(() => localGroup = v == 'Todos' ? null : v),
                     ),
                   ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      selectedWarehouse = null;
-                      selectedGroup = null;
-                      selectedDate = null;
-                      searchQuery = null;
-                    });
-                    Navigator.of(context).pop();
-                    _loadMovementsData();
-                  },
-                  child: const Text('Limpiar'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    _loadMovementsData();
-                    Navigator.of(context).pop();
-                  },
-                  icon: const Icon(Icons.check_rounded, size: 16),
-                  label: const Text('Aplicar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    selectedWarehouse = null;
+                    selectedGroup = null;
+                    searchQuery = null;
+                    docNumberSearch = null;
+                    dateFrom = null;
+                    dateTo = null;
+                  });
+                  Navigator.of(dialogCtx).pop();
+                  _loadMovementsData();
+                },
+                child: const Text('Limpiar todo'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    selectedWarehouse = localWarehouse;
+                    selectedGroup = localGroup;
+                    searchQuery = localSearch;
+                    docNumberSearch = localDocNumber;
+                    dateFrom = localFrom;
+                    dateTo = localTo;
+                  });
+                  Navigator.of(dialogCtx).pop();
+                  _loadMovementsData();
+                },
+                icon: const Icon(Icons.check_rounded, size: 16),
+                label: const Text('Aplicar'),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
