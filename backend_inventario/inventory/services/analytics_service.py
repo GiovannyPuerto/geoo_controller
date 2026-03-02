@@ -84,15 +84,21 @@ def _get_monthly_value_series(
         )
 
     value_output = DecimalField(max_digits=28, decimal_places=6)
-    movement_value_expr = ExpressionWrapper(
-        F("quantity") * F("unit_cost"),
-        output_field=value_output,
-    )
-    exit_value_expr = ExpressionWrapper(
-        -1 * movement_value_expr,
-        output_field=value_output,
-    )
 
+    # Usamos el campo `total` (ya almacenado con signo correcto desde el ERP)
+    # en lugar de recalcular quantity × unit_cost.  Esto produce los mismos
+    # valores que el ERP cuando usa costeo promedio ponderado, FIFO u otro
+    # método donde unit_cost de salidas ≠ costo de compra.
+    #
+    # Convención del campo `total` en BD:
+    #   total > 0  →  entrada  (valor añadido al inventario)
+    #   total < 0  →  salida   (valor removido del inventario)
+    #   total = 0  →  movimiento sin valor (no afecta saldo monetario)
+    #
+    # Para el saldo inicial y pasado también usamos total, que ya representa
+    # el cambio neto de valor de cada movimiento.
+
+    # ── Saldo inicial (inventario base) ─────────────────────────────────────
     if warehouse_filter:
         initial_stock_query = WarehouseDetail.objects.filter(
             product__inventory_name=inventory_name,
@@ -133,7 +139,7 @@ def _get_monthly_value_series(
 
     past_movements_value = (
         base_queryset.filter(date__lt=start_month_date).aggregate(
-            total_value=Sum(movement_value_expr)
+            total_value=Sum("total")
         )["total_value"]
         or Decimal("0")
     )
@@ -146,14 +152,19 @@ def _get_monthly_value_series(
         .annotate(
             total_entries=Sum(
                 Case(
-                    When(quantity__gt=0, then=movement_value_expr),
+                    When(quantity__gt=0, then=F("total")),
                     default=Value(Decimal("0"), output_field=value_output),
                     output_field=value_output,
                 )
             ),
             total_exits=Sum(
                 Case(
-                    When(quantity__lt=0, then=exit_value_expr),
+                    # total es negativo para salidas; lo negamos para reportar
+                    # el valor absoluto de lo que salió del inventario.
+                    When(quantity__lt=0, then=ExpressionWrapper(
+                        -1 * F("total"),
+                        output_field=value_output,
+                    )),
                     default=Value(Decimal("0"), output_field=value_output),
                     output_field=value_output,
                 )

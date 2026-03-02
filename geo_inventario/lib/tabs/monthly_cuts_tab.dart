@@ -128,7 +128,16 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
         month = null;
       } else {
         final validMonths = cuts.map((e) => e.month).toSet();
-        if (month == null || !validMonths.contains(month)) month = cuts.last.month;
+        if (month == null || !validMonths.contains(month)) {
+          // Seleccionar el último mes que tenga movimientos reales (entradas o
+          // salidas > 0). Así se evita mostrar el mes actual vacío cuando los
+          // datos importados cubren períodos anteriores.
+          final lastWithMovements = cuts.lastWhere(
+            (c) => c.totalEntries > 0 || c.totalExits > 0,
+            orElse: () => cuts.last,
+          );
+          month = lastWithMovements.month;
+        }
       }
 
       if (!mounted) return;
