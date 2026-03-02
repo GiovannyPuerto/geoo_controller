@@ -901,6 +901,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         warehouse: selectedWarehouse,
         category: selectedGroup,
         search: searchQuery,
+        documentType: selectedDocType,
         dateFrom: dateFrom,
         dateTo: dateTo,
       );

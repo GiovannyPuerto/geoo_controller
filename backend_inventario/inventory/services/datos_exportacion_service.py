@@ -1,5 +1,4 @@
-from django.db.models import F, Value
-from django.db.models.functions import Coalesce, Length
+from django.db.models import F
 
 from ..models import InventoryRecord
 from .analitica_inventario_service import (
@@ -12,13 +11,6 @@ from .consulta_registros_service import (
     filtros_registros_desde_request,
     slice_desde_request,
 )
-
-
-def _ordenar_por_documento_desc(queryset):
-    return queryset.annotate(
-        _doc_number_text=Coalesce('document_number', Value('')),
-        _doc_number_len=Length(Coalesce('document_number', Value(''))),
-    ).order_by('-_doc_number_len', '-_doc_number_text', '-date', '-id')
 
 
 def construir_datos_analisis_exportacion(request, inventory_name_default='default'):
@@ -63,7 +55,10 @@ def construir_datos_movimientos_exportacion(request, inventory_name_default='def
     )
 
     records_query = aplicar_filtros_registros(InventoryRecord.objects.all(), filters)
-    records = _ordenar_por_documento_desc(records_query).values(
+    # Ordenar por fecha DESC e id DESC para que el corte por límite recoja todos
+    # los tipos de documento proporcionalmente (evita que el orden alfabético de
+    # número de documento excluya tipos como EN/EA cuando SA domina la cabeza).
+    records = records_query.order_by('-date', '-id').values(
         fecha=F('date'),
         codigo=F('product__code'),
         nombre_producto=F('product__description'),
