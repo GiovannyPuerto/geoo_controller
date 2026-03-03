@@ -321,6 +321,10 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.lg),
+              if (_hasActiveFilters()) ...[
+                _buildActiveFilterChips(),
+                const SizedBox(height: AppSpacing.sm)
+              ],
               _buildAnalysisCharts(),
               const SizedBox(height: AppSpacing.lg),
               _buildNegativeStockAlerts(),
@@ -981,52 +985,75 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   Widget _buildActiveFilterChips() {
     final chips = <Widget>[];
 
-    void addChip(String label, VoidCallback onDelete) {
+    void addChip(IconData icon, String label, VoidCallback onDelete) {
       chips.add(
-        Chip(
-          label: Text(label, style: const TextStyle(fontSize: 11)),
-          onDeleted: onDelete,
-          backgroundColor: AppColors.infoLight,
-          deleteIconColor: AppColors.infoDark,
-          side: const BorderSide(color: AppColors.info, width: 0.5),
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppColors.primaryLight,
+            borderRadius: BorderRadius.circular(AppRadius.full),
+            border:
+                Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: AppColors.primary),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onDelete,
+                child: const Icon(Icons.close_rounded,
+                    size: 12, color: AppColors.primaryDark),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     if (selectedGroup != null) {
-      addChip('Grupo: $selectedGroup', () {
+      addChip(Icons.category_rounded, 'Grupo: $selectedGroup', () {
         setState(() => selectedGroup = null);
         _loadAnalysisData();
       });
     }
     if (selectedRotation != null) {
-      addChip('Rotación: $selectedRotation', () {
+      addChip(Icons.autorenew_rounded, 'Rotación: $selectedRotation', () {
         setState(() => selectedRotation = null);
         _loadAnalysisData();
       });
     }
     if (selectedStagnant != null) {
-      addChip('Estancado: $selectedStagnant', () {
+      addChip(Icons.hourglass_empty_rounded, 'Estancado: $selectedStagnant',
+          () {
         setState(() => selectedStagnant = null);
         _loadAnalysisData();
       });
     }
     if (selectedHighRotation != null) {
-      addChip('Alta Rot.: $selectedHighRotation', () {
+      addChip(Icons.trending_up_rounded, 'Alta Rot.: $selectedHighRotation',
+          () {
         setState(() => selectedHighRotation = null);
         _loadAnalysisData();
       });
     }
     if (selectedWarehouse != null) {
-      addChip('Almacén: $selectedWarehouse', () {
+      addChip(Icons.warehouse_rounded, 'Almacén: $selectedWarehouse', () {
         setState(() => selectedWarehouse = null);
         _loadAnalysisData();
       });
     }
     if (searchQuery != null && searchQuery!.isNotEmpty) {
-      addChip('Búsqueda: $searchQuery', () {
+      addChip(Icons.search_rounded, 'Búsqueda: $searchQuery', () {
         setState(() => searchQuery = null);
         _loadAnalysisData();
       });
@@ -1034,14 +1061,14 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     if (selectedDateFrom != null) {
       final dateStr =
           DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDateFrom!);
-      addChip('Desde: $dateStr', () {
+      addChip(Icons.calendar_today_rounded, 'Desde: $dateStr', () {
         setState(() => selectedDateFrom = null);
         _loadAnalysisData();
       });
     }
     if (selectedDateTo != null) {
       final dateStr = DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDateTo!);
-      addChip('Hasta: $dateStr', () {
+      addChip(Icons.event_rounded, 'Hasta: $dateStr', () {
         setState(() => selectedDateTo = null);
         _loadAnalysisData();
       });
@@ -1051,15 +1078,13 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
+      child: Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Expanded(
-            child: Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: chips),
-          ),
-          TextButton(
+          ...chips,
+          TextButton.icon(
             onPressed: () {
               setState(() {
                 selectedGroup = null;
@@ -1073,8 +1098,14 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
               });
               _loadAnalysisData();
             },
-            child: const Text('Limpiar todo',
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+            icon: const Icon(Icons.filter_list_off_rounded, size: 14),
+            label: const Text('Limpiar todo', style: TextStyle(fontSize: 12)),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.error,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
           ),
         ],
       ),
@@ -1111,7 +1142,6 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
-            if (_hasActiveFilters()) _buildActiveFilterChips(),
             if (_isRangeMode) _buildRangeModeInfoBanner(),
             const Divider(height: 1),
             const SizedBox(height: AppSpacing.sm),
@@ -1490,6 +1520,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
               ),
               actions: [
                 TextButton(
+                  style: TextButton.styleFrom(foregroundColor: AppColors.error),
                   onPressed: () {
                     setState(() {
                       selectedGroup = null;

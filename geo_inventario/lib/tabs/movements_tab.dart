@@ -247,6 +247,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 ),
               ),
               const SizedBox(height: AppSpacing.lg),
+              if (_hasActiveFilters()) ...[_buildActiveFilterChips(), const SizedBox(height: AppSpacing.sm)],
               _buildMovementsChart(),
               const SizedBox(height: AppSpacing.lg),
               _buildChartDataTable(),
@@ -659,7 +660,6 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (_hasActiveFilters()) _buildActiveFilterChips(),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.md),
 
@@ -752,46 +752,67 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     final chips = <Widget>[];
     final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
 
-    void addChip(String label, VoidCallback onDelete) {
+    void addChip(IconData icon, String label, VoidCallback onDelete) {
       chips.add(
-        Chip(
-          label: Text(label, style: const TextStyle(fontSize: 11)),
-          onDeleted: onDelete,
-          backgroundColor: AppColors.cyanLight,
-          deleteIconColor: AppColors.cyanDark,
-          side: const BorderSide(color: AppColors.cyan, width: 0.5),
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppColors.primaryLight,
+            borderRadius: BorderRadius.circular(AppRadius.full),
+            border:
+                Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: AppColors.primary),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onDelete,
+                child: const Icon(Icons.close_rounded,
+                    size: 12, color: AppColors.primaryDark),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     if (selectedWarehouse != null) {
-      addChip('Almacén: $selectedWarehouse', () {
+      addChip(Icons.warehouse_rounded, 'Almacén: $selectedWarehouse', () {
         setState(() => selectedWarehouse = null);
         _loadMovementsData();
       });
     }
     if (selectedGroup != null) {
-      addChip('Categoría: $selectedGroup', () {
+      addChip(Icons.category_rounded, 'Categoría: $selectedGroup', () {
         setState(() => selectedGroup = null);
         _loadMovementsData();
       });
     }
     if (searchQuery != null && searchQuery!.isNotEmpty) {
-      addChip('Búsqueda: $searchQuery', () {
+      addChip(Icons.search_rounded, 'Búsqueda: $searchQuery', () {
         setState(() => searchQuery = null);
         _loadMovementsData();
       });
     }
     if (docNumberSearch != null && docNumberSearch!.isNotEmpty) {
-      addChip('Doc: $docNumberSearch', () {
+      addChip(Icons.tag_rounded, 'Doc: $docNumberSearch', () {
         setState(() => docNumberSearch = null);
         _loadMovementsData();
       });
     }
     if (selectedDocType != null) {
-      addChip('Tipo doc: $selectedDocType', () {
+      addChip(Icons.description_outlined, 'Tipo doc: $selectedDocType', () {
         setState(() => selectedDocType = null);
         _loadMovementsData();
       });
@@ -799,7 +820,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
     if (dateFrom != null || dateTo != null) {
       final from = dateFrom != null ? fmt.format(dateFrom!) : '∅';
       final to = dateTo != null ? fmt.format(dateTo!) : 'hoy';
-      addChip('Fecha: $from → $to', () {
+      addChip(Icons.calendar_month_rounded, 'Fecha: $from → $to', () {
         setState(() {
           dateFrom = null;
           dateTo = null;
@@ -815,7 +836,32 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
       child: Wrap(
         spacing: AppSpacing.xs,
         runSpacing: AppSpacing.xs,
-        children: chips,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ...chips,
+          TextButton.icon(
+            onPressed: () {
+              setState(() {
+                selectedWarehouse = null;
+                selectedGroup = null;
+                searchQuery = null;
+                docNumberSearch = null;
+                selectedDocType = null;
+                dateFrom = null;
+                dateTo = null;
+              });
+              _loadMovementsData();
+            },
+            icon: const Icon(Icons.filter_list_off_rounded, size: 14),
+            label: const Text('Limpiar todo', style: TextStyle(fontSize: 12)),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.error,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1112,6 +1158,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
             ),
             actions: [
               TextButton(
+                style: TextButton.styleFrom(foregroundColor: AppColors.error),
                 onPressed: () {
                   setState(() {
                     selectedWarehouse = null;

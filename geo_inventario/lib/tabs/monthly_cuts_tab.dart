@@ -425,12 +425,9 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
       runSpacing: AppSpacing.xs,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        const Text(
-          'Filtros activos:',
-          style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-        ),
         if (selectedWarehouse != null)
           _deletableChip(
+            Icons.warehouse_rounded,
             'Almacén: $selectedWarehouse',
             () {
               setState(() => selectedWarehouse = null);
@@ -439,6 +436,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
           ),
         if (selectedCategory != null)
           _deletableChip(
+            Icons.category_rounded,
             'Categoría: $selectedCategory',
             () {
               setState(() => selectedCategory = null);
@@ -447,6 +445,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
           ),
         if (searchQuery != null)
           _deletableChip(
+            Icons.search_rounded,
             'Búsqueda: $searchQuery',
             () {
               setState(() => searchQuery = null);
@@ -463,8 +462,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
             });
             _loadData();
           },
-          icon: const Icon(Icons.clear_all, size: 14),
-          label: const Text('Limpiar', style: TextStyle(fontSize: 12)),
+          icon: const Icon(Icons.filter_list_off_rounded, size: 14),
+          label: const Text('Limpiar todo', style: TextStyle(fontSize: 12)),
           style: TextButton.styleFrom(
             foregroundColor: AppColors.error,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -476,16 +475,35 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
     );
   }
 
-  Widget _deletableChip(String label, VoidCallback onDelete) {
-    return Chip(
-      label: Text(label, style: const TextStyle(fontSize: 11)),
-      onDeleted: onDelete,
-      deleteIconColor: AppColors.infoDark,
-      backgroundColor: AppColors.infoLight,
-      side: BorderSide(color: AppColors.info.withValues(alpha: 0.3)),
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: VisualDensity.compact,
+  Widget _deletableChip(IconData icon, String label, VoidCallback onDelete) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight,
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.primary),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.primary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onDelete,
+            child: const Icon(Icons.close_rounded,
+                size: 12, color: AppColors.primaryDark),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1389,6 +1407,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
           ),
           actions: [
             TextButton(
+              style: TextButton.styleFrom(foregroundColor: AppColors.error),
               onPressed: () {
                 setState(() {
                   monthsWindow = 12;

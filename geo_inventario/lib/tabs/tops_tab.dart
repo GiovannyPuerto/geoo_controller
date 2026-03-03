@@ -601,6 +601,28 @@ class _TopsTabPageState extends State<TopsTabPage> {
                             '${_formatDate(movementDateFrom!)} — ${_formatDate(movementDateTo!)}',
                         onDelete: _clearMovementDateRange,
                       ),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          topsGroup = null;
+                          topsRotation = null;
+                          topsSearch = null;
+                          movementDateFrom = null;
+                          movementDateTo = null;
+                        });
+                        _loadData();
+                      },
+                      icon: const Icon(Icons.filter_list_off_rounded, size: 14),
+                      label: const Text('Limpiar todo',
+                          style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.error,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -677,6 +699,9 @@ class _TopsTabPageState extends State<TopsTabPage> {
     String? localGroup = topsGroup;
     String? localRotation = topsRotation;
     String localSearch = topsSearch ?? '';
+    DateTime? localFrom = movementDateFrom;
+    DateTime? localTo = movementDateTo;
+    final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
 
     showDialog<void>(
       context: context,
@@ -828,24 +853,89 @@ class _TopsTabPageState extends State<TopsTabPage> {
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textMuted)),
-                  const SizedBox(height: 4),
-                  _MovementRangeButton(
-                    dateFrom: movementDateFrom,
-                    dateTo: movementDateTo,
+                  const SizedBox(height: AppSpacing.sm),
+                  const Text('Desde',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.xs),
+                  GestureDetector(
                     onTap: () async {
-                      Navigator.of(dialogCtx).pop();
-                      await _pickMovementDateRange();
-                      if (mounted) {
-                        _showFilterDialog(groupItems);
-                      }
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        firstDate: DateTime(2020),
+                        lastDate: localTo ?? DateTime.now(),
+                        initialDate: localFrom ?? DateTime.now().subtract(const Duration(days: 30)),
+                        locale: const Locale('es', 'CO'),
+                      );
+                      if (picked != null) setDlgState(() => localFrom = picked);
                     },
-                    onClear: (movementDateFrom != null &&
-                            movementDateTo != null)
-                        ? () {
-                            _clearMovementDateRange();
-                            Navigator.of(dialogCtx).pop();
-                          }
-                        : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        border: Border.all(
+                          color: localFrom != null ? AppColors.primary : AppColors.border,
+                          width: localFrom != null ? 1.8 : 1,
+                        ),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.calendar_today_rounded, size: 16,
+                            color: localFrom != null ? AppColors.primary : AppColors.textDisabled),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(
+                          localFrom != null ? fmt.format(localFrom!) : 'Fecha desde (opcional)',
+                          style: TextStyle(fontSize: 14,
+                              color: localFrom != null ? AppColors.textPrimary : AppColors.textDisabled),
+                        )),
+                        if (localFrom != null)
+                          GestureDetector(
+                            onTap: () => setDlgState(() => localFrom = null),
+                            child: const Icon(Icons.close_rounded, size: 16, color: AppColors.textMuted),
+                          ),
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const Text('Hasta',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.xs),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        firstDate: localFrom ?? DateTime(2020),
+                        lastDate: DateTime.now(),
+                        initialDate: localTo ?? DateTime.now(),
+                        locale: const Locale('es', 'CO'),
+                      );
+                      if (picked != null) setDlgState(() => localTo = picked);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        border: Border.all(
+                          color: localTo != null ? AppColors.primary : AppColors.border,
+                          width: localTo != null ? 1.8 : 1,
+                        ),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.calendar_today_rounded, size: 16,
+                            color: localTo != null ? AppColors.primary : AppColors.textDisabled),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(
+                          localTo != null ? fmt.format(localTo!) : 'Fecha hasta (opcional)',
+                          style: TextStyle(fontSize: 14,
+                              color: localTo != null ? AppColors.textPrimary : AppColors.textDisabled),
+                        )),
+                        if (localTo != null)
+                          GestureDetector(
+                            onTap: () => setDlgState(() => localTo = null),
+                            child: const Icon(Icons.close_rounded, size: 16, color: AppColors.textMuted),
+                          ),
+                      ]),
+                    ),
                   ),
                 ],
               ),
@@ -880,8 +970,11 @@ class _TopsTabPageState extends State<TopsTabPage> {
                   topsRotation = localRotation;
                   topsSearch =
                       localSearch.trim().isEmpty ? null : localSearch.trim();
+                  movementDateFrom = localFrom;
+                  movementDateTo = localTo;
                 });
                 Navigator.of(dialogCtx).pop();
+                _loadData();
               },
               child: const Text('Aplicar'),
             ),
