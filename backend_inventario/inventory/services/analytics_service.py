@@ -242,6 +242,351 @@ def get_monthly_movements_data(
     return result_data
 
 
+def _get_monthly_qty_value_series(
+    inventory_name="default",
+    warehouse_filter="",
+    category_filter="",
+    search_filter="",
+    months=12,
+):
+    """
+    Construye la serie de cortes mensuales usando EXACTAMENTE la misma
+    metodología que get_monthly_product_cuts_data (tabla de inventario):
+
+    - Itera día a día, POR ALMACÉN dentro de cada producto.
+    - Usa WarehouseDetail.initial_quantity como stock base por almacén.
+    - Aplica snapshots de final_quantity por (producto, almacén, día).
+    - El promedio mensual = Σ(valor total inventario en cada día) / días_del_mes.
+
+    Así el campo average_balance_general coincide exactamente con el
+    "Valor total promedio" del chip de la tabla de inventario.
+
+    Retorna: (start_month_date, months_count, rows, period_avg_general, products_count)
+    """
+    try:
+        months_count = int(months or 12)
+    except (TypeError, ValueError):
+        months_count = 12
+    months_count = max(1, min(months_count, 36))
+
+    today = now().date()
+    start_month_date = (today - relativedelta(months=months_count - 1)).replace(day=1)
+    last_month_start = start_month_date + relativedelta(months=months_count - 1)
+    period_end = (last_month_start + relativedelta(months=1)) - relativedelta(days=1)
+
+    # ── Productos ────────────────────────────────────────────────────────────
+    products_qs = Product.objects.filter(inventory_name=inventory_name)
+    if category_filter:
+        products_qs = products_qs.filter(group__icontains=category_filter)
+    if search_filter:
+        products_qs = products_qs.filter(_search_q(search_filter))
+
+    products_meta = list(
+        products_qs.values("id", "initial_balance", "initial_unit_cost")
+    )
+    product_ids = [p["id"] for p in products_meta]
+    products_map = {p["id"]: p for p in products_meta}
+
+    if not product_ids:
+        return start_month_date, months_count, [], Decimal("0"), 0
+
+    records_qs = InventoryRecord.objects.filter(product_id__in=product_ids)
+    if warehouse_filter:
+        records_qs = records_qs.filter(warehouse__icontains=warehouse_filter)
+
+    warehouse_query = WarehouseDetail.objects.filter(product_id__in=product_ids)
+    if warehouse_filter:
+        warehouse_query = warehouse_query.filter(warehouse__icontains=warehouse_filter)
+
+    # ── Último costo unitario por producto ───────────────────────────────────
+    latest_cost_ids = [
+        row["latest_id"]
+        for row in records_qs.filter(date__lte=period_end)
+        .values("product_id")
+        .annotate(latest_id=Max("id"))
+        if row["latest_id"]
+    ]
+    latest_cost_by_product: dict[int, Decimal] = {
+        row["product_id"]: Decimal(row["unit_cost"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=latest_cost_ids).values(
+            "product_id", "unit_cost"
+        )
+    }
+
+    def get_cost(pid: int) -> Decimal:
+        return latest_cost_by_product.get(
+            pid, Decimal(products_map[pid]["initial_unit_cost"] or 0)
+        )
+
+    # ── Almacenes por producto (WarehouseDetail + registros) ─────────────────
+    warehouses_by_product: dict[int, set] = {}
+    for row in warehouse_query.values("product_id", "warehouse"):
+        warehouses_by_product.setdefault(row["product_id"], set()).add(row["warehouse"])
+    for row in records_qs.values("product_id", "warehouse").distinct():
+        warehouses_by_product.setdefault(row["product_id"], set()).add(row["warehouse"])
+
+    # ── Cantidades iniciales por (producto, almacén) en WarehouseDetail ──────
+    initial_qty_by_warehouse: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"]): Decimal(row["initial_quantity"] or 0)
+        for row in warehouse_query.values("product_id", "warehouse", "initial_quantity")
+    }
+
+    # ── Movimientos antes del período ────────────────────────────────────────
+    # Por (producto, almacén) — para apertura warehouse-level
+    movement_before_start_by_wh: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"]): row["qty"] or Decimal("0")
+        for row in records_qs.filter(date__lt=start_month_date)
+        .values("product_id", "warehouse")
+        .annotate(qty=Sum("quantity"))
+    }
+    # Por producto — para productos sin WarehouseDetail
+    movement_before_start_by_product: dict[int, Decimal] = {
+        row["product_id"]: row["qty"] or Decimal("0")
+        for row in records_qs.filter(date__lt=start_month_date)
+        .values("product_id")
+        .annotate(qty=Sum("quantity"))
+    }
+
+    # ── opening final_quantity por (producto, almacén) antes del período ─────
+    opening_final_ids_wh = [
+        row["latest_id"]
+        for row in records_qs.filter(
+            final_quantity__isnull=False, date__lt=start_month_date
+        )
+        .values("product_id", "warehouse")
+        .annotate(latest_id=Max("id"))
+        if row["latest_id"]
+    ]
+    opening_final_by_wh: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"]): Decimal(row["final_quantity"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=opening_final_ids_wh).values(
+            "product_id", "warehouse", "final_quantity"
+        )
+    }
+    # Para productos sin almacén
+    opening_final_ids_prod = [
+        row["latest_id"]
+        for row in records_qs.filter(
+            final_quantity__isnull=False, date__lt=start_month_date
+        )
+        .values("product_id")
+        .annotate(latest_id=Max("id"))
+        if row["latest_id"]
+    ]
+    opening_final_by_product: dict[int, Decimal] = {
+        row["product_id"]: Decimal(row["final_quantity"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=opening_final_ids_prod).values(
+            "product_id", "final_quantity"
+        )
+    }
+
+    # ── Movimientos diarios por (producto, almacén, fecha) ───────────────────
+    _vf = DecimalField(max_digits=28, decimal_places=6)
+    _zero = Value(Decimal("0"), output_field=_vf)
+
+    movement_by_day_by_wh: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"], row["date"]): row["qty"] or Decimal("0")
+        for row in records_qs.filter(date__gte=start_month_date, date__lte=period_end)
+        .values("product_id", "warehouse", "date")
+        .annotate(qty=Sum("quantity"))
+    }
+    # Para productos sin almacén
+    movement_by_day_by_product: dict[tuple, Decimal] = {
+        (row["product_id"], row["date"]): row["qty"] or Decimal("0")
+        for row in records_qs.filter(date__gte=start_month_date, date__lte=period_end)
+        .values("product_id", "date")
+        .annotate(qty=Sum("quantity"))
+    }
+
+    # Entradas/salidas diarias por (producto, almacén) para valor de movimientos
+    daily_pos_wh: dict[tuple, Decimal] = {}
+    daily_neg_wh: dict[tuple, Decimal] = {}
+    for row in (
+        records_qs.filter(date__gte=start_month_date, date__lte=period_end)
+        .values("product_id", "warehouse", "date")
+        .annotate(
+            pos_qty=Sum(
+                Case(When(quantity__gt=0, then=F("quantity")), default=_zero, output_field=_vf)
+            ),
+            neg_qty=Sum(
+                Case(When(quantity__lt=0, then=F("quantity")), default=_zero, output_field=_vf)
+            ),
+        )
+    ):
+        k = (row["product_id"], row["warehouse"], row["date"])
+        daily_pos_wh[k] = row["pos_qty"] or Decimal("0")
+        daily_neg_wh[k] = abs(row["neg_qty"] or Decimal("0"))
+
+    # ── Snapshots final_quantity diarios por (producto, almacén, fecha) ──────
+    daily_final_ids_wh = [
+        row["latest_id"]
+        for row in records_qs.filter(
+            final_quantity__isnull=False,
+            date__gte=start_month_date,
+            date__lte=period_end,
+        )
+        .values("product_id", "warehouse", "date")
+        .annotate(latest_id=Max("id"))
+        if row["latest_id"]
+    ]
+    daily_final_by_wh: dict[tuple, Decimal] = {
+        (row["product_id"], row["warehouse"], row["date"]): Decimal(row["final_quantity"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=daily_final_ids_wh).values(
+            "product_id", "warehouse", "date", "final_quantity"
+        )
+    }
+    # Para productos sin almacén
+    daily_final_ids_prod = [
+        row["latest_id"]
+        for row in records_qs.filter(
+            final_quantity__isnull=False,
+            date__gte=start_month_date,
+            date__lte=period_end,
+        )
+        .values("product_id", "date")
+        .annotate(latest_id=Max("id"))
+        if row["latest_id"]
+    ]
+    daily_final_by_product: dict[tuple, Decimal] = {
+        (row["product_id"], row["date"]): Decimal(row["final_quantity"] or 0)
+        for row in InventoryRecord.objects.filter(id__in=daily_final_ids_prod).values(
+            "product_id", "date", "final_quantity"
+        )
+    }
+
+    # ── Estado inicial de running_qty: (producto, almacén) → qty ─────────────
+    # Para productos con almacenes usa apertura por almacén.
+    # Para productos sin almacenes usa apertura a nivel producto.
+    running_wh: dict[tuple, Decimal] = {}   # clave (pid, wh)
+    running_prod: dict[int, Decimal] = {}   # clave pid (sin almacén)
+
+    for pid in product_ids:
+        whs = warehouses_by_product.get(pid, set())
+        if whs:
+            for wh in whs:
+                key = (pid, wh)
+                snap = opening_final_by_wh.get(key)
+                if snap is not None:
+                    running_wh[key] = snap
+                else:
+                    running_wh[key] = (
+                        initial_qty_by_warehouse.get(key, Decimal("0"))
+                        + movement_before_start_by_wh.get(key, Decimal("0"))
+                    )
+        else:
+            snap = opening_final_by_product.get(pid)
+            if snap is not None:
+                running_prod[pid] = snap
+            else:
+                running_prod[pid] = (
+                    Decimal(products_map[pid]["initial_balance"] or 0)
+                    + movement_before_start_by_product.get(pid, Decimal("0"))
+                )
+
+    # ── Construir filas mensuales con promedio diario real ────────────────────
+    rows = []
+    average_sum = Decimal("0")
+    products_count = len(product_ids)
+
+    for i in range(months_count):
+        current_month_date = start_month_date + relativedelta(months=i)
+        month_key = current_month_date.strftime("%Y-%m")
+        month_end_date = (current_month_date + relativedelta(months=1)) - relativedelta(days=1)
+
+        month_days = []
+        day_cursor = current_month_date
+        while day_cursor <= month_end_date:
+            month_days.append(day_cursor)
+            day_cursor += timedelta(days=1)
+        days_count = len(month_days)
+
+        # Valor de apertura del mes
+        opening_val = Decimal("0")
+        for pid in product_ids:
+            cost = get_cost(pid)
+            whs = warehouses_by_product.get(pid, set())
+            if whs:
+                for wh in whs:
+                    opening_val += running_wh.get((pid, wh), Decimal("0")) * cost
+            else:
+                opening_val += running_prod.get(pid, Decimal("0")) * cost
+
+        # Iterar día a día — mismo algoritmo que get_monthly_product_cuts_data
+        sum_daily_val = Decimal("0")
+        entries_val = Decimal("0")
+        exits_val = Decimal("0")
+        day_val = opening_val  # valor inicial en caso de mes vacío (no ocurre)
+
+        for day in month_days:
+            # Actualizar posiciones
+            for pid in product_ids:
+                cost = get_cost(pid)
+                whs = warehouses_by_product.get(pid, set())
+                if whs:
+                    for wh in whs:
+                        k = (pid, wh, day)
+                        snap = daily_final_by_wh.get(k)
+                        if snap is not None:
+                            running_wh[(pid, wh)] = snap
+                        else:
+                            running_wh[(pid, wh)] = running_wh.get(
+                                (pid, wh), Decimal("0")
+                            ) + movement_by_day_by_wh.get(k, Decimal("0"))
+                        entries_val += daily_pos_wh.get(k, Decimal("0")) * cost
+                        exits_val += daily_neg_wh.get(k, Decimal("0")) * cost
+                else:
+                    kp = (pid, day)
+                    snap = daily_final_by_product.get(kp)
+                    if snap is not None:
+                        running_prod[pid] = snap
+                    else:
+                        running_prod[pid] = running_prod.get(
+                            pid, Decimal("0")
+                        ) + movement_by_day_by_product.get(kp, Decimal("0"))
+
+            # Valor del inventario al cierre de este día
+            day_val = Decimal("0")
+            for pid in product_ids:
+                cost = get_cost(pid)
+                whs = warehouses_by_product.get(pid, set())
+                if whs:
+                    for wh in whs:
+                        day_val += running_wh.get((pid, wh), Decimal("0")) * cost
+                else:
+                    day_val += running_prod.get(pid, Decimal("0")) * cost
+            sum_daily_val += day_val
+
+        # Valor de cierre del mes (ya es el valor al último día)
+        closing_val = day_val if month_days else opening_val
+
+        # Promedio diario real: Σ valor_diario / días_del_mes
+        average_val = sum_daily_val / Decimal(days_count) if days_count > 0 else closing_val
+        average_sum += average_val
+
+        avg_per_product = (
+            average_val / Decimal(products_count) if products_count > 0 else Decimal("0")
+        )
+
+        rows.append(
+            {
+                "month": month_key,
+                "opening_balance": float(opening_val),
+                "total_entries": float(entries_val),
+                "total_exits": float(exits_val),
+                "closing_balance": float(closing_val),
+                "average_balance": float(average_val),
+                "average_balance_general": float(average_val),
+                "average_balance_per_product": float(avg_per_product),
+                "products_count": products_count,
+            }
+        )
+
+    period_avg_general = (
+        average_sum / Decimal(months_count) if months_count > 0 else Decimal("0")
+    )
+    return start_month_date, months_count, rows, period_avg_general, products_count
+
+
 def get_monthly_cuts_data(
     inventory_name="default",
     warehouse_filter="",
@@ -250,16 +595,18 @@ def get_monthly_cuts_data(
     months=12,
 ):
     """
-    Calcula cortes mensuales:
-    - corte general (valorizado),
-    - corte promedio por producto.
+    Calcula cortes mensuales valorados usando cantidad × costo_unitario_actual
+    por producto, con la misma metodología que la tabla de inventario
+    (get_monthly_product_cuts_data), garantizando que gráfica y tabla muestren
+    cifras coherentes aunque hayan cambiado los costos unitarios.
     """
     (
-        start_month_date,
+        _start,
         months_count,
-        starting_balance,
-        monthly_data,
-    ) = _get_monthly_value_series(
+        rows,
+        period_avg_general,
+        products_count,
+    ) = _get_monthly_qty_value_series(
         inventory_name=inventory_name,
         warehouse_filter=warehouse_filter,
         category_filter=category_filter,
@@ -267,72 +614,16 @@ def get_monthly_cuts_data(
         months=months,
     )
 
-    # Cantidad de productos considerados para el promedio por producto.
-    products_qs = Product.objects.filter(inventory_name=inventory_name)
-    if category_filter:
-        products_qs = products_qs.filter(group__icontains=category_filter)
-    if warehouse_filter:
-        products_qs = products_qs.filter(
-            Q(warehousedetail__warehouse__icontains=warehouse_filter)
-            | Q(inventoryrecord__warehouse__icontains=warehouse_filter)
-        ).distinct()
-    if search_filter:
-        products_qs = products_qs.filter(
-            _search_q(search_filter)
-        )
-    products_count = products_qs.count()
-
-    rows = []
-    running_balance = starting_balance
-    average_sum_general = Decimal("0")
-    average_sum_per_product = Decimal("0")
-
-    for i in range(months_count):
-        current_month_date = start_month_date + relativedelta(months=i)
-        month_key = current_month_date.strftime("%Y-%m")
-        month_data = monthly_data.get(
-            month_key, {"entries": Decimal("0"), "exits": Decimal("0")}
-        )
-        entries = month_data["entries"]
-        exits = month_data["exits"]
-        opening_balance = running_balance
-        closing_balance = opening_balance + entries - exits
-        average_balance_general = (opening_balance + closing_balance) / Decimal("2")
-        if products_count > 0:
-            average_balance_per_product = average_balance_general / Decimal(products_count)
-        else:
-            average_balance_per_product = Decimal("0")
-        average_sum_general += average_balance_general
-        average_sum_per_product += average_balance_per_product
-
-        rows.append(
-            {
-                "month": month_key,
-                "opening_balance": float(opening_balance),
-                "total_entries": float(entries),
-                "total_exits": float(exits),
-                "closing_balance": float(closing_balance),
-                # Compatibilidad: average_balance conserva el corte general.
-                "average_balance": float(average_balance_general),
-                "average_balance_general": float(average_balance_general),
-                "average_balance_per_product": float(average_balance_per_product),
-                "products_count": products_count,
-            }
-        )
-        running_balance = closing_balance
-
-    period_average_general = (
-        average_sum_general / Decimal(months_count) if months_count else Decimal("0")
-    )
     period_average_per_product = (
-        average_sum_per_product / Decimal(months_count) if months_count else Decimal("0")
+        period_avg_general / Decimal(products_count)
+        if products_count > 0
+        else Decimal("0")
     )
 
     return {
         "months": rows,
-        # El promedio principal solicitado es producto por producto.
         "period_average_cut": float(period_average_per_product),
-        "period_average_general": float(period_average_general),
+        "period_average_general": float(period_avg_general),
         "period_average_per_product": float(period_average_per_product),
         "products_count": products_count,
         "months_count": months_count,

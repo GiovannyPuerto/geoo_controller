@@ -719,7 +719,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                           final xLabel = point.x?.toString() ?? '';
                           final yVal = point.y;
                           final idx = sortedGroupData.indexWhere(
-                            (e) => _getShortGroupName(e.key) == xLabel,
+                            (e) => e.key == xLabel,
                           );
                           final barColor = groupColors[
                               (idx >= 0 ? idx : 0) % groupColors.length];
@@ -791,7 +791,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                         ColumnSeries<MapEntry<String, double>, String>(
                           dataSource: sortedGroupData,
                           xValueMapper: (MapEntry<String, double> data, _) =>
-                              _getShortGroupName(data.key),
+                              data.key,
                           yValueMapper: (MapEntry<String, double> data, _) =>
                               data.value,
                           pointColorMapper:

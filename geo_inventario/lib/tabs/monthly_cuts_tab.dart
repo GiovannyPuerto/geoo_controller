@@ -603,8 +603,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         // x está directamente en CartesianChartPoint
                         final xLabel = points.first.x?.toString() ?? '';
                         const seriesNames = [
-                          'Corte Promedio',
-                          'Corte Final',
+                          'Valor Promedio Inventario',
+                          'Valor Cierre',
                           'Promedio período',
                         ];
                         const seriesColors = [
@@ -696,7 +696,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         xValueMapper: (d, _) =>
                           MonthlyCutsFiltrosService.formatMonth(d.month),
                         yValueMapper: (d, _) => d.averageBalanceGeneral,
-                        name: 'Corte Promedio General',
+                        name: 'Valor Promedio Inventario',
                         color: AppColors.chartCutAverage
                             .withValues(alpha: 0.55),
                         borderRadius: const BorderRadius.vertical(
@@ -707,13 +707,13 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                           isVisible: false,
                         ),
                       ),
-                      // Línea de corte final con marcadores destacados
+                      // Línea de valor de cierre con marcadores destacados
                       LineSeries<MonthlyCut, String>(
                         dataSource: monthlyCuts,
                         xValueMapper: (d, _) =>
                           MonthlyCutsFiltrosService.formatMonth(d.month),
                         yValueMapper: (d, _) => d.closingBalance,
-                        name: 'Corte Final',
+                        name: 'Valor Cierre',
                         color: AppColors.chartCutFinal,
                         width: 2.5,
                         markerSettings: const MarkerSettings(
@@ -934,8 +934,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                   DataColumn2(label: Text('Entradas'), numeric: true),
                   DataColumn2(label: Text('Salidas'), numeric: true),
                   DataColumn2(label: Text('Cierre'), numeric: true),
-                  DataColumn2(label: Text('Prom. General'), numeric: true),
-                ],
+                  DataColumn2(label: Text('Prom. valor inventario'), numeric: true),
+                ],  
                 rows: monthlyCuts.asMap().entries.map((entry) {
                   final i = entry.key;
                   final row = entry.value;

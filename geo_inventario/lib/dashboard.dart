@@ -290,151 +290,171 @@ class _DashboardPageState extends State<DashboardPage>
   PreferredSizeWidget _buildAppBar() {
     final isMobile = MediaQuery.of(context).size.width < 600;
     return PreferredSize(
-      preferredSize: Size.fromHeight(isMobile ? 96 : 112),
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: AppGradients.hero,
-          boxShadow: AppShadows.elevated,
-        ),
-        child: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-            tooltip: 'Volver al inicio',
-            onPressed: () => Navigator.pop(context),
-          ),
-          title: Row(
-            children: [
-              // Ícono en círculo traslúcido blanco sobre fondo navy
-              Container(
-                width: isMobile ? 34 : 40,
-                height: isMobile ? 34 : 40,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+      preferredSize: Size.fromHeight(isMobile ? 100 : 116),
+      child: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: AppGradients.hero,
+              boxShadow: AppShadows.elevated,
+            ),
+            child: AppBar(
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                scrolledUnderElevation: 0,
+                elevation: 0,
+                leading: IconButton(
+                  icon:
+                      const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                  tooltip: 'Volver al inicio',
+                  onPressed: () => Navigator.pop(context),
                 ),
-                padding: const EdgeInsets.all(4),
-                child: Image.asset('statics/images/logo.png',
-                    height: isMobile ? 24 : 30),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                title: Row(
                   children: [
-                    const Text(
-                      'Dashboard de Inventario',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        letterSpacing: 0.1,
+                    // Ícono en círculo traslúcido blanco sobre fondo navy
+                    Container(
+                      width: isMobile ? 34 : 40,
+                      height: isMobile ? 34 : 40,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.4),
+                            width: 1.5),
+                      ),
+                      padding: const EdgeInsets.all(4),
+                      child: Image.asset('statics/images/logo.png',
+                          height: isMobile ? 24 : 30),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Dashboard de Inventario',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              letterSpacing: 0.1,
+                            ),
+                          ),
+                          if (_lastUpdateTime != null)
+                            Text(
+                              'Actualizado el $_lastUpdateTime',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xCCFFFFFF),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    if (_lastUpdateTime != null)
-                      Text(
-                        'Actualizado el $_lastUpdateTime',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xCCFFFFFF),
-                        ),
+                  ],
+                ),
+                actions: [
+                  // Indicador del servidor + botón de configuración
+                  ServerIndicatorChip(
+                    host: ConfigService.instance.host,
+                    port: ConfigService.instance.port,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Tooltip(
+                    message: 'Configurar servidor',
+                    child: IconButton(
+                      icon: const Icon(Icons.settings_ethernet_rounded,
+                          color: Color(0xCCFFFFFF), size: 22),
+                      onPressed: () async {
+                        final changed =
+                            await ServerSettingsDialog.show(context);
+                        if (changed && mounted) {
+                          setState(() {}); // refresca indicador en AppBar
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  _UploadMenu(
+                    hasBaseData: _hasBaseData,
+                    onUploadBase: _pickAndUploadBaseFile,
+                    onUploadUpdate: _pickAndUploadUpdateFiles,
+                    onRollbackUpdate: _rollbackLastUpdate,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                ],
+                bottom: TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: const Color(0x88FFFFFF),
+                  labelStyle: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
+                  unselectedLabelStyle: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w400),
+                  indicator: BoxDecoration(
+                    color: AppColors.brandPink,
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  ),
+                  indicatorPadding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  tabs: const [
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.analytics_rounded, size: 16),
+                          SizedBox(width: 6),
+                          Text('Análisis'),
+                        ],
                       ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.leaderboard_rounded, size: 16),
+                          SizedBox(width: 6),
+                          Text('Tops'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.swap_horiz_rounded, size: 16),
+                          SizedBox(width: 6),
+                          Text('Movimientos'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.calendar_month_rounded, size: 16),
+                          SizedBox(width: 6),
+                          Text('Cortes Mensuales'),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ],
+            ),
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ColoredBox(
+              color: AppColors.brandPink,
+              child: SizedBox(height: 4, width: double.infinity),
+            ),
           ),
-          actions: [
-            // Indicador del servidor + botón de configuración
-            ServerIndicatorChip(
-              host: ConfigService.instance.host,
-              port: ConfigService.instance.port,
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Tooltip(
-              message: 'Configurar servidor',
-              child: IconButton(
-                icon: const Icon(Icons.settings_ethernet_rounded,
-                    color: Color(0xCCFFFFFF), size: 22),
-                onPressed: () async {
-                  final changed = await ServerSettingsDialog.show(context);
-                  if (changed && mounted) {
-                    setState(() {}); // refresca indicador en AppBar
-                  }
-                },
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            _UploadMenu(
-              hasBaseData: _hasBaseData,
-              onUploadBase: _pickAndUploadBaseFile,
-              onUploadUpdate: _pickAndUploadUpdateFiles,
-              onRollbackUpdate: _rollbackLastUpdate,
-            ),
-            const SizedBox(width: AppSpacing.md),
-          ],
-          bottom: TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelColor: Colors.white,
-            unselectedLabelColor: const Color(0xAAFFFFFF),
-            labelStyle:
-                const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-            unselectedLabelStyle:
-                const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
-            indicator: const UnderlineTabIndicator(
-              borderSide: BorderSide(color: AppColors.brandPink, width: 3),
-              insets: EdgeInsets.symmetric(horizontal: 8),
-            ),
-            indicatorSize: TabBarIndicatorSize.tab,
-            tabs: const [
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.analytics_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Análisis'),
-                  ],
-                ),
-              ),
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.leaderboard_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Tops'),
-                  ],
-                ),
-              ),
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.swap_horiz_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Movimientos'),
-                  ],
-                ),
-              ),
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.calendar_month_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Cortes Mensuales'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }

@@ -48,10 +48,10 @@ class AppColors {
   static const Color accentLighter = Color(0xFFEAF8EC);
 
   // ── Superficies ────────────────────────────────────────────────────────────
-  static const Color background = Color(0xFFF0F4F8);
+  static const Color background = Color(0xFFE6EFF8); // tinte azul corporativo
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceVariant = Color(0xFFEAF2F7);
-  static const Color surfaceBlue = Color(0xFFE0F3FA);
+  static const Color surfaceVariant = Color(0xFFDDE9F5); // azul más saturado
+  static const Color surfaceBlue = Color(0xFFCDE7F5);
 
   // ── Textos ─────────────────────────────────────────────────────────────────
   static const Color textPrimary = Color(0xFF0F172A);
@@ -166,14 +166,15 @@ class AppShadows {
 class AppGradients {
   AppGradients._();
 
-  /// Gradiente corporativo: azul profundo → cian (refleja el logo Geoflora).
+  /// Gradiente corporativo: azul profundo → azul medio (Pantone 7462 C → 7460 C).
   static const LinearGradient primary = LinearGradient(
     colors: [AppColors.primary, AppColors.midBlue],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Gradiente banner hero: navy → cian — identidad corporativa completa.
+  /// Gradiente banner hero: azul profundo → azul medio → cian
+  /// (Pantone 7462 C → 7460 C → 638 C) — solo colores de la paleta oficial.
   static const LinearGradient hero = LinearGradient(
     colors: [AppColors.primary, AppColors.midBlue, AppColors.cyan],
     begin: Alignment.topLeft,
@@ -248,6 +249,11 @@ class AppTheme {
       ),
       fontFamily: 'Roboto',
       scaffoldBackgroundColor: AppColors.background,
+
+      // Drawer (si se usa)
+      drawerTheme: const DrawerThemeData(
+        backgroundColor: AppColors.dark,
+      ),
 
       // AppBar — azul corporativo profundo con texto blanco
       appBarTheme: const AppBarTheme(

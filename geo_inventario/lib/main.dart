@@ -217,80 +217,97 @@ class _WelcomePageState extends State<WelcomePage>
   PreferredSizeWidget _buildAppBar() {
     return PreferredSize(
       preferredSize: const Size.fromHeight(68),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.primary,
-          boxShadow: AppShadows.elevated,
-        ),
-        child: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          title: Row(
-            children: [
-              // Logo en pastilla blanca para contraste sobre fondo navy
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              color: AppColors.primary,
+              boxShadow: AppShadows.elevated,
+            ),
+            child: AppBar(
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                scrolledUnderElevation: 0,
+                elevation: 0,
+                title: Row(
+                  children: [
+                    // Logo en pastilla blanca para contraste sobre fondo navy
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: Image.asset('statics/images/logo_geoflora.png',
+                          height: 26),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Sistema de Inventario',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                        Text(
+                          'Geoflora SAS',
+                          style:
+                              TextStyle(fontSize: 11, color: Color(0xCCFFFFFF)),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                child:
-                    Image.asset('statics/images/logo_geoflora.png', height: 26),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Sistema de Inventario',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: 0.1,
+                actions: [
+                  // Indicador del servidor configurado
+                  ServerIndicatorChip(
+                    host: ConfigService.instance.host,
+                    port: ConfigService.instance.port,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  // Botón de configuración del servidor
+                  Tooltip(
+                    message: 'Configurar servidor',
+                    child: IconButton(
+                      icon: const Icon(Icons.settings_ethernet_rounded,
+                          color: Color(0xCCFFFFFF), size: 22),
+                      onPressed: () async {
+                        final changed =
+                            await ServerSettingsDialog.show(context);
+                        if (changed && mounted) {
+                          setState(() {}); // refresca indicador
+                          _loadHistorial();
+                        }
+                      },
                     ),
                   ),
-                  Text(
-                    'Geoflora SAS',
-                    style: TextStyle(fontSize: 11, color: Color(0xCCFFFFFF)),
+                  const SizedBox(width: AppSpacing.sm),
+                  _AppBarButton(
+                    icon: Icons.dashboard_rounded,
+                    label: 'Dashboard',
+                    onTap: _goToDashboard,
                   ),
+                  const SizedBox(width: AppSpacing.md),
                 ],
               ),
-            ],
+            ),
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ColoredBox(
+              color: AppColors.brandPink,
+              child: SizedBox(height: 4, width: double.infinity),
+            ),
           ),
-          actions: [
-            // Indicador del servidor configurado
-            ServerIndicatorChip(
-              host: ConfigService.instance.host,
-              port: ConfigService.instance.port,
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            // Botón de configuración del servidor
-            Tooltip(
-              message: 'Configurar servidor',
-              child: IconButton(
-                icon: const Icon(Icons.settings_ethernet_rounded,
-                    color: Color(0xCCFFFFFF), size: 22),
-                onPressed: () async {
-                  final changed = await ServerSettingsDialog.show(context);
-                  if (changed && mounted) {
-                    setState(() {}); // refresca indicador
-                    _loadHistorial();
-                  }
-                },
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            _AppBarButton(
-              icon: Icons.dashboard_rounded,
-              label: 'Dashboard',
-              onTap: _goToDashboard,
-            ),
-            const SizedBox(width: AppSpacing.md),
-          ],
-        ),
+        ],
       ),
     );
   }
