@@ -21,6 +21,7 @@ from .vistas.lectura import (
     get_product_analysis,
     get_product_history,
     get_products,
+    get_range_product_cuts,
     get_records,
     get_summary,
     list_inventories,
@@ -45,6 +46,7 @@ obtener_cortes_mensuales = get_monthly_cuts
 obtener_movimientos_mensuales = get_monthly_movements
 obtener_cortes_mensuales_productos = get_monthly_product_cuts
 obtener_analisis_producto = get_product_analysis
+obtener_cortes_rango_producto = get_range_product_cuts
 obtener_historial_producto = get_product_history
 obtener_productos = get_products
 obtener_registros = get_records
@@ -56,6 +58,7 @@ urlpatterns = [
     path('movimientos-mensuales/', obtener_movimientos_mensuales, name='obtener_movimientos_mensuales'),
     path('cortes-mensuales/', obtener_cortes_mensuales, name='obtener_cortes_mensuales'),
     path('cortes-mensuales-productos/', obtener_cortes_mensuales_productos, name='obtener_cortes_mensuales_productos'),
+    path('cortes-rango-productos/', obtener_cortes_rango_producto, name='obtener_cortes_rango_producto'),
     path('ultima-actualizacion/', obtener_ultima_actualizacion, name='obtener_ultima_actualizacion'),
     path('cargar/', actualizar_inventario, name='cargar_excel'),
     path('cargar/<str:inventory_name>/', actualizar_inventario, name='cargar_excel_con_inventario'),

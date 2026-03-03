@@ -202,21 +202,46 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                           color: Colors.white, size: 24),
                     ),
                     const SizedBox(width: AppSpacing.md),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Historial de Movimientos',
-                          style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold,
-                            color: Colors.white, letterSpacing: 0.3,
+                    Expanded(
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Historial de Movimientos',
+                            style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold,
+                              color: Colors.white, letterSpacing: 0.3,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Entradas, salidas y saldos del inventario',
-                          style: TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
-                        ),
-                      ],
+                          Text(
+                            'Entradas, salidas y saldos del inventario',
+                            style: TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.filter_list_rounded, size: 20, color: Colors.white),
+                      tooltip: 'Filtros',
+                      onPressed: showFiltersDialog,
+                      style: IconButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.15),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.sm)),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    IconButton(
+                      icon: const Icon(Icons.download_outlined, size: 20, color: Colors.white),
+                      tooltip: 'Exportar',
+                      onPressed: _showExportDialog,
+                      style: IconButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.15),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.sm)),
+                      ),
                     ),
                   ],
                 ),
@@ -351,7 +376,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                 tooltipDisplayMode: TrackballDisplayMode.groupAllPoints,
                 tooltipSettings: const InteractiveTooltip(
                   enable: true,
-                  color: Color(0xFF1E293B),
+                  color: AppColors.dark,
                   textStyle: TextStyle(color: Colors.white, fontSize: 11),
                   borderWidth: 0,
                 ),
@@ -368,7 +393,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
+                      color: AppColors.dark,
                       borderRadius: BorderRadius.circular(8),
                       boxShadow: [
                         BoxShadow(
@@ -385,7 +410,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                         Text(
                           xLabel,
                           style: const TextStyle(
-                            color: Color(0xFF94A3B8),
+                            color: AppColors.textDisabled,
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
                           ),
@@ -418,7 +443,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                                 Text(
                                   '$label: ',
                                   style: const TextStyle(
-                                    color: Color(0xFF94A3B8),
+                                    color: AppColors.textDisabled,
                                     fontSize: 11,
                                   ),
                                 ),
@@ -603,57 +628,33 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
         children: [
           // ── Encabezado ───────────────────────────────────────────────
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.swap_horiz_rounded,
-                      size: 18, color: AppColors.primary),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    'Todos los movimientos',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryLight,
-                      borderRadius: BorderRadius.circular(AppRadius.full),
-                    ),
-                    child: Text(
-                      '${filteredMovements.length}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primaryDarker,
-                      ),
-                    ),
-                  ),
-                ],
+              const Icon(Icons.swap_horiz_rounded,
+                  size: 18, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text(
+                'Todos los movimientos',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
               ),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _showExportDialog,
-                    icon: const Icon(Icons.download_outlined, size: 16),
-                    label: const Text('Exportar'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.primary,
-                      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                    ),
+              const SizedBox(width: AppSpacing.sm),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(AppRadius.full),
+                ),
+                child: Text(
+                  '${filteredMovements.length}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primaryDarker,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.filter_list_rounded,
-                        color: AppColors.textMuted),
-                    tooltip: 'Filtros',
-                    onPressed: showFiltersDialog,
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -811,31 +812,10 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
-        children: [
-          Expanded(
-            child: Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: chips),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                selectedWarehouse = null;
-                selectedGroup = null;
-                searchQuery = null;
-                docNumberSearch = null;
-                selectedDocType = null;
-                dateFrom = null;
-                dateTo = null;
-              });
-              _loadMovementsData();
-            },
-            child: const Text('Limpiar todo',
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-          ),
-        ],
+      child: Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: chips,
       ),
     );
   }
@@ -1093,21 +1073,6 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     ),
                     const SizedBox(height: AppSpacing.md),
 
-                    // ── Número de documento ───────────────────────────
-                    const Text('Número de documento',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
-                    const SizedBox(height: AppSpacing.xs),
-                    TextFormField(
-                      initialValue: localDocNumber,
-                      decoration: const InputDecoration(
-                        hintText: 'Ej. 00123456',
-                        prefixIcon: Icon(Icons.tag_rounded, size: 18),
-                        isDense: true,
-                      ),
-                      onChanged: (v) => setDlgState(() => localDocNumber = v.isEmpty ? null : v),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-
                     // ── Búsqueda de producto ──────────────────────────
                     const Text('Producto (código o descripción)',
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
@@ -1123,22 +1088,6 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     ),
                     const SizedBox(height: AppSpacing.md),
 
-                    // ── Almacén ───────────────────────────────────────
-                    const Text('Almacén',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
-                    const SizedBox(height: AppSpacing.xs),
-                    DropdownButtonFormField<String>(
-                      initialValue: localWarehouse == null || !warehouses.contains(localWarehouse)
-                          ? 'Todos'
-                          : localWarehouse,
-                      isDense: true,
-                      decoration: const InputDecoration(isDense: true),
-                      items: warehouses
-                          .map((v) => DropdownMenuItem(value: v, child: Text(v, style: const TextStyle(fontSize: 14))))
-                          .toList(),
-                      onChanged: (v) => setDlgState(() => localWarehouse = v == 'Todos' ? null : v),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
 
                     // ── Categoría ─────────────────────────────────────
                     const Text('Categoría',
@@ -1157,24 +1106,6 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
                     ),
                     const SizedBox(height: AppSpacing.md),
 
-                    // ── Tipo de documento ──────────────────────────────────
-                    const Text('Tipo de documento',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
-                    const SizedBox(height: AppSpacing.xs),
-                    DropdownButtonFormField<String>(
-                      initialValue: localDocType == null || !docTypes.contains(localDocType)
-                          ? 'Todos'
-                          : localDocType,
-                      isDense: true,
-                      decoration: const InputDecoration(isDense: true),
-                      items: docTypes
-                          .map((v) => DropdownMenuItem(
-                                value: v,
-                                child: Text(v, style: const TextStyle(fontSize: 14, fontFamily: 'monospace')),
-                              ))
-                          .toList(),
-                      onChanged: (v) => setDlgState(() => localDocType = v == 'Todos' ? null : v),
-                    ),
                   ],
                 ),
               ),

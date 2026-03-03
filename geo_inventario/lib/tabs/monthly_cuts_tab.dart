@@ -305,10 +305,10 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.download_outlined,
+                icon: const Icon(Icons.filter_list_rounded,
                     size: 20, color: Colors.white),
-                tooltip: 'Exportar',
-                onPressed: _showExportDialog,
+                tooltip: 'Filtros',
+                onPressed: _showFiltersDialog,
                 style: IconButton.styleFrom(
                   foregroundColor: Colors.white,
                   backgroundColor: Colors.white.withValues(alpha: 0.15),
@@ -319,10 +319,10 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
               ),
               const SizedBox(width: AppSpacing.xs),
               IconButton(
-                icon: const Icon(Icons.filter_list_rounded,
+                icon: const Icon(Icons.download_outlined,
                     size: 20, color: Colors.white),
-                tooltip: 'Filtros',
-                onPressed: _showFiltersDialog,
+                tooltip: 'Exportar',
+                onPressed: _showExportDialog,
                 style: IconButton.styleFrom(
                   foregroundColor: Colors.white,
                   backgroundColor: Colors.white.withValues(alpha: 0.15),
@@ -357,13 +357,13 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                     Icons.bar_chart_rounded,
                     'Promedio general',
                     CurrencyFormatter.format(periodAverageGeneral),
-                    AppColors.info,
+                    AppColors.midBlue,
                   ),
                   _kpiChip(
                     Icons.inventory_2_outlined,
                     'Productos base',
                     '$productsCount',
-                    AppColors.warning,
+                    AppColors.brandPink,
                   ),
                   _kpiChip(
                     Icons.date_range_rounded,
@@ -588,7 +588,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                       lineDashArray: const [4, 3],
                       tooltipSettings: const InteractiveTooltip(
                         enable: true,
-                        color: Color(0xFF1E293B),
+                        color: AppColors.dark,
                         textStyle: TextStyle(color: Colors.white, fontSize: 11),
                         borderWidth: 0,
                       ),
@@ -616,7 +616,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
+                            color: AppColors.dark,
                             borderRadius: BorderRadius.circular(8),
                             boxShadow: [
                               BoxShadow(
@@ -633,7 +633,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                               Text(
                                 xLabel,
                                 style: const TextStyle(
-                                  color: Color(0xFF94A3B8),
+                                  color: AppColors.textDisabled,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -668,7 +668,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                                       Text(
                                         '$label: ',
                                         style: const TextStyle(
-                                          color: Color(0xFF94A3B8),
+                                          color: AppColors.textDisabled,
                                           fontSize: 11,
                                         ),
                                       ),
@@ -796,7 +796,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
           label: 'Cierre período',
           value: closing,
           icon: Icons.flag_rounded,
-          color: AppColors.chartCutFinal,
+          color: AppColors.brandPink,
         ),
       ],
     );

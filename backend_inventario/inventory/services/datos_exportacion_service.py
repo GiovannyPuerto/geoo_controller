@@ -48,7 +48,7 @@ def construir_datos_movimientos_exportacion(request, inventory_name_default='def
     filters = filtros_registros_desde_request(request, inventory_name_default)
     export_slice = slice_desde_request(
         request,
-        default_limit=5000,
+        default_limit=10000,
         max_limit=20000,
         default_offset=0,
         max_offset=100000,
@@ -164,31 +164,50 @@ def construir_datos_tops_exportacion(request, inventory_name_default='default'):
         except (TypeError, ValueError):
             return 0.0
 
-    cutoff_analysis = obtener_datos_analisis_producto(
-        inventory_name=inventory_name,
-        category_filter=category_filter,
-        warehouse_filter=warehouse_filter,
-        rotation_filter=rotation_filter,
-        stagnant_filter='',
-        high_rotation_filter='',
-        date_from='',
-        date_to=exact_cutoff_date,
-        search_filter=search_filter,
-        limit='',
+    # Reutilizar un mismo resultado si ambas consultas tienen los mismos filtros
+    # de fecha (situación más común: sin fechas o con la misma fecha de corte).
+    _queries_identical = (
+        movement_date_from == ''
+        and movement_date_to == exact_cutoff_date
     )
-
-    range_analysis = obtener_datos_analisis_producto(
-        inventory_name=inventory_name,
-        category_filter=category_filter,
-        warehouse_filter=warehouse_filter,
-        rotation_filter=rotation_filter,
-        stagnant_filter='',
-        high_rotation_filter='',
-        date_from=movement_date_from,
-        date_to=movement_date_to,
-        search_filter=search_filter,
-        limit='',
-    )
+    if _queries_identical:
+        cutoff_analysis = range_analysis = obtener_datos_analisis_producto(
+            inventory_name=inventory_name,
+            category_filter=category_filter,
+            warehouse_filter=warehouse_filter,
+            rotation_filter=rotation_filter,
+            stagnant_filter='',
+            high_rotation_filter='',
+            date_from='',
+            date_to=exact_cutoff_date,
+            search_filter=search_filter,
+            limit='',
+        )
+    else:
+        cutoff_analysis = obtener_datos_analisis_producto(
+            inventory_name=inventory_name,
+            category_filter=category_filter,
+            warehouse_filter=warehouse_filter,
+            rotation_filter=rotation_filter,
+            stagnant_filter='',
+            high_rotation_filter='',
+            date_from='',
+            date_to=exact_cutoff_date,
+            search_filter=search_filter,
+            limit='',
+        )
+        range_analysis = obtener_datos_analisis_producto(
+            inventory_name=inventory_name,
+            category_filter=category_filter,
+            warehouse_filter=warehouse_filter,
+            rotation_filter=rotation_filter,
+            stagnant_filter='',
+            high_rotation_filter='',
+            date_from=movement_date_from,
+            date_to=movement_date_to,
+            search_filter=search_filter,
+            limit='',
+        )
 
     def _apply_group_filter(items):
         if not group_filter:

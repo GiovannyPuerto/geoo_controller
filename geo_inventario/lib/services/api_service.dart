@@ -157,6 +157,49 @@ class ApiService {
     }
   }
 
+  // Cortes promedio por producto en un rango libre de fechas
+  Future<Map<String, dynamic>> getRangeProductCuts({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    String? warehouse,
+    String? category,
+    String? search,
+    String? inventoryName,
+  }) async {
+    try {
+      final params = <String, String>{
+        'date_from': _toIsoDate(dateFrom),
+        'date_to': _toIsoDate(dateTo),
+      };
+      if (inventoryName != null && inventoryName.isNotEmpty) {
+        params['inventory_name'] = inventoryName;
+      }
+      if (warehouse != null && warehouse.isNotEmpty) {
+        params['warehouse'] = warehouse;
+      }
+      if (category != null && category.isNotEmpty) {
+        params['category'] = category;
+      }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+      final uri = Uri.parse('$baseUrl/cortes-rango-productos/')
+          .replace(queryParameters: params);
+      final response = await _httpClient.get(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 45));
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        return {};
+      }
+      return {};
+    } catch (e) {
+      throw Exception('Error al obtener cortes de rango: $e');
+    }
+  }
+
   // Endpoints de movimientos de inventario
   Future<List<Map<String, dynamic>>> getMovements({
     String? inventoryName,

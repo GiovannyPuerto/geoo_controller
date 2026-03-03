@@ -22,7 +22,15 @@ class TopsCalculoService {
       if (query.isNotEmpty) {
         final code = (item['codigo'] ?? '').toString().toLowerCase();
         final name = (item['nombre_producto'] ?? '').toString().toLowerCase();
-        if (!code.contains(query) && !name.contains(query)) return false;
+        // Si la búsqueda es solo dígitos → coincidencia exacta en código
+        // (evita que "320" coincida con "3200", "1320", etc.)
+        // Si tiene letras → coincidencia parcial en código y nombre
+        final isNumericQuery = RegExp(r'^\d+$').hasMatch(query);
+        if (isNumericQuery) {
+          if (code != query && !name.contains(query)) return false;
+        } else {
+          if (!code.contains(query) && !name.contains(query)) return false;
+        }
       }
       return true;
     }).toList();
@@ -56,12 +64,6 @@ class TopsCalculoService {
     String? rotation,
     String? search,
   }) {
-    final topsBaseCutoff = filtrarBase(
-      analysisCutoff,
-      group: group,
-      rotation: rotation,
-      search: search,
-    );
     final topsBaseRange = filtrarBase(
       analysisRange,
       group: group,
@@ -70,11 +72,6 @@ class TopsCalculoService {
     );
 
     return {
-      'valor': topBy(
-        topsBaseCutoff,
-        (item) => toDouble(item['valor_saldo_actual']),
-        topLimit,
-      ),
       'entradas': topBy(
         topsBaseRange,
         (item) =>

@@ -1,4 +1,4 @@
-import 'dart:io' as io;
+﻿import 'dart:io' as io;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +9,7 @@ import 'package:geo_inventario/tabs/tops/tops_calculo_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:intl/intl.dart';
+import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:universal_html/html.dart' as html
   if (dart.library.io) 'package:geo_inventario/stubs/html_stub.dart';
 
@@ -30,7 +31,6 @@ class _TopsTabPageState extends State<TopsTabPage> {
   String? topsGroup;
   String? topsRotation;
   String? topsSearch;
-  DateTime? selectedDate;
   DateTime? movementDateFrom;
   DateTime? movementDateTo;
 
@@ -61,40 +61,18 @@ class _TopsTabPageState extends State<TopsTabPage> {
     if (!mounted) return;
     setState(() => isLoading = true);
     try {
-      final hasCutoff = selectedDate != null;
-      final hasMovementRange = movementDateFrom != null && movementDateTo != null;
-
-      List<Map<String, dynamic>> cutoffData;
-      List<Map<String, dynamic>> rangeData;
-
-      if (!hasCutoff && !hasMovementRange) {
-        // Sin ningún filtro de fecha: una sola llamada, se usa para ambas vistas.
-        final allData = await _apiService.getAnalysis();
-        cutoffData = allData;
-        rangeData = allData;
-      } else if (hasCutoff && !hasMovementRange) {
-        // Solo fecha de corte: las entradas/salidas deben acotarse a esa misma
-        // fecha para que los tres tops sean coherentes entre sí.
-        final data = await _apiService.getAnalysis(specificDate: selectedDate);
-        cutoffData = data;
-        rangeData = data;
-      } else {
-        // Hay rango de movimientos (con o sin fecha de corte de valor).
-        final results = await Future.wait([
-          _apiService.getAnalysis(specificDate: selectedDate),
-          _apiService.getAnalysis(
-            dateFrom: movementDateFrom,
-            dateTo: movementDateTo,
-          ),
-        ]);
-        cutoffData = results[0];
-        rangeData = results[1];
-      }
-
+      final hasMovementRange =
+          movementDateFrom != null && movementDateTo != null;
+      final analysisData = hasMovementRange
+          ? await _apiService.getAnalysis(
+              dateFrom: movementDateFrom,
+              dateTo: movementDateTo,
+            )
+          : await _apiService.getAnalysis();
       if (!mounted) return;
       setState(() {
-        analysisCutoff = cutoffData;
-        analysisRange = rangeData;
+        analysisCutoff = analysisData;
+        analysisRange = analysisData;
         isLoading = false;
         _lastCutoffRef = null;
         _lastRangeRef = null;
@@ -108,36 +86,6 @@ class _TopsTabPageState extends State<TopsTabPage> {
 
   double _asDouble(dynamic raw) {
     return TopsCalculoService.toDouble(raw);
-  }
-
-  Future<void> _pickCutoffDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: now,
-      initialDate: selectedDate ?? now,
-      locale: const Locale('es', 'CO'),
-      builder: (context, child) => Theme(
-        data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: AppColors.primary,
-            onPrimary: Colors.white,
-            surface: AppColors.surface,
-          ),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      setState(() => selectedDate = picked);
-      _loadData();
-    }
-  }
-
-  void _clearCutoffDate() {
-    setState(() => selectedDate = null);
-    _loadData();
   }
 
   Future<void> _pickMovementDateRange() async {
@@ -452,7 +400,6 @@ class _TopsTabPageState extends State<TopsTabPage> {
         group: topsGroup,
         rotation: topsRotation,
         search: topsSearch,
-        cutoffDate: selectedDate,
         movementDateFrom: movementDateFrom,
         movementDateTo: movementDateTo,
       );
@@ -493,7 +440,6 @@ class _TopsTabPageState extends State<TopsTabPage> {
 
     _refreshTopListsCacheIfNeeded();
     final tops = _cachedTopLists;
-    final topByValue = tops['valor'] ?? const <Map<String, dynamic>>[];
     final topByEntries = tops['entradas'] ?? const <Map<String, dynamic>>[];
     final topByExits = tops['salidas'] ?? const <Map<String, dynamic>>[];
 
@@ -504,9 +450,12 @@ class _TopsTabPageState extends State<TopsTabPage> {
     }
     final groupItems = groups.toList()..sort((a, b) => a.compareTo(b));
 
-    final hasCutoffDateFilter = selectedDate != null;
     final hasMovementRangeFilter =
         movementDateFrom != null && movementDateTo != null;
+    final hasAnyFilter = hasMovementRangeFilter ||
+        topsGroup != null ||
+        topsRotation != null ||
+        (topsSearch ?? '').isNotEmpty;
 
     return RefreshIndicator(
       color: AppColors.primary,
@@ -557,11 +506,9 @@ class _TopsTabPageState extends State<TopsTabPage> {
                           ),
                         ),
                         Text(
-                          'Corte valor: '
-                          '${hasCutoffDateFilter ? _formatDate(selectedDate!) : 'sin fecha'}'
-                          '  ·  '
-                          'Rango ent/sal.: '
-                          '${hasMovementRangeFilter ? '${_formatDate(movementDateFrom!)} — ${_formatDate(movementDateTo!)}' : 'sin rango'}',
+                          hasMovementRangeFilter
+                              ? 'Rango: ${_formatDate(movementDateFrom!)} — ${_formatDate(movementDateTo!)}'
+                              : 'Últimos 12 meses',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.white.withValues(alpha: 0.8),
@@ -570,20 +517,37 @@ class _TopsTabPageState extends State<TopsTabPage> {
                       ],
                     ),
                   ),
-                  if (hasCutoffDateFilter || hasMovementRangeFilter)
-                    Chip(
-                      label: const Text(
-                        'Filtro activo',
+                  if (hasAnyFilter)
+                    Container(
+                      margin: const EdgeInsets.only(right: AppSpacing.xs),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(AppRadius.full),
+                      ),
+                      child: const Text(
+                        'Filtros activos',
                         style: TextStyle(
                           color: AppColors.primaryDark,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      backgroundColor: Colors.white,
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
                     ),
+                  IconButton(
+                    icon: const Icon(Icons.filter_list_rounded,
+                        size: 20, color: Colors.white),
+                    tooltip: 'Filtros',
+                    onPressed: () => _showFilterDialog(groupItems),
+                    style: IconButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: AppSpacing.xs),
                   IconButton(
                     icon: const Icon(Icons.download_outlined,
@@ -604,97 +568,99 @@ class _TopsTabPageState extends State<TopsTabPage> {
 
             const SizedBox(height: AppSpacing.md),
 
-            // ── Filtros ──────────────────────────────────────────────────────
-            _buildFiltersPanel(
-              hasCutoffDateFilter: hasCutoffDateFilter,
-              hasMovementRangeFilter: hasMovementRangeFilter,
-              groupItems: groupItems,
-            ),
+            // ── Chips de filtros activos ─────────────────────────────────────
+            if (hasAnyFilter)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Wrap(
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    if (topsGroup != null)
+                      _ActiveFilterChip(
+                        icon: Icons.category_rounded,
+                        label: topsGroup!,
+                        onDelete: () => setState(() => topsGroup = null),
+                      ),
+                    if (topsRotation != null)
+                      _ActiveFilterChip(
+                        icon: Icons.autorenew_rounded,
+                        label: topsRotation!,
+                        onDelete: () => setState(() => topsRotation = null),
+                      ),
+                    if ((topsSearch ?? '').isNotEmpty)
+                      _ActiveFilterChip(
+                        icon: Icons.search_rounded,
+                        label: '"$topsSearch"',
+                        onDelete: () => setState(() => topsSearch = null),
+                      ),
+                    if (hasMovementRangeFilter)
+                      _ActiveFilterChip(
+                        icon: Icons.calendar_month_rounded,
+                        label:
+                            '${_formatDate(movementDateFrom!)} — ${_formatDate(movementDateTo!)}',
+                        onDelete: _clearMovementDateRange,
+                      ),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            // ── Gráfica top productos ─────────────────────────────────────────
+            _buildTopsChart(topByEntries, topByExits),
 
             const SizedBox(height: AppSpacing.md),
 
             // ── Tablas de tops ───────────────────────────────────────────────
             LayoutBuilder(
               builder: (context, constraints) {
-                final threeCol = constraints.maxWidth >= 900;
-                final twoCol = !threeCol && constraints.maxWidth >= 580;
+                final twoCol = constraints.maxWidth >= 580;
 
                 final cards = [
                   _TopMetricCard(
-                    title: 'Top valor en inventario',
-                    icon: Icons.attach_money_rounded,
-                    accentColor: AppColors.primary,
-                    items: topByValue,
-                    valueSelector: (item) =>
-                        _asDouble(item['valor_saldo_actual']),
-                    valueLabel: (item) =>
-                        'Valor: ${CurrencyFormatter.format(item['valor_saldo_actual'] ?? 0)}',
-                  ),
-                  _TopMetricCard(
-                    title: 'Más valor entradas en período',
+                    title: 'Top entradas — valor',
                     icon: Icons.arrow_downward_rounded,
                     accentColor: AppColors.success,
                     items: topByEntries,
                     valueSelector: (item) => _movementValueFor(
                         item, 'entradas_periodo', 'valor_entradas_periodo'),
-                    valueLabel: (item) =>
-                        'Valor ent.: ${CurrencyFormatter.format(_movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo'))}',
+                    valueLabel: (item) => CurrencyFormatter.format(
+                        _movementValueFor(
+                            item, 'entradas_periodo', 'valor_entradas_periodo')),
                   ),
                   _TopMetricCard(
-                    title: 'Más valor salidas en período',
+                    title: 'Top salidas — valor',
                     icon: Icons.arrow_upward_rounded,
-                    accentColor: AppColors.warning,
+                    accentColor: AppColors.brandPink,
                     items: topByExits,
                     valueSelector: (item) => _movementValueFor(
                         item, 'salidas_periodo', 'valor_salidas_periodo'),
-                    valueLabel: (item) =>
-                        'Valor sal.: ${CurrencyFormatter.format(_movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo'))}',
+                    valueLabel: (item) => CurrencyFormatter.format(
+                        _movementValueFor(
+                            item, 'salidas_periodo', 'valor_salidas_periodo')),
                   ),
                 ];
 
-                if (threeCol) {
+                if (twoCol) {
                   return IntrinsicHeight(
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: cards
-                          .expand((c) => [
-                                Expanded(child: c),
-                                if (c != cards.last)
-                                  const SizedBox(width: AppSpacing.md),
-                              ])
-                          .toList(),
+                      children: [
+                        Expanded(child: cards[0]),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(child: cards[1]),
+                      ],
                     ),
                   );
                 }
 
-                if (twoCol) {
-                  return Column(
-                    children: [
-                      cards[0],
-                      const SizedBox(height: AppSpacing.md),
-                      IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(child: cards[1]),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(child: cards[2]),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                }
-
-                // Mobile: columna
                 return Column(
-                  children: cards
-                      .expand((c) => [
-                            c,
-                            if (c != cards.last)
-                              const SizedBox(height: AppSpacing.md),
-                          ])
-                      .toList(),
+                  children: [
+                    cards[0],
+                    const SizedBox(height: AppSpacing.md),
+                    cards[1],
+                  ],
                 );
               },
             ),
@@ -704,20 +670,351 @@ class _TopsTabPageState extends State<TopsTabPage> {
     );
   }
 
-  // ── Panel de filtros inline ──────────────────────────────────────────────
+  // ── Diálogo de filtros ─────────────────────────────────────────────────
 
-  Widget _buildFiltersPanel({
-    required bool hasCutoffDateFilter,
-    required bool hasMovementRangeFilter,
-    required List<String> groupItems,
+  void _showFilterDialog(List<String> groupItems) {
+    int localLimit = topsLimit;
+    String? localGroup = topsGroup;
+    String? localRotation = topsRotation;
+    String localSearch = topsSearch ?? '';
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: const Icon(Icons.tune_rounded,
+                    color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('Filtros — Tops',
+                  style:
+                      TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          content: SizedBox(
+            width: 380,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Top N
+                  const Text('Mostrar',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<int>(
+                    value: localLimit,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon: Icon(
+                          Icons.format_list_numbered_rounded,
+                          size: 16),
+                    ),
+                    items: const [10, 20, 30, 50]
+                        .map((v) => DropdownMenuItem(
+                              value: v,
+                              child: Text('Top $v',
+                                  style:
+                                      const TextStyle(fontSize: 13)),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setDlgState(() => localLimit = v);
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  // Grupo
+                  const Text('Grupo',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<String>(
+                    value: (localGroup != null &&
+                            groupItems.contains(localGroup))
+                        ? localGroup
+                        : 'Todos',
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon:
+                          Icon(Icons.category_rounded, size: 16),
+                    ),
+                    items: groupItems
+                        .map((v) => DropdownMenuItem(
+                              value: v,
+                              child: Text(v,
+                                  style:
+                                      const TextStyle(fontSize: 13)),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setDlgState(
+                        () => localGroup =
+                            (v == null || v == 'Todos') ? null : v),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  // Rotación
+                  const Text('Rotación',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<String>(
+                    value: (topsRotation?.isNotEmpty == true)
+                        ? topsRotation
+                        : 'Todos',
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon:
+                          Icon(Icons.autorenew_rounded, size: 16),
+                    ),
+                    items: const [
+                      'Todos',
+                      'Activo',
+                      'Estancado',
+                      'Obsoleto',
+                      'Inactivo',
+                    ]
+                        .map((v) => DropdownMenuItem(
+                              value: v,
+                              child: Text(v,
+                                  style:
+                                      const TextStyle(fontSize: 13)),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setDlgState(() =>
+                        localRotation = v == 'Todos' ? null : v),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  // Búsqueda
+                  const Text('Buscar por código o nombre',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                    initialValue: localSearch,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      prefixIcon: Icon(Icons.search_rounded, size: 16),
+                      hintText: 'Ej: NITRATO, 320…',
+                    ),
+                    onChanged: (v) => setDlgState(() => localSearch = v),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  const Divider(height: 1),
+                  const SizedBox(height: AppSpacing.md),
+                  const Text('Rango de movimientos',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted)),
+                  const SizedBox(height: 4),
+                  _MovementRangeButton(
+                    dateFrom: movementDateFrom,
+                    dateTo: movementDateTo,
+                    onTap: () async {
+                      Navigator.of(dialogCtx).pop();
+                      await _pickMovementDateRange();
+                      if (mounted) {
+                        _showFilterDialog(groupItems);
+                      }
+                    },
+                    onClear: (movementDateFrom != null &&
+                            movementDateTo != null)
+                        ? () {
+                            _clearMovementDateRange();
+                            Navigator.of(dialogCtx).pop();
+                          }
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  topsGroup = null;
+                  topsRotation = null;
+                  topsSearch = null;
+                  movementDateFrom = null;
+                  movementDateTo = null;
+                  topsLimit = 30;
+                });
+                Navigator.of(dialogCtx).pop();
+                _loadData();
+              },
+              child: const Text('Limpiar todo',
+                  style: TextStyle(color: AppColors.error)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  topsLimit = localLimit;
+                  topsGroup = localGroup;
+                  topsRotation = localRotation;
+                  topsSearch =
+                      localSearch.trim().isEmpty ? null : localSearch.trim();
+                });
+                Navigator.of(dialogCtx).pop();
+              },
+              child: const Text('Aplicar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Gráfica top productos ────────────────────────────────────────────────
+
+  Widget _buildTopsChart(
+    List<Map<String, dynamic>> topByEntries,
+    List<Map<String, dynamic>> topByExits,
+  ) {
+    final chartLimit = topsLimit.clamp(3, 15);
+    final bool byGroup = topsGroup == null;
+
+    // ── Modo por GRUPO: agrega TODOS los productos (sin límite topN) ─────
+    if (byGroup) {
+      // Usa la lista completa filtrada, no la ya limitada a topN
+      final allFiltered = TopsCalculoService.filtrarBase(
+        analysisRange,
+        rotation: topsRotation,
+        search: topsSearch,
+      );
+
+      final entryByGroup = <String, double>{};
+      final exitByGroup = <String, double>{};
+
+      for (final item in allFiltered) {
+        final g = (item['grupo'] ?? 'Sin grupo').toString().trim();
+        if (g.isEmpty) continue;
+        entryByGroup[g] = (entryByGroup[g] ?? 0) +
+            _movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo');
+        exitByGroup[g] = (exitByGroup[g] ?? 0) +
+            _movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo');
+      }
+
+      final allGroups = <String>{...entryByGroup.keys, ...exitByGroup.keys};
+      if (allGroups.isEmpty) return const SizedBox.shrink();
+
+      final chartData = allGroups
+          .map((g) => _TopsChartPoint(
+                code: g,
+                name: g,
+                entradas: entryByGroup[g] ?? 0,
+                salidas: exitByGroup[g] ?? 0,
+              ))
+          .toList()
+        ..sort((a, b) =>
+            (b.entradas + b.salidas).compareTo(a.entradas + a.salidas));
+
+      return _buildChartWidget(
+        chartData: chartData, // sin límite — muestra todos los grupos
+        tooltipTitle: (pt) => pt.name,
+        tooltipSubtitle: null,
+        chartTitle: 'Todos los grupos — Entradas vs Salidas',
+      );
+    }
+
+    // ── Modo por PRODUCTO: dentro del grupo seleccionado ──────────────────
+    final allKeys = <String>{};
+    for (final item in topByEntries.take(chartLimit)) {
+      allKeys.add((item['codigo'] ?? '').toString());
+    }
+    for (final item in topByExits.take(chartLimit)) {
+      allKeys.add((item['codigo'] ?? '').toString());
+    }
+    if (allKeys.isEmpty) return const SizedBox.shrink();
+
+    final entryMap = <String, double>{};
+    for (final item in topByEntries) {
+      entryMap[(item['codigo'] ?? '').toString()] =
+          _movementValueFor(item, 'entradas_periodo', 'valor_entradas_periodo');
+    }
+    final exitMap = <String, double>{};
+    for (final item in topByExits) {
+      exitMap[(item['codigo'] ?? '').toString()] =
+          _movementValueFor(item, 'salidas_periodo', 'valor_salidas_periodo');
+    }
+    final nameMap = <String, String>{};
+    for (final item in [...topByEntries, ...topByExits]) {
+      final code = (item['codigo'] ?? '').toString();
+      if (code.isNotEmpty && !nameMap.containsKey(code)) {
+        nameMap[code] = (item['nombre_producto'] ?? '').toString();
+      }
+    }
+
+    final chartData = allKeys
+        .map((code) => _TopsChartPoint(
+              code: code,
+              name: nameMap[code] ?? code,
+              entradas: entryMap[code] ?? 0,
+              salidas: exitMap[code] ?? 0,
+            ))
+        .toList()
+      ..sort((a, b) =>
+          (b.entradas + b.salidas).compareTo(a.entradas + a.salidas));
+
+    return _buildChartWidget(
+      chartData: chartData,
+      tooltipTitle: (pt) => pt.code,
+      tooltipSubtitle: (pt) => pt.name,
+      chartTitle: 'Top productos (${topsGroup!}) — Entradas vs Salidas',
+    );
+  }
+
+  Widget _buildChartWidget({
+    required List<_TopsChartPoint> chartData,
+    required String Function(_TopsChartPoint) tooltipTitle,
+    String Function(_TopsChartPoint)? tooltipSubtitle,
+    required String chartTitle,
   }) {
-    final hasAnyFilter = hasCutoffDateFilter ||
-        hasMovementRangeFilter ||
-        topsGroup != null ||
-        topsRotation != null ||
-        (topsSearch ?? '').isNotEmpty;
+
+    String fmtAxis(num v) {
+      final abs = v.abs();
+      if (abs >= 1e9) return '\$${(v / 1e9).toStringAsFixed(1)}B';
+      if (abs >= 1e6) return '\$${(v / 1e6).toStringAsFixed(1)}M';
+      if (abs >= 1e3) return '\$${(v / 1e3).toStringAsFixed(0)}K';
+      return '\$${v.toStringAsFixed(0)}';
+    }
+
+    String fmtVal(num? v) {
+      if (v == null) return '—';
+      return CurrencyFormatter.format(v.toDouble());
+    }
+
+    const seriesColors = [AppColors.chartPositive, AppColors.chartNegative];
+    const seriesNames = ['Entradas', 'Salidas'];
 
     return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -727,245 +1024,252 @@ class _TopsTabPageState extends State<TopsTabPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Cabecera ──────────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md, vertical: AppSpacing.sm + 2),
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(AppRadius.lg),
-                topRight: Radius.circular(AppRadius.lg),
+          Row(
+            children: [
+              const Icon(Icons.bar_chart_rounded,
+                  size: 18, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  chartTitle,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              border: Border(bottom: BorderSide(color: AppColors.border)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryLight,
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                  ),
-                  child: const Icon(Icons.tune_rounded,
-                      size: 15, color: AppColors.primary),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                const Text(
-                  'Filtros',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textSecondary,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-                const Spacer(),
-                if (hasAnyFilter)
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        topsGroup = null;
-                        topsRotation = null;
-                        topsSearch = null;
-                        selectedDate = null;
-                        movementDateFrom = null;
-                        movementDateTo = null;
-                      });
-                      _loadData();
-                    },
-                    icon: const Icon(Icons.clear_all_rounded, size: 14),
-                    label:
-                        const Text('Limpiar', style: TextStyle(fontSize: 12)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm),
-                    ),
-                  ),
-              ],
-            ),
+            ],
           ),
-
-          // ── Fila 1: Dropdowns + búsqueda ──────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
-            child: Wrap(
-              spacing: AppSpacing.md,
-              runSpacing: AppSpacing.md,
-              crossAxisAlignment: WrapCrossAlignment.end,
-              children: [
-                // Top N
-                SizedBox(
-                  width: 130,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Mostrar',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textMuted)),
-                      const SizedBox(height: 4),
-                      DropdownButtonFormField<int>(
-                        initialValue: topsLimit,
-                        isDense: true,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          prefixIcon: Icon(
-                              Icons.format_list_numbered_rounded,
-                              size: 16),
-                        ),
-                        items: const [10, 20, 30, 50]
-                            .map((v) => DropdownMenuItem(
-                                  value: v,
-                                  child: Text('Top $v',
-                                      style: const TextStyle(fontSize: 13)),
-                                ))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) setState(() => topsLimit = v);
-                        },
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.md),
+          LayoutBuilder(builder: (ctx, cons) {
+            final baseH = cons.maxWidth < 480 ? 220.0 : 300.0;
+            final chartH = (chartData.length * 38.0).clamp(baseH, 600.0);
+            return SizedBox(
+            height: chartH,
+            child: SfCartesianChart(
+              plotAreaBorderWidth: 0,
+              primaryXAxis: CategoryAxis(
+                labelStyle: const TextStyle(
+                    color: AppColors.textMuted, fontSize: 10),
+                axisLine: const AxisLine(width: 0),
+                majorTickLines: const MajorTickLines(size: 0),
+                majorGridLines: const MajorGridLines(width: 0),
+                labelIntersectAction: AxisLabelIntersectAction.rotate45,
+              ),
+              primaryYAxis: NumericAxis(
+                axisLine: const AxisLine(width: 0),
+                majorTickLines: const MajorTickLines(size: 0),
+                labelStyle: const TextStyle(
+                    color: AppColors.textMuted, fontSize: 10),
+                majorGridLines: const MajorGridLines(
+                  width: 1,
+                  color: AppColors.border,
+                  dashArray: [4, 4],
                 ),
-
-                // Grupo
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Grupo',
-                        style: TextStyle(
-                            fontSize: 11,
+                axisLabelFormatter: (AxisLabelRenderDetails details) =>
+                    ChartAxisLabel(
+                        fmtAxis(details.value), details.textStyle),
+              ),
+              legend: const Legend(
+                isVisible: true,
+                position: LegendPosition.bottom,
+                textStyle: TextStyle(
+                    color: AppColors.textSecondary, fontSize: 11),
+                overflowMode: LegendItemOverflowMode.wrap,
+              ),
+              trackballBehavior: TrackballBehavior(
+                enable: true,
+                activationMode: ActivationMode.singleTap,
+                lineType: TrackballLineType.vertical,
+                lineColor: AppColors.textMuted,
+                lineWidth: 1,
+                lineDashArray: const [4, 3],
+                tooltipDisplayMode:
+                    TrackballDisplayMode.groupAllPoints,
+                tooltipSettings:
+                    const InteractiveTooltip(enable: false),
+                builder: (context, details) {
+                  final points =
+                      details.groupingModeInfo?.points ?? [];
+                  if (points.isEmpty) return const SizedBox.shrink();
+                  final xKey = points.first.x?.toString() ?? '';
+                  // Busca el punto en chartData para obtener título/subtítulo
+                  final pt = chartData.firstWhere(
+                    (d) => d.code == xKey,
+                    orElse: () => _TopsChartPoint(
+                        code: xKey, name: xKey,
+                        entradas: 0, salidas: 0),
+                  );
+                  final title = tooltipTitle(pt);
+                  final subtitle = tooltipSubtitle?.call(pt) ?? '';
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.dark,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.textMuted)),
-                    const SizedBox(height: 4),
-                    DropdownMenu<String>(
-                      width: 200,
-                      menuHeight: 280,
-                      initialSelection: (topsGroup != null &&
-                              groupItems.contains(topsGroup))
-                          ? topsGroup
-                          : 'Todos',
-                      leadingIcon: const Icon(
-                          Icons.category_rounded,
-                          size: 16),
-                      inputDecorationTheme: const InputDecorationTheme(
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                            vertical: 10, horizontal: 8),
-                      ),
-                      textStyle: const TextStyle(fontSize: 13),
-                      menuStyle: MenuStyle(
-                        surfaceTintColor:
-                            WidgetStateProperty.all(Colors.transparent),
-                      ),
-                      dropdownMenuEntries: groupItems
-                          .map((v) => DropdownMenuEntry<String>(
-                                value: v,
-                                label: v,
-                                style: MenuItemButton.styleFrom(
-                                  textStyle:
-                                      const TextStyle(fontSize: 13),
-                                ),
-                              ))
-                          .toList(),
-                      onSelected: (v) => setState(
-                          () => topsGroup =
-                              (v == null || v == 'Todos') ? null : v),
-                    ),
-                  ],
-                ),
-
-                // Rotación
-                SizedBox(
-                  width: 170,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Rotación',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textMuted)),
-                      const SizedBox(height: 4),
-                      DropdownButtonFormField<String>(
-                        initialValue: (topsRotation != null &&
-                                topsRotation!.isNotEmpty)
-                            ? topsRotation
-                            : 'Todos',
-                        isDense: true,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          prefixIcon:
-                              Icon(Icons.autorenew_rounded, size: 16),
+                          ),
                         ),
-                        items: const [
-                          'Todos',
-                          'Activo',
-                          'Estancado',
-                          'Obsoleto',
-                          'Inactivo',
-                        ]
-                            .map((v) => DropdownMenuItem(
-                                  value: v,
-                                  child: Text(v,
-                                      style:
-                                          const TextStyle(fontSize: 13)),
-                                ))
-                            .toList(),
-                        onChanged: (v) => setState(
-                            () => topsRotation =
-                                v == 'Todos' ? null : v),
-                      ),
-                    ],
+                        if (subtitle.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(
+                              subtitle,
+                              style: const TextStyle(
+                                color: AppColors.textDisabled,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 4),
+                        ...points.asMap().entries.map((e) {
+                          final idx = e.key;
+                          final yVal = e.value.y;
+                          final dotColor = idx < seriesColors.length
+                              ? seriesColors[idx]
+                              : Colors.white;
+                          final label = idx < seriesNames.length
+                              ? seriesNames[idx]
+                              : 'Serie ${idx + 1}';
+                          return Padding(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: dotColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '$label: ',
+                                  style: const TextStyle(
+                                    color: AppColors.textDisabled,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  fmtVal(yVal),
+                                  style: TextStyle(
+                                    color: dotColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              series: <CartesianSeries>[
+                ColumnSeries<_TopsChartPoint, String>(
+                  name: 'Entradas',
+                  dataSource: chartData,
+                  xValueMapper: (d, _) => d.code,
+                  yValueMapper: (d, _) => d.entradas,
+                  color: AppColors.chartPositive.withValues(alpha: 0.75),
+                  width: 0.55,
+                  spacing: 0.1,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(4),
+                    topRight: Radius.circular(4),
                   ),
+                  animationDuration: 900,
+                ),
+                ColumnSeries<_TopsChartPoint, String>(
+                  name: 'Salidas',
+                  dataSource: chartData,
+                  xValueMapper: (d, _) => d.code,
+                  yValueMapper: (d, _) => d.salidas,
+                  color: AppColors.chartNegative.withValues(alpha: 0.75),
+                  width: 0.55,
+                  spacing: 0.1,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(4),
+                    topRight: Radius.circular(4),
+                  ),
+                  animationDuration: 900,
                 ),
               ],
             ),
-          ),
+          );
+          }),
+        ],
+      ),
+    );
+  }
+}
 
-          // ── Divisor ───────────────────────────────────────────────────────
-          const Padding(
-            padding: EdgeInsets.symmetric(
-                horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-            child: Divider(height: 1, color: AppColors.border),
-          ),
+// ── Chip de filtro activo ─────────────────────────────────────────────────────
+class _ActiveFilterChip extends StatelessWidget {
+  const _ActiveFilterChip({
+    required this.icon,
+    required this.label,
+    required this.onDelete,
+  });
 
-          // ── Fila 2: Filtros de fecha ───────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md, 0, AppSpacing.md, AppSpacing.md),
-            child: Wrap(
-              spacing: AppSpacing.md,
-              runSpacing: AppSpacing.sm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                const Text(
-                  'Filtros de fecha:',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textMuted),
-                ),
-                _DateRangeButton(
-                  selectedDate: selectedDate,
-                  onTap: _pickCutoffDate,
-                  onClear: hasCutoffDateFilter ? _clearCutoffDate : null,
-                ),
-                _MovementRangeButton(
-                  dateFrom: movementDateFrom,
-                  dateTo: movementDateTo,
-                  onTap: _pickMovementDateRange,
-                  onClear: hasMovementRangeFilter
-                      ? _clearMovementDateRange
-                      : null,
-                ),
-              ],
+  final IconData icon;
+  final String label;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight,
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.primary),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.primary,
+              fontWeight: FontWeight.w500,
             ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onDelete,
+            child: const Icon(Icons.close_rounded,
+                size: 12, color: AppColors.primaryDark),
           ),
         ],
       ),
@@ -973,75 +1277,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
   }
 }
 
-// ── Botón de rango de fechas ─────────────────────────────────────────────────
-class _DateRangeButton extends StatelessWidget {
-  const _DateRangeButton({
-    required this.selectedDate,
-    required this.onTap,
-    this.onClear,
-  });
-
-  final DateTime? selectedDate;
-  final VoidCallback onTap;
-  final VoidCallback? onClear;
-
-  String _fmt(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
-
-  @override
-  Widget build(BuildContext context) {
-    final hasRange = selectedDate != null;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: 11,
-        ),
-        decoration: BoxDecoration(
-          color: hasRange ? AppColors.primaryLight : AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(
-            color: hasRange ? AppColors.primary : AppColors.border,
-            width: hasRange ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.date_range_rounded,
-              size: 18,
-              color: hasRange ? AppColors.primary : AppColors.textMuted,
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Text(
-              hasRange ? _fmt(selectedDate!) : 'Fecha de corte valor inventario',
-              style: TextStyle(
-                fontSize: 14,
-                color: hasRange ? AppColors.primary : AppColors.textMuted,
-                fontWeight: hasRange ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-            if (onClear != null) ...[
-              const SizedBox(width: AppSpacing.xs),
-              GestureDetector(
-                onTap: onClear,
-                child: const Icon(
-                  Icons.close_rounded,
-                  size: 16,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+// ── Botón de rango de movimientos ───────────────────────────────────────────
 class _MovementRangeButton extends StatelessWidget {
   const _MovementRangeButton({
     required this.dateFrom,
@@ -1342,18 +1578,13 @@ class _TopRow extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 // Valor
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      valueLabel,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isMedal ? medalColor : accentColor,
-                      ),
-                    ),
-                  ],
+                Text(
+                  valueLabel,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isMedal ? medalColor : accentColor,
+                  ),
                 ),
               ],
             ),
@@ -1377,4 +1608,20 @@ class _TopRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Datos para la gráfica de tops ────────────────────────────────────────────
+
+class _TopsChartPoint {
+  const _TopsChartPoint({
+    required this.code,
+    required this.name,
+    required this.entradas,
+    required this.salidas,
+  });
+
+  final String code;
+  final String name;
+  final double entradas;
+  final double salidas;
 }

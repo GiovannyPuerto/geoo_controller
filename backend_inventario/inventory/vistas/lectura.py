@@ -9,6 +9,7 @@ from django.views.decorators.http import require_http_methods
 
 from ..models import ImportBatch, InventoryRecord, Product
 from ..services.analitica_inventario_service import (
+    obtener_cortes_rango_producto,
     obtener_datos_analisis_producto,
     obtener_datos_cortes_mensuales,
     obtener_datos_cortes_mensuales_por_producto,
@@ -107,6 +108,33 @@ def get_monthly_product_cuts(request):
         return JsonResponse(result_data)
     except Exception as exc:
         logger.error(f"Error in get_monthly_product_cuts: {str(exc)}", exc_info=True)
+        return JsonResponse({'error': str(exc)}, status=500)
+
+
+@cache_page(API_CACHE_PESADO_SEGUNDOS)
+@require_http_methods(["GET"])
+def get_range_product_cuts(request):
+    inventory_name = request.GET.get('inventory_name', 'default')
+    warehouse_filter = request.GET.get('warehouse', '')
+    category_filter = request.GET.get('category', '')
+    search_filter = request.GET.get('search', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    limit = request.GET.get('limit', '')
+
+    try:
+        result_data = obtener_cortes_rango_producto(
+            inventory_name=inventory_name,
+            date_from=date_from,
+            date_to=date_to,
+            warehouse_filter=warehouse_filter,
+            category_filter=category_filter,
+            search_filter=search_filter,
+            limit=limit,
+        )
+        return JsonResponse(result_data)
+    except Exception as exc:
+        logger.error(f"Error in get_range_product_cuts: {str(exc)}", exc_info=True)
         return JsonResponse({'error': str(exc)}, status=500)
 
 

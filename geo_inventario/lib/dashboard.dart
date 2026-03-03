@@ -6,7 +6,6 @@ import 'package:geo_inventario/services/excel_upload_service.dart';
 import 'package:geo_inventario/tabs/analysis_tab.dart';
 import 'package:geo_inventario/tabs/monthly_cuts_tab.dart';
 import 'package:geo_inventario/tabs/movements_tab.dart';
-import 'package:geo_inventario/tabs/summary_tab.dart';
 import 'package:geo_inventario/tabs/tops_tab.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
@@ -34,7 +33,7 @@ class _DashboardPageState extends State<DashboardPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadDashboardState();
   }
 
@@ -279,7 +278,6 @@ class _DashboardPageState extends State<DashboardPage>
       body: TabBarView(
         controller: _tabController,
         children: [
-          SummaryTabPage(onPickFile: _pickAndUploadBaseFile),
           const AnalysisTabPage(),
           const TopsTabPage(),
           const MovementsTabPage(),
@@ -295,7 +293,7 @@ class _DashboardPageState extends State<DashboardPage>
       preferredSize: Size.fromHeight(isMobile ? 96 : 112),
       child: Container(
         decoration: const BoxDecoration(
-          color: AppColors.primary,
+          gradient: AppGradients.hero,
           boxShadow: AppShadows.elevated,
         ),
         child: AppBar(
@@ -389,21 +387,11 @@ class _DashboardPageState extends State<DashboardPage>
             unselectedLabelStyle:
                 const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
             indicator: const UnderlineTabIndicator(
-              borderSide: BorderSide(color: AppColors.cyan, width: 3),
+              borderSide: BorderSide(color: AppColors.brandPink, width: 3),
               insets: EdgeInsets.symmetric(horizontal: 8),
             ),
             indicatorSize: TabBarIndicatorSize.tab,
             tabs: const [
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.summarize_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Resumen'),
-                  ],
-                ),
-              ),
               Tab(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,

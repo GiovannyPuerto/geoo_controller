@@ -30,8 +30,11 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   bool _isRefreshing = false;
   int _analysisRequestEpoch = 0;
 
+  bool _isRangeMode = false;
+
   // Filters
-  DateTime? selectedDate;
+  DateTime? selectedDateFrom;
+  DateTime? selectedDateTo;
   String? searchQuery;
   String? selectedGroup;
   String? selectedRotation;
@@ -56,13 +59,15 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   /// Resetea los filtros para mostrar todos los datos actualizados.
   void _onExternalRefresh() {
     setState(() {
-      selectedDate = null;
+      selectedDateFrom = null;
+      selectedDateTo = null;
       searchQuery = null;
       selectedGroup = null;
       selectedRotation = null;
       selectedStagnant = null;
       selectedHighRotation = null;
       selectedWarehouse = null;
+      _isRangeMode = false;
     });
     _loadAnalysisData();
   }
@@ -70,10 +75,9 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   Future<void> _loadAnalysisData() async {
     if (!mounted) return;
     final requestEpoch = ++_analysisRequestEpoch;
+    final bool isFullRange = selectedDateFrom != null && selectedDateTo != null;
 
     setState(() {
-      // Solo mostrar spinner completo si aún no hay datos cargados.
-      // En re-filtrado se muestra overlay translúcido sobre los datos existentes.
       if (analysis.isEmpty) {
         isLoading = true;
         _isRefreshing = false;
@@ -83,18 +87,53 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     });
 
     try {
-      final data = await _apiService.getAnalysis(
-        warehouse: selectedWarehouse,
-        category: selectedGroup,
-        rotation: selectedRotation,
-        stagnant: selectedStagnant,
-        highRotation: selectedHighRotation,
-        search: searchQuery,
-        specificDate: selectedDate,
-      );
+      List<Map<String, dynamic>> rows;
+
+      if (isFullRange) {
+        // Rango completo → promedio diario real, igual que los cortes mensuales
+        final result = await _apiService.getRangeProductCuts(
+          dateFrom: selectedDateFrom!,
+          dateTo: selectedDateTo!,
+          warehouse: selectedWarehouse,
+          category: selectedGroup,
+          search: searchQuery,
+        );
+        final rawProducts =
+            List<Map<String, dynamic>>.from(result['products'] as List? ?? []);
+        // Mapear al formato que usa AnalysisDataSource
+        rows = rawProducts
+            .map((p) => <String, dynamic>{
+                  'codigo': p['codigo'],
+                  'nombre_producto': p['nombre_producto'],
+                  'grupo': p['grupo'],
+                  'cantidad_saldo_actual': p['cantidad_promedio'],
+                  'valor_saldo_actual': p['valor_promedio'],
+                  'costo_unitario': p['costo_unitario'],
+                  'rotacion': '—',
+                  'estancado': '—',
+                  'alta_rotacion': '—',
+                  'negative_stock_alert': false,
+                  // Columnas extra disponibles para referencia
+                  'cantidad_apertura': p['cantidad_apertura'],
+                  'cantidad_cierre': p['cantidad_cierre'],
+                })
+            .toList();
+      } else {
+        // Sin rango o solo un extremo → inventario a la última carga
+        rows = await _apiService.getAnalysis(
+          warehouse: selectedWarehouse,
+          category: selectedGroup,
+          rotation: selectedRotation,
+          stagnant: selectedStagnant,
+          highRotation: selectedHighRotation,
+          search: searchQuery,
+          dateFrom: selectedDateFrom,
+          dateTo: selectedDateTo,
+        );
+      }
 
       if (mounted && requestEpoch == _analysisRequestEpoch) {
-        final sorted = List<Map<String, dynamic>>.from(data)
+        final sorted = List<Map<String, dynamic>>.from(rows)
           ..sort((a, b) {
             final va = ((a['valor_saldo_actual'] as num?) ?? 0).toDouble();
             final vb = ((b['valor_saldo_actual'] as num?) ?? 0).toDouble();
@@ -103,6 +142,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         setState(() {
           analysis = sorted;
           filteredAnalysis = sorted;
+          _isRangeMode = isFullRange;
           isLoading = false;
           _isRefreshing = false;
         });
@@ -208,24 +248,74 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                           color: Colors.white, size: 24),
                     ),
                     const SizedBox(width: AppSpacing.md),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Análisis de Productos',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            letterSpacing: 0.3,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _isRangeMode
+                                ? 'Análisis (Promedio Rango)'
+                                : 'Análisis de Productos',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.3,
+                            ),
                           ),
+                          Text(
+                            _isRangeMode
+                                ? 'Promedio diario en el período seleccionado'
+                                : 'Corte de inventario a la fecha',
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xCCFFFFFF)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_hasActiveFilters())
+                      Padding(
+                        padding: const EdgeInsets.only(right: AppSpacing.xs),
+                        child: Chip(
+                          label: const Text(
+                            'Filtro activo',
+                            style: TextStyle(
+                              color: AppColors.primaryDark,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          backgroundColor: Colors.white,
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
                         ),
-                        Text(
-                          'Valor, rotación y alertas del inventario',
-                          style:
-                              TextStyle(fontSize: 12, color: Color(0xCCFFFFFF)),
+                      ),
+                    IconButton(
+                      icon: const Icon(Icons.filter_list_rounded,
+                          size: 20, color: Colors.white),
+                      tooltip: 'Filtros',
+                      onPressed: showFiltersDialog,
+                      style: IconButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
                         ),
-                      ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    IconButton(
+                      icon: const Icon(Icons.download_outlined,
+                          size: 20, color: Colors.white),
+                      tooltip: 'Exportar',
+                      onPressed: _showExportDialog,
+                      style: IconButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -617,7 +707,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                         tooltipDisplayMode: TrackballDisplayMode.groupAllPoints,
                         tooltipSettings: const InteractiveTooltip(
                           enable: true,
-                          color: Color(0xFF1E293B),
+                          color: AppColors.dark,
                           textStyle:
                               TextStyle(color: Colors.white, fontSize: 11),
                           borderWidth: 0,
@@ -637,7 +727,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1E293B),
+                              color: AppColors.dark,
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [
                                 BoxShadow(
@@ -654,7 +744,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                 Text(
                                   xLabel,
                                   style: const TextStyle(
-                                    color: Color(0xFF94A3B8),
+                                    color: AppColors.textDisabled,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -675,7 +765,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                     const Text(
                                       'Valor: ',
                                       style: TextStyle(
-                                        color: Color(0xFF94A3B8),
+                                        color: AppColors.textDisabled,
                                         fontSize: 11,
                                       ),
                                     ),
@@ -885,7 +975,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       selectedHighRotation != null ||
       selectedWarehouse != null ||
       (searchQuery != null && searchQuery!.isNotEmpty) ||
-      selectedDate != null;
+      selectedDateFrom != null ||
+      selectedDateTo != null;
 
   Widget _buildActiveFilterChips() {
     final chips = <Widget>[];
@@ -940,10 +1031,18 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         _loadAnalysisData();
       });
     }
-    if (selectedDate != null) {
-      final dateStr = DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDate!);
-      addChip('Fecha: $dateStr', () {
-        setState(() => selectedDate = null);
+    if (selectedDateFrom != null) {
+      final dateStr =
+          DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDateFrom!);
+      addChip('Desde: $dateStr', () {
+        setState(() => selectedDateFrom = null);
+        _loadAnalysisData();
+      });
+    }
+    if (selectedDateTo != null) {
+      final dateStr = DateFormat('dd/MM/yyyy', 'es_CO').format(selectedDateTo!);
+      addChip('Hasta: $dateStr', () {
+        setState(() => selectedDateTo = null);
         _loadAnalysisData();
       });
     }
@@ -969,7 +1068,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                 selectedHighRotation = null;
                 selectedWarehouse = null;
                 searchQuery = null;
-                selectedDate = null;
+                selectedDateFrom = null;
+                selectedDateTo = null;
               });
               _loadAnalysisData();
             },
@@ -989,54 +1089,30 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(AppSpacing.sm),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryLight,
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                      ),
-                      child: const Icon(Icons.analytics_outlined,
-                          color: AppColors.primaryDark, size: 18),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    const Text(
-                      'Análisis de Productos',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ],
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryLight,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.analytics_outlined,
+                      color: AppColors.primaryDark, size: 18),
                 ),
-                Row(
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _showExportDialog,
-                      icon: const Icon(Icons.download_outlined, size: 16),
-                      label: const Text('Exportar'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-                        textStyle: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    IconButton.outlined(
-                      icon: const Icon(Icons.filter_list_rounded, size: 18),
-                      onPressed: showFiltersDialog,
-                      tooltip: 'Filtros',
-                    ),
-                  ],
+                const SizedBox(width: AppSpacing.sm),
+                const Text(
+                  'Catálogo de Productos',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
             if (_hasActiveFilters()) _buildActiveFilterChips(),
+            if (_isRangeMode) _buildRangeModeInfoBanner(),
             const Divider(height: 1),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
@@ -1101,7 +1177,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       builder: (BuildContext dialogCtx) {
         // Variables locales en el scope del showDialog (no dentro del
         // StatefulBuilder.builder) para que no se reinicien en cada rebuild.
-        DateTime? localDate = selectedDate;
+        DateTime? localDateFrom = selectedDateFrom;
+        DateTime? localDateTo = selectedDateTo;
         String? localGroup = selectedGroup;
         String? localRotation = selectedRotation;
         String? localStagnant = selectedStagnant;
@@ -1332,29 +1409,80 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       ),
                       const SizedBox(height: AppSpacing.md),
 
-                      // ── Fecha de corte ─────────────────────────────────
-                      const Text('Fecha de corte',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textMuted)),
+                      // ── Rango de fechas ───────────────────────────────
+                      const Text(
+                        'Rango de fechas',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textMuted),
+                      ),
                       const SizedBox(height: AppSpacing.xs),
-                      dateRow(
-                        'Sin fecha (opcional)',
-                        localDate,
-                        () async {
-                          final picked = await showDatePicker(
-                            context: ctx,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime.now(),
-                            initialDate: localDate ?? DateTime.now(),
-                            locale: const Locale('es', 'CO'),
-                          );
-                          if (picked != null) {
-                            setDlgState(() => localDate = picked);
-                          }
-                        },
-                        () => setDlgState(() => localDate = null),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Desde',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textDisabled)),
+                                const SizedBox(height: 4),
+                                dateRow(
+                                  'dd/mm/aaaa',
+                                  localDateFrom,
+                                  () async {
+                                    final picked = await showDatePicker(
+                                      context: ctx,
+                                      firstDate: DateTime(2020),
+                                      lastDate: localDateTo ?? DateTime.now(),
+                                      initialDate:
+                                          localDateFrom ?? DateTime.now(),
+                                      locale: const Locale('es', 'CO'),
+                                    );
+                                    if (picked != null) {
+                                      setDlgState(() => localDateFrom = picked);
+                                    }
+                                  },
+                                  () => setDlgState(() => localDateFrom = null),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Hasta',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textDisabled)),
+                                const SizedBox(height: 4),
+                                dateRow(
+                                  'dd/mm/aaaa',
+                                  localDateTo,
+                                  () async {
+                                    final picked = await showDatePicker(
+                                      context: ctx,
+                                      firstDate:
+                                          localDateFrom ?? DateTime(2020),
+                                      lastDate: DateTime.now(),
+                                      initialDate:
+                                          localDateTo ?? DateTime.now(),
+                                      locale: const Locale('es', 'CO'),
+                                    );
+                                    if (picked != null) {
+                                      setDlgState(() => localDateTo = picked);
+                                    }
+                                  },
+                                  () => setDlgState(() => localDateTo = null),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1368,7 +1496,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       selectedRotation = null;
                       selectedStagnant = null;
                       selectedHighRotation = null;
-                      selectedDate = null;
+                      selectedDateFrom = null;
+                      selectedDateTo = null;
                       searchQuery = null;
                     });
                     Navigator.of(dialogCtx).pop();
@@ -1387,7 +1516,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                       selectedRotation = localRotation;
                       selectedStagnant = localStagnant;
                       selectedHighRotation = localHighRotation;
-                      selectedDate = localDate;
+                      selectedDateFrom = localDateFrom;
+                      selectedDateTo = localDateTo;
                       searchQuery = localSearch;
                     });
                     Navigator.of(dialogCtx).pop();
@@ -1418,6 +1548,44 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
 
   Color _getRotationColor(String rotation) {
     return AnalisisCatalogoService.colorRotacion(rotation);
+  }
+
+  Widget _buildRangeModeInfoBanner() {
+    if (selectedDateFrom == null || selectedDateTo == null) {
+      return const SizedBox.shrink();
+    }
+    final fmt = DateFormat('dd/MM/yyyy', 'es_CO');
+    final label =
+        '${fmt.format(selectedDateFrom!)}  →  ${fmt.format(selectedDateTo!)}';
+    final daysCount = selectedDateTo!.difference(selectedDateFrom!).inDays + 1;
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.date_range_rounded,
+              size: 15, color: AppColors.primaryDark),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              'Promedio diario del rango $label  ·  $daysCount día${daysCount != 1 ? "s" : ""}'
+              '  —  Cantidad y valor representan el saldo promedio diario'
+              ' (mismo cálculo que cortes mensuales).',
+              style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.primaryDark,
+                  fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showExportDialog() {
@@ -1484,7 +1652,8 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         stagnant: selectedStagnant,
         highRotation: selectedHighRotation,
         search: searchQuery,
-        specificDate: selectedDate,
+        dateFrom: selectedDateFrom,
+        dateTo: selectedDateTo,
       );
 
       if (response.statusCode == 200) {

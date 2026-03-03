@@ -4,28 +4,44 @@
 import 'package:flutter/material.dart';
 
 /// Paleta de colores corporativa Geoflora.
-/// Extraída directamente de logo_geoflora.png e icono.png.
-/// Azul profundo #005286 (primario), Cian #00AFD4 (acento), Neutros claros.
+/// Basada en la guía de marca oficial:
+///   Pantone 7462 C → #005286  (azul profundo — primario)
+///   Pantone 7460 C → #007DAD  (azul medio — gradientes)
+///   Pantone 638 C  → #00AFD3  (cian — acento)
+///   Pantone 184 C  → #EA516D  (rosa coral — brand accent)
+///   Pantone 177 C  → #F08592  (rosa claro — brand accent light)
+///   Pantone 7401 C → #FFE3AB  (champagne cálido — brand warm)
 class AppColors {
   AppColors._();
 
-  // ── Primario: Azul corporativo Geoflora (#005286) ─────────────────────────
+  // ── Primario: Azul profundo Geoflora — Pantone 7462 C ─────────────────────
   static const Color primary = Color(0xFF005286);
   static const Color primaryDark = Color(0xFF003D66);
   static const Color primaryDarker = Color(0xFF002444);
   static const Color primaryLight = Color(0xFFCCE4F0);
   static const Color primaryLighter = Color(0xFFEBF5FA);
 
-  // ── Cian corporativo Geoflora (#00AFD4) ───────────────────────────────────
-  static const Color cyan = Color(0xFF00AFD4);
-  static const Color cyanDark = Color(0xFF007A96);
-  static const Color cyanLight = Color(0xFFE0F6FB);
+  // ── Azul medio — Pantone 7460 C ───────────────────────────────────────────
+  static const Color midBlue = Color(0xFF007DAD);
+
+  // ── Cian corporativo — Pantone 638 C ──────────────────────────────────────
+  static const Color cyan = Color(0xFF00AFD3);
+  static const Color cyanDark = Color(0xFF006E88);
+  static const Color cyanLight = Color(0xFFDEF6FC);
   static const Color cyanLighter = Color(0xFFF0FBFE);
 
-  // ── Azul medio (gradientes / hover) ───────────────────────────────────────
-  static const Color midBlue = Color(0xFF057CB2);
+  // ── Rosa coral — Pantone 184 C ────────────────────────────────────────────
+  static const Color brandPink = Color(0xFFEA516D);
+  static const Color brandPinkDark = Color(0xFFC22649);
+  static const Color brandPinkLight = Color(0xFFF08592); // Pantone 177 C
+  static const Color brandPinkLighter = Color(0xFFFDE8EC);
 
-  // ── Acento: Verde naturaleza (conservado para semántica) ──────────────────
+  // ── Champagne cálido — Pantone 7401 C ─────────────────────────────────────
+  static const Color brandWarm = Color(0xFFFFE3AB);
+  static const Color brandWarmDark = Color(0xFFC8960A);
+  static const Color brandWarmLight = Color(0xFFFFF8E8);
+
+  // ── Acento: Verde naturaleza (semántica positiva) ─────────────────────────
   static const Color accent = Color(0xFF2E7D32);
   static const Color accentDark = Color(0xFF1F5B23);
   static const Color accentLight = Color(0xFFCDEDD1);
@@ -44,15 +60,15 @@ class AppColors {
   static const Color textDisabled = Color(0xFF94A3B8);
 
   // ── Semánticos ─────────────────────────────────────────────────────────────
-  static const Color success = Color.fromARGB(255, 58, 166, 63);
+  static const Color success = Color(0xFF3AA63F);
   static const Color successLight = Color(0xFFE8F5E9);
   static const Color successDark = Color(0xFF1B5E20);
 
-  static const Color warning = Color.fromARGB(255, 240, 104, 0);
+  static const Color warning = Color(0xFFF06800);
   static const Color warningLight = Color(0xFFFFF7ED);
   static const Color warningDark = Color(0xFF92400E);
 
-  static const Color error = Color.fromARGB(255, 236, 42, 42);
+  static const Color error = Color(0xFFEC2A2A);
   static const Color errorLight = Color(0xFFFEECEC);
   static const Color errorDark = Color(0xFF8E1B1B);
 
@@ -64,26 +80,26 @@ class AppColors {
   static const Color border = Color(0xFFD7E0EA);
   static const Color borderLight = Color(0xFFEAF0F6);
 
-  // ── Footer / fondos oscuros ────────────────────────────────────────────────
-  static const Color dark = Color(0xFF0B1628);
-  static const Color darkMuted = Color(0xFF1B2B42);
+  // ── Fondos oscuros / navy Geoflora ────────────────────────────────────────
+  static const Color dark = Color(0xFF0D1B2E);
+  static const Color darkMuted = Color(0xFF1A2C44);
 
   // ── Colores específicos para gráficas ─────────────────────────────────────
   static const Color chartPositive = Color(0xFF00A86B);
-  static const Color chartNegative = Color(0xFFE53935);
+  static const Color chartNegative = Color(0xFFEA516D); // brand pink
   static const Color chartBalance = Color(0xFF005286);
-  static const Color chartCutAverage = Color(0xFF057CB2);
-  static const Color chartCutFinal = Color(0xFFFF8F00);
+  static const Color chartCutAverage = Color(0xFF007DAD); // brand mid-blue
+  static const Color chartCutFinal = Color(0xFFF06800);
 
-  // ── Paleta para gráficas ───────────────────────────────────────────────────
+  // ── Paleta para gráficas (orden marca Geoflora) ───────────────────────────
   static const List<Color> chartPalette = [
-    Color(0xFF005286), // azul corporativo
-    Color(0xFF00AFD4), // cian corporativo
-    Color(0xFF00A86B), // verde intenso
-    Color(0xFFFF8F00), // naranja fuerte
-    Color(0xFFE53935), // rojo intenso
-    Color(0xFF057CB2), // azul medio
-    Color(0xFF7CB342), // lima
+    Color(0xFF005286), // azul profundo  — Pantone 7462 C
+    Color(0xFF007DAD), // azul medio     — Pantone 7460 C
+    Color(0xFF00AFD3), // cian           — Pantone 638 C
+    Color(0xFFEA516D), // rosa coral     — Pantone 184 C
+    Color(0xFFF08592), // rosa claro     — Pantone 177 C
+    Color(0xFFFFE3AB), // champagne      — Pantone 7401 C
+    Color(0xFF00A86B), // verde semántico
     Color(0xFF263238), // grafito
   ];
 
@@ -171,28 +187,39 @@ class AppGradients {
   );
 
   static const LinearGradient successCard = LinearGradient(
-    colors: [Color.fromARGB(255, 73, 198, 79), Color(0xFF1B5E20)],
+    colors: [AppColors.success, AppColors.successDark],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient infoCard = LinearGradient(
-    colors: [Color.fromARGB(255, 33, 121, 228), Color(0xFF0D3F85)],
+    colors: [AppColors.info, AppColors.infoDark],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient warningCard = LinearGradient(
-    colors: [
-      Color.fromARGB(255, 255, 147, 65),
-      Color.fromARGB(255, 185, 77, 10)
-    ],
+    colors: [AppColors.warning, AppColors.warningDark],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient errorCard = LinearGradient(
-    colors: [Color.fromARGB(255, 227, 76, 76), Color(0xFF8E1B1B)],
+    colors: [AppColors.error, AppColors.errorDark],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// Gradiente brand pink — Pantone 184 C → Pantone 177 C.
+  static const LinearGradient brandPinkCard = LinearGradient(
+    colors: [AppColors.brandPink, AppColors.brandPinkDark],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// Gradiente champagne cálido — Pantone 7401 C (KPIs destacados).
+  static const LinearGradient brandWarmCard = LinearGradient(
+    colors: [AppColors.brandWarm, AppColors.brandWarmDark],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -212,8 +239,12 @@ class AppTheme {
         onPrimary: Colors.white,
         secondary: AppColors.cyan,
         onSecondary: Colors.white,
+        tertiary: AppColors.brandPink,
+        onTertiary: Colors.white,
         surface: AppColors.surface,
         surfaceContainerHighest: AppColors.background,
+        error: AppColors.error,
+        onError: Colors.white,
       ),
       fontFamily: 'Roboto',
       scaffoldBackgroundColor: AppColors.background,

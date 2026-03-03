@@ -31,6 +31,14 @@ _Spacer              = None
 _ParagraphStyle      = None
 _getSampleStyleSheet = None
 
+# ── Cached style instances (built once after lazy load, reused every row) ────
+# Evita crear miles de objetos idénticos por cada fila de datos en los exports.
+_CACHED_THIN_BORDER    = None
+_CACHED_ALT_FILL       = None
+_CACHED_HEADER_FILL    = None
+_CACHED_SUBHEADER_FILL = None
+_CACHED_PDF_STYLES     = None
+
 # ── Paleta corporativa Geoflora ─────────────────────────────────────────────
 # Extraída de AppColors (app_theme.dart):
 #   primary      #005286  azul profundo corporativo
@@ -119,6 +127,9 @@ def _pdf_doc(buffer, horizontal=True):
 
 def _pdf_styles():
     """Retorna tupla (title_style, subtitle_style, section_style, cell_style)."""
+    global _CACHED_PDF_STYLES
+    if _CACHED_PDF_STYLES is not None:
+        return _CACHED_PDF_STYLES
     styles = _getSampleStyleSheet()
     title_style = _ParagraphStyle(
         'GeoTitle',
@@ -149,7 +160,8 @@ def _pdf_styles():
         fontSize=7,
         leading=9,
     )
-    return title_style, subtitle_style, section_style, cell_style
+    _CACHED_PDF_STYLES = (title_style, subtitle_style, section_style, cell_style)
+    return _CACHED_PDF_STYLES
 
 
 def _pdf_header_elements(title: str, inventory_name: str, extra_lines=None):
@@ -220,23 +232,35 @@ def _w(text, style):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _thin_border():
-    thin = _Side(style='thin', color=_COLOR_BORDER)
-    return _Border(left=thin, right=thin, top=thin, bottom=thin)
+    global _CACHED_THIN_BORDER
+    if _CACHED_THIN_BORDER is None:
+        thin = _Side(style='thin', color=_COLOR_BORDER)
+        _CACHED_THIN_BORDER = _Border(left=thin, right=thin, top=thin, bottom=thin)
+    return _CACHED_THIN_BORDER
 
 
 def _header_fill():
     """Fondo azul corporativo Geoflora para filas de encabezado."""
-    return _PatternFill(fill_type='solid', fgColor=_COLOR_PRIMARY)
+    global _CACHED_HEADER_FILL
+    if _CACHED_HEADER_FILL is None:
+        _CACHED_HEADER_FILL = _PatternFill(fill_type='solid', fgColor=_COLOR_PRIMARY)
+    return _CACHED_HEADER_FILL
 
 
 def _subheader_fill():
     """Fondo azul claro para filas de sección / totales."""
-    return _PatternFill(fill_type='solid', fgColor=_COLOR_SUBHEADER)
+    global _CACHED_SUBHEADER_FILL
+    if _CACHED_SUBHEADER_FILL is None:
+        _CACHED_SUBHEADER_FILL = _PatternFill(fill_type='solid', fgColor=_COLOR_SUBHEADER)
+    return _CACHED_SUBHEADER_FILL
 
 
 def _alt_fill():
     """Fondo muy suave para filas de datos alternas."""
-    return _PatternFill(fill_type='solid', fgColor=_COLOR_ALT_ROW)
+    global _CACHED_ALT_FILL
+    if _CACHED_ALT_FILL is None:
+        _CACHED_ALT_FILL = _PatternFill(fill_type='solid', fgColor=_COLOR_ALT_ROW)
+    return _CACHED_ALT_FILL
 
 
 def _agregar_encabezado_excel(ws, titulo: str, inventory_name: str, num_cols: int = 1):

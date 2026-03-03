@@ -1,7 +1,7 @@
 """Compatibilidad de vistas legacy.
 
 Este módulo conserva los nombres históricos de endpoints y reexporta la
-implementación modular en español ubicada en `inventory.vistas.*`.
+implementación modular ubicada en `inventory.vistas.*`.
 """
 
 from .vistas.escritura import create_inventory, rollback_batch, update_inventory, upload_base_file
@@ -21,6 +21,7 @@ from .vistas.lectura import (
     get_product_analysis,
     get_product_history,
     get_products,
+    get_range_product_cuts,
     get_records,
     get_summary,
     list_inventories,
@@ -46,6 +47,7 @@ obtener_movimientos_mensuales = get_monthly_movements
 obtener_cortes_mensuales_productos = get_monthly_product_cuts
 obtener_analisis_producto = get_product_analysis
 obtener_historial_producto = get_product_history
+obtener_cortes_rango_producto = get_range_product_cuts
 obtener_productos = get_products
 obtener_registros = get_records
 obtener_resumen = get_summary

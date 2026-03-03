@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from django.db.models import Q, QuerySet
@@ -74,10 +75,17 @@ def apply_record_filters(queryset: QuerySet, filters: RecordFilterParams) -> Que
             filtered = filtered.filter(date__lte=filters.date_to)
 
     if filters.search_filter:
-        filtered = filtered.filter(
-            Q(product__code__icontains=filters.search_filter)
-            | Q(product__description__icontains=filters.search_filter)
-        )
+        sf = filters.search_filter
+        if re.match(r'^\d+$', sf):
+            filtered = filtered.filter(
+                Q(product__code__iexact=sf)
+                | Q(product__description__icontains=sf)
+            )
+        else:
+            filtered = filtered.filter(
+                Q(product__code__icontains=sf)
+                | Q(product__description__icontains=sf)
+            )
 
     if filters.document_number_filter:
         filtered = filtered.filter(
