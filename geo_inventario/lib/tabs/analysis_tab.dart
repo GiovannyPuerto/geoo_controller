@@ -8,6 +8,7 @@ import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:geo_inventario/services/api_service.dart';
+import 'package:geo_inventario/services/ideal_inventory_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/tabs/analysis/analisis_catalogo_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
@@ -29,6 +30,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   bool isLoading = true;
   bool _isRefreshing = false;
   int _analysisRequestEpoch = 0;
+  Map<String, double> _idealValues = {};
 
   bool _isRangeMode = false;
 
@@ -46,6 +48,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   void initState() {
     super.initState();
     inventoryRefreshNotifier.addListener(_onExternalRefresh);
+    _loadIdealValues();
     _loadAnalysisData();
   }
 
@@ -640,17 +643,70 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  children: const [
-                    Icon(Icons.bar_chart_rounded,
-                        size: 18, color: AppColors.primary),
-                    SizedBox(width: AppSpacing.sm),
-                    Text(
-                      'Valor Total por Grupo',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.bar_chart_rounded,
+                            size: 18, color: AppColors.primary),
+                        SizedBox(width: AppSpacing.sm),
+                        Text(
+                          'Valor Total por Grupo',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_idealValues.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color:
+                                    AppColors.brandPink.withValues(alpha: 0.1),
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.full),
+                                border: Border.all(
+                                    color: AppColors.brandPink
+                                        .withValues(alpha: 0.3)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.track_changes_rounded,
+                                      size: 11, color: AppColors.brandPink),
+                                  SizedBox(width: 4),
+                                  Text('Ideal activo',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: AppColors.brandPink,
+                                          fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.track_changes_rounded,
+                              size: 18, color: AppColors.brandPink),
+                          tooltip: 'Definir valores ideales por grupo',
+                          onPressed: _showIdealValuesDialog,
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                AppColors.brandPink.withValues(alpha: 0.1),
+                            padding: const EdgeInsets.all(6),
+                            minimumSize: const Size(32, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -786,6 +842,39 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                                     ),
                                   ],
                                 ),
+                                if ((_idealValues[xLabel] ?? 0) > 0) ...[
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(
+                                          color: AppColors.brandPink,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      const Text(
+                                        'Ideal: ',
+                                        style: TextStyle(
+                                          color: AppColors.textDisabled,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      Text(
+                                        CurrencyFormatter.format(
+                                            _idealValues[xLabel]!),
+                                        style: const TextStyle(
+                                          color: AppColors.brandPink,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           );
@@ -849,6 +938,60 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
                           animationDuration: 1200,
                           enableTooltip: true,
                         ),
+                        // ── Puntos de valor ideal por grupo ───────────────
+                        if (_idealValues.isNotEmpty)
+                          ScatterSeries<MapEntry<String, double>, String>(
+                            dataSource: sortedGroupData
+                                .where((e) => (_idealValues[e.key] ?? 0) > 0)
+                                .map((e) =>
+                                    MapEntry(e.key, _idealValues[e.key]!))
+                                .toList(),
+                            xValueMapper: (e, _) => e.key,
+                            yValueMapper: (e, _) => e.value,
+                            name: 'Valor Ideal ◆',
+                            color: AppColors.brandPink,
+                            markerSettings: const MarkerSettings(
+                              isVisible: true,
+                              height: 20,
+                              width: 20,
+                              shape: DataMarkerType.diamond,
+                              color: AppColors.brandPink,
+                              borderColor: Colors.white,
+                              borderWidth: 2,
+                            ),
+                            enableTooltip: false,
+                            dataLabelSettings: DataLabelSettings(
+                              isVisible: true,
+                              labelAlignment: ChartDataLabelAlignment.top,
+                              textStyle: const TextStyle(
+                                color: AppColors.brandPink,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              builder: (dynamic dp, dynamic pt, dynamic s,
+                                  int pIdx, int sIdx) {
+                                final entry = dp as MapEntry<String, double>;
+                                final v = entry.value;
+                                String lbl;
+                                if (v >= 1000000000) {
+                                  lbl =
+                                      '\$${(v / 1000000000).toStringAsFixed(1)}B ◆';
+                                } else if (v >= 1000000) {
+                                  lbl =
+                                      '\$${(v / 1000000).toStringAsFixed(1)}M ◆';
+                                } else if (v >= 1000) {
+                                  lbl = '\$${(v / 1000).toStringAsFixed(0)}K ◆';
+                                } else {
+                                  lbl = '\$${v.toStringAsFixed(0)} ◆';
+                                }
+                                return Text(lbl,
+                                    style: const TextStyle(
+                                        color: AppColors.brandPink,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700));
+                              },
+                            ),
+                          ),
                       ],
                     ),
                   );
@@ -859,6 +1002,182 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
         ],
       );
     }); // LayoutBuilder
+  }
+
+  // ── Valores ideales de inventario por grupo ─────────────────────────────
+
+  Future<void> _loadIdealValues() async {
+    await IdealInventoryService.instance.load();
+    if (mounted) {
+      setState(() => _idealValues = IdealInventoryService.instance.getAll());
+    }
+  }
+
+  void _showIdealValuesDialog() {
+    final groupsFromData =
+        AnalisisCatalogoService.obtenerValoresUnicos(analysis, 'grupo');
+    final allGroups = {...groupsFromData, ..._idealValues.keys}.toList()
+      ..sort();
+
+    if (allGroups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Carga datos de inventario para configurar.')),
+      );
+      return;
+    }
+
+    final controllers = {
+      for (final g in allGroups)
+        g: TextEditingController(
+          text: (_idealValues[g] ?? 0) > 0
+              ? _idealValues[g]!.toStringAsFixed(0)
+              : '',
+        ),
+    };
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.xl)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.brandPink.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: const Icon(Icons.track_changes_rounded,
+                    color: AppColors.brandPink, size: 18),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              const Expanded(
+                child: Text(
+                  'Valor Ideal por Grupo',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Define el valor objetivo de inventario para cada grupo.\n'
+                  'Deja vacío para no mostrar referencia. Se guarda automáticamente.',
+                  style: TextStyle(
+                      fontSize: 12, color: AppColors.textMuted, height: 1.45),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 400),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: allGroups.map((group) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Text(
+                                  group,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: AppSpacing.sm),
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller: controllers[group],
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: false),
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(fontSize: 13),
+                                  decoration: InputDecoration(
+                                    prefixText: '\$',
+                                    hintText: '0',
+                                    hintStyle: const TextStyle(
+                                        color: AppColors.textDisabled),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 8),
+                                    border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(AppRadius.sm),
+                                      borderSide: const BorderSide(
+                                          color: AppColors.border),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(AppRadius.sm),
+                                      borderSide: const BorderSide(
+                                          color: AppColors.border),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(AppRadius.sm),
+                                      borderSide: const BorderSide(
+                                          color: AppColors.primary, width: 1.5),
+                                    ),
+                                    isDense: true,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final newValues = <String, double>{};
+                for (final g in allGroups) {
+                  final raw =
+                      controllers[g]!.text.replaceAll(RegExp(r'[^\d.]'), '');
+                  final val = double.tryParse(raw) ?? 0;
+                  if (val > 0) newValues[g] = val;
+                }
+                await IdealInventoryService.instance.save(newValues);
+                if (mounted) {
+                  setState(() =>
+                      _idealValues = IdealInventoryService.instance.getAll());
+                }
+                if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+              },
+              icon: const Icon(Icons.save_rounded, size: 16),
+              label: const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    ).whenComplete(() {
+      for (final c in controllers.values) {
+        c.dispose();
+      }
+    });
   }
 
   Widget _buildNegativeStockAlerts() {

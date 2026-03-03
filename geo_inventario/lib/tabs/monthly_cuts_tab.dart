@@ -10,7 +10,9 @@ import 'package:universal_html/html.dart' as html
 import 'package:geo_inventario/models/monthly_cut.dart';
 import 'package:geo_inventario/models/monthly_product_cut.dart';
 import 'package:geo_inventario/services/api_service.dart';
+import 'package:geo_inventario/services/ideal_inventory_service.dart';
 import 'package:geo_inventario/services/refresh_notifier.dart';
+import 'package:geo_inventario/tabs/analysis/analisis_catalogo_service.dart';
 import 'package:geo_inventario/tabs/monthly_cuts/monthly_cuts_filtros_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
@@ -40,6 +42,8 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   int monthsWindow = 12;
   int productLimit = 5000;
 
+  Map<String, double> _idealValues = {};
+
   // Paginación de la tabla de productos
   MonthlyProductCutDataSource? _productDataSource;
   int _productPageRows = 10;
@@ -61,6 +65,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
     super.initState();
     inventoryRefreshNotifier.addListener(_onExternalRefresh);
     _loadSelectableFilterOptions();
+    _loadIdealValues();
     _loadData();
   }
 
@@ -72,6 +77,13 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   }
 
   void _onExternalRefresh() => _loadData();
+
+  Future<void> _loadIdealValues() async {
+    await IdealInventoryService.instance.load();
+    if (mounted) {
+      setState(() => _idealValues = IdealInventoryService.instance.getAll());
+    }
+  }
 
   Future<void> _loadSelectableFilterOptions() async {
     try {
@@ -510,6 +522,12 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
   // ─── Gráfica ───────────────────────────────────────────────────────────────
 
   Widget _buildChart() {
+    // Valor ideal de referencia: suma total o el del grupo filtrado
+    final double idealRef = selectedCategory != null
+        ? (_idealValues[AnalisisCatalogoService.normalizarNombreGrupo(
+                selectedCategory!)] ??
+            0)
+        : _idealValues.values.fold(0.0, (s, v) => s + v);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -620,15 +638,19 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                         if (points.isEmpty) return const SizedBox.shrink();
                         // x está directamente en CartesianChartPoint
                         final xLabel = points.first.x?.toString() ?? '';
-                        const seriesNames = [
+                        final seriesNames = [
                           'Valor Promedio Inventario',
                           'Valor Cierre',
-                          'Promedio período',
+                          if (periodAverageGeneral > 0)
+                            'Promedio $monthsWindow meses',
+                          if (idealRef > 0) 'Valor Ideal',
                         ];
-                        const seriesColors = [
+                        final seriesColors = [
                           AppColors.chartCutAverage,
                           AppColors.chartCutFinal,
-                          AppColors.chartPositive,
+                          if (periodAverageGeneral > 0)
+                            AppColors.chartPositive,
+                          if (idealRef > 0) AppColors.brandPink,
                         ];
                         return Container(
                           padding: const EdgeInsets.symmetric(
@@ -770,6 +792,45 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
                           dashArray: const [10, 6],
                           markerSettings: const MarkerSettings(
                             isVisible: false,
+                          ),
+                        ),
+                      // ── Línea de valor ideal (configurada por el usuario) ─
+                      if (idealRef > 0)
+                        LineSeries<MonthlyCut, String>(
+                          dataSource: monthlyCuts,
+                          xValueMapper: (d, _) =>
+                              MonthlyCutsFiltrosService.formatMonth(d.month),
+                          yValueMapper: (_, __) => idealRef,
+                          name: 'Valor Ideal ◆',
+                          color: AppColors.brandPink,
+                          width: 2.5,
+                          dashArray: const [8, 4],
+                          markerSettings: const MarkerSettings(
+                            isVisible: false,
+                          ),
+                          dataLabelSettings: DataLabelSettings(
+                            isVisible: true,
+                            labelAlignment: ChartDataLabelAlignment.middle,
+                            builder: (dynamic dp, dynamic pt, dynamic s,
+                                int pIdx, int sIdx) {
+                              if (pIdx != 0) return const SizedBox.shrink();
+                              final v = idealRef;
+                              String lbl;
+                              if (v >= 1000000) {
+                                lbl =
+                                    '\$${(v / 1000000).toStringAsFixed(1)}M ◆ Ideal';
+                              } else if (v >= 1000) {
+                                lbl =
+                                    '\$${(v / 1000).toStringAsFixed(0)}K ◆ Ideal';
+                              } else {
+                                lbl = '\$${v.toStringAsFixed(0)} ◆ Ideal';
+                              }
+                              return Text(lbl,
+                                  style: const TextStyle(
+                                      color: AppColors.brandPink,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700));
+                            },
                           ),
                         ),
                     ],
