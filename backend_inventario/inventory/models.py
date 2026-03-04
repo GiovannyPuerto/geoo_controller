@@ -18,7 +18,7 @@ class ImportBatch(models.Model):
     # Permite manejar múltiples inventarios independientes
     nombre_inventario = models.CharField(
         max_length=128,
-        default='default',
+        default='Por defecto',
         db_index=True,
         db_column='nombre_inventario',
     )
@@ -41,7 +41,7 @@ class Product(models.Model):
     grupo = models.CharField(max_length=128, blank=True, db_column='grupo')
     nombre_inventario = models.CharField(
         max_length=128,
-        default='default',
+        default='Por defecto',
         db_index=True,
         db_column='nombre_inventario',
     )

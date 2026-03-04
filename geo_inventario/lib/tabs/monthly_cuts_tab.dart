@@ -1447,37 +1447,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage>
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Almacén ─────────────────────────────────────────
-                  const Text('Almacén',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textMuted)),
-                  const SizedBox(height: AppSpacing.xs),
-                  DropdownButtonFormField<String>(
-                    initialValue: localWarehouse,
-                    isDense: true,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      prefixIcon:
-                          Icon(Icons.warehouse_outlined, size: 18),
-                    ),
-                    items: [
-                      const DropdownMenuItem<String>(
-                          value: null,
-                          child: Text('Todos',
-                              style: TextStyle(fontSize: 14))),
-                      ..._warehouseOptions.map(
-                        (item) => DropdownMenuItem<String>(
-                          value: item,
-                          child: Text(item,
-                              style: const TextStyle(fontSize: 14)),
-                        ),
-                      ),
-                    ],
-                    onChanged: (value) =>
-                        setDlgState(() => localWarehouse = value),
-                  ),
                   const SizedBox(height: AppSpacing.md),
 
                   // ── Categoría ────────────────────────────────────────

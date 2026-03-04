@@ -557,7 +557,7 @@ class _UploadMenu extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.cyan,
           borderRadius: BorderRadius.circular(AppRadius.md),
-          boxShadow: AppShadows.colored(AppColors.cyan),
+          boxShadow: AppShadows.colored(AppColors.primaryDarker),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,

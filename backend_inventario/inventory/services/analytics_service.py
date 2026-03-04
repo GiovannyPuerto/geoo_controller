@@ -67,7 +67,7 @@ def _resolve_target_month(target_month="", fallback_date=None):
 
 
 def _get_monthly_value_series(
-    inventory_name="default",
+    inventory_name="Por defecto",
     warehouse_filter="",
     category_filter="",
     search_filter="",
@@ -196,20 +196,26 @@ def _get_monthly_value_series(
 
 
 def get_monthly_movements_data(
-    inventory_name="default",
+    inventory_name="Por defecto",
     warehouse_filter="",
     category_filter="",
     search_filter="",
 ):
     """
-    Calcula entradas, salidas y saldo de cierre para una ventana de 12 meses.
+    Calcula entradas, salidas y saldo mensual para una ventana de 12 meses.
+
+    Importante:
+    Para evitar diferencias entre el "Saldo" de Movimientos y el
+    "Valor Cierre" de Cortes Mensuales, ambos se derivan de la misma
+    metodología de valuación (get_monthly_qty_value_series).
     """
     (
-        start_month_date,
-        months_count,
-        starting_balance,
-        monthly_data,
-    ) = _get_monthly_value_series(
+        _start_month_date,
+        _months_count,
+        rows,
+        _period_avg_general,
+        _products_count,
+    ) = _get_monthly_qty_value_series(
         inventory_name=inventory_name,
         warehouse_filter=warehouse_filter,
         category_filter=category_filter,
@@ -217,33 +223,19 @@ def get_monthly_movements_data(
         months=12,
     )
 
-    result_data = []
-    current_balance = starting_balance
-    for i in range(months_count):
-        current_month_date = start_month_date + relativedelta(months=i)
-        month_key = current_month_date.strftime("%Y-%m")
-
-        month_data = monthly_data.get(
-            month_key, {"entries": Decimal("0"), "exits": Decimal("0")}
-        )
-        entries = month_data["entries"]
-        exits = month_data["exits"]
-
-        current_balance += entries - exits
-        result_data.append(
-            {
-                "month": month_key,
-                "total_entries": float(entries),
-                "total_exits": float(exits),
-                "closing_balance": float(current_balance),
-            }
-        )
-
-    return result_data
+    return [
+        {
+            "month": row.get("month"),
+            "total_entries": float(row.get("total_entries", 0) or 0),
+            "total_exits": float(row.get("total_exits", 0) or 0),
+            "closing_balance": float(row.get("closing_balance", 0) or 0),
+        }
+        for row in rows
+    ]
 
 
 def _get_monthly_qty_value_series(
-    inventory_name="default",
+    inventory_name="Por defecto ",
     warehouse_filter="",
     category_filter="",
     search_filter="",
@@ -619,7 +611,7 @@ def _get_monthly_qty_value_series(
 
 
 def get_monthly_cuts_data(
-    inventory_name="default",
+    inventory_name="Por defecto",
     warehouse_filter="",
     category_filter="",
     search_filter="",
@@ -672,7 +664,7 @@ def get_monthly_cuts_data(
 
 
 def get_monthly_product_cuts_data(
-    inventory_name="default",
+    inventory_name="Por defecto",
     target_month="",
     warehouse_filter="",
     category_filter="",
@@ -1060,7 +1052,7 @@ def get_monthly_product_cuts_data(
 
 
 def get_range_product_cuts_data(
-    inventory_name="default",
+    inventory_name="Por defecto",
     date_from="",
     date_to="",
     warehouse_filter="",
@@ -1391,7 +1383,7 @@ def get_range_product_cuts_data(
 
 
 def get_product_analysis_data(
-    inventory_name="default",
+    inventory_name="Por defecto",
     category_filter="",
     warehouse_filter="",
     rotation_filter="",
@@ -1612,6 +1604,16 @@ def get_product_analysis_data(
             "daily_total"
         ] or Decimal("0")
 
+    # Primera fecha con movimiento por producto dentro del alcance consultado.
+    # Se usa para no marcar como "Obsoleto" productos que aparecieron después
+    # del periodo de evaluación (p.ej. cuando el año de rotación se ajusta al
+    # año anterior por tener pocos meses en el año más reciente).
+    first_record_date_by_product: dict[int, datetime.date] = {
+        row["product_id"]: row["first_date"]
+        for row in records_scope.values("product_id").annotate(first_date=Min("date"))
+        if row["first_date"]
+    }
+
     qty_output = DecimalField(max_digits=28, decimal_places=6)
     movement_stats_filter = monthly_filter
     if start_date:
@@ -1768,6 +1770,10 @@ def get_product_analysis_data(
             has_variations = any(month_has_daily_changes.values())
             all_same_year = len(unique_b) == 1 and not has_variations
             all_zero_year = all_daily_zero
+            first_record_date = first_record_date_by_product.get(pid)
+            is_new_after_evaluation_window = bool(
+                first_record_date and first_record_date > evaluation_end_date
+            )
             month_change_flags = [
                 month_has_daily_changes.get(month, False) for month in month_numbers
             ]
@@ -1816,6 +1822,12 @@ def get_product_analysis_data(
             if current_stock <= 0:
                 rotation = "Inactivo"
                 rotation_rule = "stock_real_en_cero_o_negativo"
+            elif is_new_after_evaluation_window:
+                # Producto nuevo posterior al periodo evaluado:
+                # no debe penalizarse como "Obsoleto" por no existir aún
+                # en el año de rotación.
+                rotation = "Activo"
+                rotation_rule = "producto_nuevo_posterior_al_periodo_evaluado"
             elif all_zero_year:
                 # Stock real > 0 pero la simulación de saldo del año estuvo
                 # siempre en cero: sin actividad registrada → Obsoleto.
@@ -1892,7 +1904,7 @@ def get_product_analysis_data(
 
 
 def get_inventory_at_date_data(
-    inventory_name="default",
+    inventory_name="Por defecto",
     date_str="",
     target_date=None,
     warehouse_filter="",

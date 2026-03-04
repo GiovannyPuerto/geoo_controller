@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/date_symbol_data_local.dart';
 import 'dashboard.dart';
+import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/excel_upload_service.dart';
 import 'package:geo_inventario/services/config_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
@@ -48,14 +49,19 @@ class WelcomePage extends StatefulWidget {
   State<WelcomePage> createState() => _WelcomePageState();
 }
 
+enum _UploadKind { base, update }
+
 class _WelcomePageState extends State<WelcomePage>
     with SingleTickerProviderStateMixin {
-  PlatformFile? _selectedFile;
+  final ApiService _apiService = ApiService();
   final ExcelUploadService _uploadService = ExcelUploadService();
+  List<PlatformFile> _selectedFiles = [];
+  _UploadKind _selectedKind = _UploadKind.base;
 
   String? _mensaje;
   bool _isSuccess = false;
   bool _isLoading = false;
+  bool _hasBaseData = false;
   List<Map<String, dynamic>> _historial = [];
 
   late AnimationController _animCtrl;
@@ -81,6 +87,7 @@ class _WelcomePageState extends State<WelcomePage>
       CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic),
     );
     _animCtrl.forward();
+    _loadBaseDataStatus();
     _loadHistorial();
   }
 
@@ -108,12 +115,35 @@ class _WelcomePageState extends State<WelcomePage>
     }
   }
 
+  /// Consulta si ya existe una base cargada para cambiar el flujo de carga:
+  /// - sin base: permite cargar archivo base;
+  /// - con base: permite cargar archivos de actualización.
+  Future<void> _loadBaseDataStatus() async {
+    try {
+      final summary = await _apiService.getSummary();
+      if (!mounted) return;
+      final hasBase = (summary?['total_products'] ?? 0) > 0;
+      setState(() {
+        _hasBaseData = hasBase;
+        if (_selectedFiles.isEmpty) {
+          _selectedKind = _hasBaseData ? _UploadKind.update : _UploadKind.base;
+        }
+      });
+    } catch (_) {
+      // Si falla, se conserva el modo actual.
+    }
+  }
+
   /// Abre el selector de archivos y guarda el archivo elegido.
   Future<void> _pickFile() async {
-    final result = await _uploadService.pickBaseFile();
+    final pickUpdates = _hasBaseData;
+    final result = pickUpdates
+        ? await _uploadService.pickUpdateFiles()
+        : await _uploadService.pickBaseFile();
     if (result != null && mounted) {
       setState(() {
-        _selectedFile = result.files.first;
+        _selectedFiles = result.files;
+        _selectedKind = pickUpdates ? _UploadKind.update : _UploadKind.base;
         _mensaje = null;
       });
     }
@@ -121,14 +151,16 @@ class _WelcomePageState extends State<WelcomePage>
 
   /// Sube el archivo seleccionado al servidor y muestra el resultado.
   Future<void> _uploadFile() async {
-    if (_selectedFile == null) return;
+    if (_selectedFiles.isEmpty) return;
     setState(() {
       _isLoading = true;
       _mensaje = null;
     });
 
     try {
-      final result = await _uploadService.uploadBaseFile(_selectedFile!);
+      final result = _selectedKind == _UploadKind.update
+          ? await _uploadService.uploadUpdateFiles(_selectedFiles)
+          : await _uploadService.uploadBaseFile(_selectedFiles.first);
       if (!mounted) return;
 
       setState(() {
@@ -137,19 +169,30 @@ class _WelcomePageState extends State<WelcomePage>
         _mensaje = result.ok
             ? (result.message.isNotEmpty
                 ? result.message
-                : 'Archivo procesado correctamente.')
+                : (_selectedKind == _UploadKind.update
+                    ? 'Actualización procesada correctamente.'
+                    : 'Archivo base procesado correctamente.'))
             : (result.error ??
-                'El archivo contiene errores o ya fue procesado. '
-                    'Verifique la fecha o formato.');
+                (_selectedKind == _UploadKind.update
+                    ? 'Los archivos de actualización contienen errores o ya fueron procesados.'
+                    : 'El archivo base contiene errores o ya fue procesado.'));
+        if (result.ok) {
+          _selectedFiles = [];
+        }
       });
 
-      if (result.ok) _loadHistorial();
+      if (result.ok) {
+        _loadHistorial();
+        _loadBaseDataStatus();
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _isSuccess = false;
-        _mensaje = 'Error al procesar el archivo. Intente nuevamente.';
+        _mensaje = _selectedKind == _UploadKind.update
+            ? 'Error al procesar la actualización. Intente nuevamente.'
+            : 'Error al procesar el archivo base. Intente nuevamente.';
       });
     }
   }
@@ -157,8 +200,9 @@ class _WelcomePageState extends State<WelcomePage>
   /// Limpia la selección actual y el mensaje de resultado.
   void _clearSelection() {
     setState(() {
-      _selectedFile = null;
+      _selectedFiles = [];
       _mensaje = null;
+      _selectedKind = _hasBaseData ? _UploadKind.update : _UploadKind.base;
     });
   }
 
@@ -197,7 +241,9 @@ class _WelcomePageState extends State<WelcomePage>
               child: Column(
                 children: [
                   _buildHeroSection(),
-                  if (_selectedFile != null || _isLoading || _mensaje != null)
+                  if (_selectedFiles.isNotEmpty ||
+                      _isLoading ||
+                      _mensaje != null)
                     _buildUploadSection(),
                   _buildFeaturesSection(),
                   _buildHowItWorksSection(),
@@ -225,79 +271,78 @@ class _WelcomePageState extends State<WelcomePage>
               boxShadow: AppShadows.elevated,
             ),
             child: AppBar(
-                backgroundColor: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
-                scrolledUnderElevation: 0,
-                elevation: 0,
-                title: Row(
-                  children: [
-                    // Logo en pastilla blanca para contraste sobre fondo navy
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                      ),
-                      child: Image.asset('statics/images/logo_geoflora.png',
-                          height: 26),
+              backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              scrolledUnderElevation: 0,
+              elevation: 0,
+              title: Row(
+                children: [
+                  // Logo en pastilla blanca para contraste sobre fondo navy
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
-                    const SizedBox(width: AppSpacing.md),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Sistema de Inventario',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
-                        Text(
-                          'Geoflora SAS',
-                          style:
-                              TextStyle(fontSize: 11, color: Color(0xCCFFFFFF)),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                actions: [
-                  // Indicador del servidor configurado
-                  ServerIndicatorChip(
-                    host: ConfigService.instance.host,
-                    port: ConfigService.instance.port,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  // Botón de configuración del servidor
-                  Tooltip(
-                    message: 'Configurar servidor',
-                    child: IconButton(
-                      icon: const Icon(Icons.settings_ethernet_rounded,
-                          color: Color(0xCCFFFFFF), size: 22),
-                      onPressed: () async {
-                        final changed =
-                            await ServerSettingsDialog.show(context);
-                        if (changed && mounted) {
-                          setState(() {}); // refresca indicador
-                          _loadHistorial();
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  _AppBarButton(
-                    icon: Icons.dashboard_rounded,
-                    label: 'Dashboard',
-                    onTap: _goToDashboard,
+                    child: Image.asset('statics/images/logo_geoflora.png',
+                        height: 26),
                   ),
                   const SizedBox(width: AppSpacing.md),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Sistema de Inventario',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: 0.1,
+                        ),
+                      ),
+                      Text(
+                        'Geoflora SAS',
+                        style:
+                            TextStyle(fontSize: 11, color: Color(0xCCFFFFFF)),
+                      ),
+                    ],
+                  ),
                 ],
               ),
+              actions: [
+                // Indicador del servidor configurado
+                ServerIndicatorChip(
+                  host: ConfigService.instance.host,
+                  port: ConfigService.instance.port,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                // Botón de configuración del servidor
+                Tooltip(
+                  message: 'Configurar servidor',
+                  child: IconButton(
+                    icon: const Icon(Icons.settings_ethernet_rounded,
+                        color: Color(0xCCFFFFFF), size: 22),
+                    onPressed: () async {
+                      final changed = await ServerSettingsDialog.show(context);
+                      if (changed && mounted) {
+                        setState(() {}); // refresca indicador
+                        _loadHistorial();
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                _AppBarButton(
+                  icon: Icons.dashboard_rounded,
+                  label: 'Dashboard',
+                  onTap: _goToDashboard,
+                ),
+                const SizedBox(width: AppSpacing.md),
+              ],
             ),
+          ),
           const Positioned(
             left: 0,
             right: 0,
@@ -400,7 +445,11 @@ class _WelcomePageState extends State<WelcomePage>
                       fontSize: 15, fontWeight: FontWeight.w700),
                 ),
                 icon: const Icon(Icons.upload_file_rounded, size: 20),
-                label: const Text('Seleccionar archivo Excel'),
+                label: Text(
+                  _hasBaseData
+                      ? 'Seleccionar actualización'
+                      : 'Seleccionar archivo base',
+                ),
               ),
               OutlinedButton.icon(
                 onPressed: _goToDashboard,
@@ -445,6 +494,12 @@ class _WelcomePageState extends State<WelcomePage>
 
   Widget _buildUploadSection() {
     final isMobile = MediaQuery.of(context).size.width < 600;
+    final isUpdateSelection = _selectedKind == _UploadKind.update;
+    final isMultiSelection = _selectedFiles.length > 1;
+    final selectedLabel = isMultiSelection
+        ? '${_selectedFiles.length} archivos seleccionados'
+        : (_selectedFiles.isNotEmpty ? _selectedFiles.first.name : '');
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(
@@ -478,28 +533,34 @@ class _WelcomePageState extends State<WelcomePage>
                           color: AppColors.primary, size: 22),
                     ),
                     const SizedBox(width: AppSpacing.md),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Procesamiento de archivo',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textPrimary,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isUpdateSelection
+                                ? 'Procesamiento de actualización'
+                                : 'Procesamiento de archivo base',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Carga tu archivo Excel base de inventario',
-                          style: TextStyle(
-                              fontSize: 13, color: AppColors.textMuted),
-                        ),
-                      ],
+                          Text(
+                            isUpdateSelection
+                                ? 'Carga uno o varios archivos de movimientos'
+                                : 'Carga tu archivo Excel base de inventario',
+                            style: const TextStyle(
+                                fontSize: 13, color: AppColors.textMuted),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
 
-                if (_selectedFile != null) ...[
+                if (_selectedFiles.isNotEmpty) ...[
                   const SizedBox(height: AppSpacing.lg),
                   // Archivo seleccionado
                   Container(
@@ -518,7 +579,7 @@ class _WelcomePageState extends State<WelcomePage>
                         const SizedBox(width: AppSpacing.sm),
                         Expanded(
                           child: Text(
-                            _selectedFile!.name,
+                            selectedLabel,
                             style: const TextStyle(
                               color: AppColors.primaryDarker,
                               fontWeight: FontWeight.w500,
@@ -546,7 +607,7 @@ class _WelcomePageState extends State<WelcomePage>
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: _selectedFile != null && !_isLoading
+                        onPressed: _selectedFiles.isNotEmpty && !_isLoading
                             ? _uploadFile
                             : null,
                         icon: _isLoading
@@ -560,10 +621,15 @@ class _WelcomePageState extends State<WelcomePage>
                               )
                             : const Icon(Icons.upload_rounded, size: 20),
                         label: Text(
-                            _isLoading ? 'Procesando…' : 'Subir y procesar'),
+                          _isLoading
+                              ? 'Procesando…'
+                              : (isUpdateSelection
+                                  ? 'Subir actualización'
+                                  : 'Subir base'),
+                        ),
                       ),
                     ),
-                    if (_selectedFile != null) ...[
+                    if (_selectedFiles.isNotEmpty) ...[
                       const SizedBox(width: AppSpacing.sm),
                       OutlinedButton(
                         onPressed: _clearSelection,
@@ -669,7 +735,7 @@ class _WelcomePageState extends State<WelcomePage>
       (
         '2',
         'Sube el archivo',
-        'Haz clic en "Seleccionar archivo Excel", elige tu archivo y presiona "Subir y procesar".'
+        'Primero carga el archivo base. Luego, desde ese mismo botón, carga archivos de actualización.'
       ),
       (
         '3',
@@ -831,7 +897,7 @@ class _WelcomePageState extends State<WelcomePage>
               ),
               // Logo
               _FooterColumn(
-                title: 'Nuestro grupo empresarial',
+                title: 'Nuestra empresa',
                 children: [
                   Image.asset('statics/images/logo_geoflora.png', width: 160),
                 ],
