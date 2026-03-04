@@ -18,11 +18,13 @@ class ApiService {
   static const Duration _genericCacheTtl = Duration(
       minutes: 20); // histórico: evita recargas frecuentes innecesarias
   static const int _analysisCacheMaxEntries = 64;
+  static const int _genericCacheMaxEntries = 48;
   static final http.Client _httpClient = http.Client();
   static final Map<String, _AnalysisCacheEntry> _analysisCache = {};
   static final Map<String, Future<List<Map<String, dynamic>>>>
       _analysisInFlight = {};
   static final Map<String, _GenericCacheEntry> _genericCache = {};
+  static bool _closeCacheFlushed = false;
 
   String _toIsoDate(DateTime date) => date.toIso8601String().split('T')[0];
 
@@ -53,6 +55,28 @@ class ApiService {
   }
 
   void _invalidateLocalCaches() {
+    _analysisCache.clear();
+    _analysisInFlight.clear();
+    _genericCache.clear();
+  }
+
+  void _pruneGenericCache() {
+    final now = DateTime.now();
+    _genericCache.removeWhere((_, entry) => entry.expiresAt.isBefore(now));
+    if (_genericCache.length <= _genericCacheMaxEntries) return;
+
+    final entries = _genericCache.entries.toList()
+      ..sort((a, b) => a.value.expiresAt.compareTo(b.value.expiresAt));
+    final removeCount = _genericCache.length - _genericCacheMaxEntries;
+    for (var i = 0; i < removeCount; i++) {
+      _genericCache.remove(entries[i].key);
+    }
+  }
+
+  static Future<void> flushCachesOnAppClose() async {
+    if (_closeCacheFlushed) return;
+    _closeCacheFlushed = true;
+
     _analysisCache.clear();
     _analysisInFlight.clear();
     _genericCache.clear();
@@ -347,6 +371,7 @@ class ApiService {
       }
 
       final cacheKey = _buildGenericCacheKey('cortes-mensuales', params);
+      _pruneGenericCache();
       final cachedEntry = _genericCache[cacheKey];
       if (cachedEntry != null &&
           cachedEntry.expiresAt.isAfter(DateTime.now())) {
@@ -381,6 +406,7 @@ class ApiService {
           data: result,
           expiresAt: DateTime.now().add(_genericCacheTtl),
         );
+        _pruneGenericCache();
         return result;
       }
 
@@ -421,6 +447,7 @@ class ApiService {
 
       final cacheKey =
           _buildGenericCacheKey('cortes-mensuales-productos', params);
+      _pruneGenericCache();
       final cachedEntry = _genericCache[cacheKey];
       if (cachedEntry != null &&
           cachedEntry.expiresAt.isAfter(DateTime.now())) {
@@ -473,6 +500,7 @@ class ApiService {
           data: result,
           expiresAt: DateTime.now().add(_genericCacheTtl),
         );
+        _pruneGenericCache();
         return result;
       }
 

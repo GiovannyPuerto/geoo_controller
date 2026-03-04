@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:convert';
 import 'package:intl/date_symbol_data_local.dart';
 import 'dashboard.dart';
@@ -19,8 +20,34 @@ Future<void> main() async {
 }
 
 /// Raíz de la aplicación. Configura el tema global y la ruta inicial.
-class GeoInventarioApp extends StatelessWidget {
+class GeoInventarioApp extends StatefulWidget {
   const GeoInventarioApp({super.key});
+
+  @override
+  State<GeoInventarioApp> createState() => _GeoInventarioAppState();
+}
+
+class _GeoInventarioAppState extends State<GeoInventarioApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(ApiService.flushCachesOnAppClose());
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      unawaited(ApiService.flushCachesOnAppClose());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -12,8 +12,8 @@ class ConfigService {
   static const String _keyHost = 'server_host';
   static const String _keyPort = 'server_port';
 
-  static const String _defaultHost = '127.0.0.1';
-  static const int _defaultPort = 8000;
+  static const String _defaultHost = '192.168.0.248';
+  static const int _defaultPort = 5050;
 
   String _host = _defaultHost;
   int _port = _defaultPort;

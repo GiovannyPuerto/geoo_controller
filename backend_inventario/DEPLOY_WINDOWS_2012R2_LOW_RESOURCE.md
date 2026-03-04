@@ -26,10 +26,10 @@ pip install -r requirements.txt
 Usar como base: `.env.win_low.example`.
 
 Variables clave:
-- `INVENTORY_SETTINGS_PROFILE=win_low`
 - `DJANGO_DEBUG=0`
 - `DJANGO_ALLOWED_HOSTS=IP_LOCAL,localhost`
 - credenciales `DB_*`
+- opcional: `DJANGO_RUNTIME_DIR` para definir dónde guardar cache/logs (fuera del código)
 
 ## 5. Inicializar base de datos
 ```powershell
@@ -54,7 +54,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_backend_win_low.ps1 -EnvF
    - Aplicación: `C:\ruta\backend_inventario\.venv310\Scripts\python.exe`
    - Argumentos: `C:\ruta\backend_inventario\run_waitress.py`
    - Directorio: `C:\ruta\backend_inventario`
-3. Definir variables de entorno del servicio (`INVENTORY_SETTINGS_PROFILE`, `DB_*`, etc.).
+3. Definir variables de entorno del servicio (`DJANGO_DEBUG`, `DB_*`, etc.).
 4. Iniciar servicio.
 
 ## 8. Ajustes de bajo consumo
@@ -69,7 +69,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_backend_win_low.ps1 -EnvF
 - No usar `runserver` en producción.
 - Respaldos diarios de MySQL.
 - Monitorear:
-  - tamaño de `backend_inventario\var\logs\backend.log`,
+  - tamaño del archivo de log configurado (`%DJANGO_LOG_DIR%\backend.log` o `%PROGRAMDATA%\GeoInventario\logs\backend.log`),
   - uso de RAM del proceso Python,
   - latencia de `/api/inventory/resumen/` y `/api/inventory/analisis-producto/`.
 

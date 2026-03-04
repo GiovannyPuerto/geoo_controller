@@ -99,8 +99,8 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
   }
 
   void _resetDefaults() {
-    _hostCtrl.text = '127.0.0.1';
-    _portCtrl.text = '8000';
+    _hostCtrl.text = '192.168.0.248';
+    _portCtrl.text = '5050';
     setState(() => _connectionStatus = null);
   }
 
@@ -181,7 +181,7 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
             TextFormField(
               controller: _hostCtrl,
               decoration: _inputDeco(
-                  hint: 'ej.  192.168.1.100   o   127.0.0.1',
+                  hint: 'ej.  192.168.0.248   o   servidor.local',
                   suffix: _pasteButton(_hostCtrl)),
               validator: (v) => (v == null || v.trim().isEmpty)
                   ? 'La direccion no puede estar vacia'
@@ -195,7 +195,7 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
               controller: _portCtrl,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: _inputDeco(hint: 'ej.  8000'),
+              decoration: _inputDeco(hint: 'ej.  5050'),
               validator: (v) {
                 final n = int.tryParse(v ?? '');
                 if (n == null || n < 1 || n > 65535) {

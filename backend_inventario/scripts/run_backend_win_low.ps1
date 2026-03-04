@@ -26,10 +26,10 @@ function Set-EnvFromFile {
 
 Set-EnvFromFile -FilePath $EnvFile
 
-if (-not $env:INVENTORY_SETTINGS_PROFILE) {
-    $env:INVENTORY_SETTINGS_PROFILE = "win_low"
+if (-not $env:DJANGO_DEBUG) {
+    $env:DJANGO_DEBUG = "0"
 }
 
-Write-Host "Perfil Django: $env:INVENTORY_SETTINGS_PROFILE"
+Write-Host "DJANGO_DEBUG=$env:DJANGO_DEBUG"
 Write-Host "Iniciando backend con Waitress..."
 python run_waitress.py

@@ -192,7 +192,7 @@ def get_batches(request):
     inventory_name = request.GET.get('inventory_name', 'default')
     batches = ImportBatch.objects.filter(inventory_name=inventory_name).order_by('-started_at').values(
         'id', 'file_name', 'inventory_name', 'started_at', 'processed_at', 'rows_imported', 'rows_total', 'checksum'
-    )
+    ).iterator(chunk_size=1000)
 
     batches_data = [{
         'id': batch['id'],
@@ -213,7 +213,7 @@ def get_products(request):
     inventory_name = request.GET.get('inventory_name', 'default')
     products = Product.objects.filter(inventory_name=inventory_name).values(
         'code', 'description', 'group', 'initial_balance', 'initial_unit_cost'
-    )
+    ).iterator(chunk_size=2000)
     products_data = [{
         'code': product['code'],
         'description': product['description'],
@@ -255,7 +255,7 @@ def get_records(request):
             'batch_id',
             product_code=F('product__code'),
             product_description=F('product__description'),
-        )[slice_params.offset:slice_params.offset + slice_params.limit]
+        )[slice_params.offset:slice_params.offset + slice_params.limit].iterator(chunk_size=2000)
 
         records_data = [{
             'id': record['id'],
@@ -303,7 +303,7 @@ def get_product_history(request, product_code, inventory_name='default'):
             'document_type',
             'document_number',
             batch_id=F('batch_id'),
-        )[slice_params.offset:slice_params.offset + slice_params.limit]
+        )[slice_params.offset:slice_params.offset + slice_params.limit].iterator(chunk_size=2000)
 
         history_data = [{
             'id': record['id'],
@@ -339,7 +339,9 @@ def get_summary(request):
 @require_http_methods(["GET"])
 def list_inventories(request):
     try:
-        inventories = Product.objects.order_by('inventory_name').values_list('inventory_name', flat=True).distinct()
+        inventories = Product.objects.order_by('inventory_name').values_list(
+            'inventory_name', flat=True
+        ).distinct().iterator(chunk_size=500)
         return JsonResponse(list(inventories), safe=False)
     except Exception as exc:
         logger.error(f"Error listing inventories: {str(exc)}", exc_info=True)
@@ -351,13 +353,13 @@ def list_inventories(request):
 def get_last_update_time(request):
     inventory_name = request.GET.get('inventory_name', 'default')
     try:
-        last_batch = ImportBatch.objects.filter(
+        last_processed_at = ImportBatch.objects.filter(
             inventory_name=inventory_name,
             processed_at__isnull=False,
-        ).order_by('-processed_at').first()
+        ).order_by('-processed_at').values_list('processed_at', flat=True).first()
 
-        if last_batch:
-            return JsonResponse({'last_update': last_batch.processed_at.isoformat()})
+        if last_processed_at:
+            return JsonResponse({'last_update': last_processed_at.isoformat()})
         return JsonResponse({'last_update': None})
     except Exception as exc:
         logger.error(f"Error retrieving last update time: {str(exc)}", exc_info=True)
