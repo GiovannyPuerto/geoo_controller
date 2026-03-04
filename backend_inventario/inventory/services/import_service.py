@@ -13,13 +13,15 @@ import logging
 import os
 import re
 import tempfile
+import time
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
 from zipfile import BadZipFile
 import pandas as pd
 from django.http import JsonResponse
+from django.db.models import Max, Min
 from django.utils import timezone
 
 from ..models import ImportBatch, Product, InventoryRecord, WarehouseDetail
@@ -56,6 +58,7 @@ UPDATE_FALLBACK_COLUMNS = [
 BASE_REQUIRED_COLUMNS = ['codigo', 'descripcion', 'cantidad', 'costo_unitario', 'valor_total']
 CSV_CHUNK_SIZE = 15000
 MOVEMENT_BULK_SIZE = 2000
+MAX_RANGE_GAP_DAYS = int(os.environ.get('INVENTORY_MAX_RANGE_GAP_DAYS', '2'))
 SIMPLE_NUMERIC_RE = re.compile(r'^-?\d+(?:\.\d+)?$')
 INTEGER_FLOAT_TEXT_RE = re.compile(r'^-?\d+\.0+$')
 ZERO_NUMERIC_TEXT_RE = re.compile(r'^0+(?:\.0+)?$')
@@ -99,6 +102,7 @@ UPDATE_READABLE_COLUMNS = {
     for synonyms in UPDATE_COLUMN_SYNONYMS.values()
     for synonym in synonyms
 }
+BASE_DATE_METADATA_RE = re.compile(r'__FECHA_BASE__=(\d{4}-\d{2}-\d{2})')
 
 
 def _canonical_column_name(name):
@@ -345,6 +349,44 @@ def _build_row_match_hash(
     return hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:32]
 
 
+def _prepared_row_sort_key(prepared):
+    """
+    Clave determinística para procesar movimientos sin depender
+    del orden original de filas del archivo.
+
+    También prioriza filas con más contexto (ej. registro explícito)
+    cuando dos movimientos colisionan en la capa de deduplicación.
+    """
+    date_value = prepared.get('date')
+    date_token = date_value.isoformat() if hasattr(date_value, 'isoformat') else str(date_value or '')
+
+    source_record = prepared.get('source_record')
+    category = prepared.get('category')
+    final_quantity = prepared.get('final_quantity')
+
+    return (
+        int(getattr(prepared.get('product'), 'id', 0) or 0),
+        date_token,
+        _normalize_match_token(prepared.get('source_document')),
+        _normalize_match_token(prepared.get('document_type')),
+        _normalize_match_token(prepared.get('document_number')),
+        _normalize_match_token(prepared.get('warehouse')),
+        _normalize_match_token(prepared.get('cost_center')),
+        _normalize_match_token(prepared.get('lote'), zero_as_empty=True),
+        _normalize_signature_value(prepared.get('quantity')),
+        _normalize_signature_value(prepared.get('unit_cost')),
+        _normalize_signature_value(prepared.get('total')),
+        # Preferimos conservar filas con más información útil.
+        0 if prepared.get('has_explicit_record') else 1,
+        0 if source_record else 1,
+        0 if category else 1,
+        0 if final_quantity not in (None, '') else 1,
+        _normalize_match_token(source_record),
+        _normalize_match_token(category),
+        _normalize_signature_value(final_quantity),
+    )
+
+
 @lru_cache(maxsize=512)
 def _map_localizacion_cached(raw_value):
     """
@@ -399,6 +441,14 @@ def _parse_date_from_raw_cached(raw):
         try:
             return datetime.strptime(raw, '%Y%m%d').date()
         except ValueError:
+            pass
+
+    # Fechas ambiguas (dd/mm/yyyy o dd-mm-yyyy):
+    # preferimos dayfirst para mantener consistencia con archivos en español.
+    if re.match(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$', raw):
+        try:
+            return pd.to_datetime(raw, dayfirst=True, errors='raise').date()
+        except (ValueError, TypeError):
             pass
 
     return parse_date(raw)
@@ -1001,6 +1051,406 @@ def _normalize_base_df_columns(df):
     return normalized_df, missing_columns
 
 
+def _prepare_update_files_for_processing(update_files_data, temp_csv_files):
+    """
+    Lee/normaliza cada archivo de actualización una sola vez.
+
+    Retorna metadata liviana + ruta CSV temporal para procesamiento por chunks.
+    """
+    prepared_updates = []
+
+    for file_name, file_content in update_files_data:
+        try:
+            t0 = time.perf_counter()
+            update_df = _read_update_dataframe(file_content, file_name)
+            update_df = _normalize_update_dataframe(update_df)
+            read_seconds = time.perf_counter() - t0
+
+            file_rows = len(update_df.index)
+            memory_bytes = int(update_df.memory_usage(index=True, deep=True).sum())
+            parsed_dates = update_df['fecha'].apply(_parse_date_fast)
+            valid_mask = parsed_dates.notna()
+            valid_rows = int(valid_mask.sum())
+            date_set = set(parsed_dates[valid_mask].tolist()) if valid_rows else set()
+
+            csv_path = _write_dataframe_to_temp_csv(update_df, prefix='inventory_update_')
+            temp_csv_files.append(csv_path)
+            del update_df
+
+            prepared_updates.append(
+                {
+                    'file_name': file_name,
+                    'csv_path': csv_path,
+                    'rows_input': file_rows,
+                    'rows_with_valid_date': valid_rows,
+                    'date_set': date_set,
+                    'read_seconds': read_seconds,
+                    'memory_bytes': memory_bytes,
+                }
+            )
+
+            logger.info(
+                "Archivo update preparado: %s | filas=%s | fechas_validas=%s | ram_aprox=%.2fMB | lectura=%.2fs",
+                file_name,
+                file_rows,
+                valid_rows,
+                memory_bytes / (1024 * 1024),
+                read_seconds,
+            )
+        except Exception as exc:
+            raise ValueError(f"Error preparando '{file_name}': {exc}") from exc
+
+    return prepared_updates
+
+
+def _extract_base_cutoff_date_from_dataframe(base_df):
+    """
+    Extrae y valida la fecha de corte del archivo base.
+
+    Regla de negocio: el archivo base representa inventario de un único día.
+    """
+    if base_df is None or 'fecha_corte' not in base_df.columns:
+        return None, (
+            'El archivo base debe incluir la columna FECHA_CORTE para anclar '
+            'las cargas de actualización sin huecos de fechas.'
+        )
+
+    parsed_dates = base_df['fecha_corte'].apply(_parse_date_fast).dropna()
+    if parsed_dates.empty:
+        return None, (
+            'No se detectó una FECHA_CORTE válida en el archivo base. '
+            'Corrija el formato de fecha e intente nuevamente.'
+        )
+
+    unique_dates = sorted(set(parsed_dates.tolist()))
+    if len(unique_dates) != 1:
+        sample = ', '.join(d.isoformat() for d in unique_dates[:5])
+        return None, (
+            'El archivo base debe tener una única FECHA_CORTE para todos los registros. '
+            f'Se detectaron múltiples fechas: {sample}.'
+        )
+
+    return unique_dates[0], ''
+
+
+def _parse_base_cutoff_date_marker(file_name):
+    """
+    Extrae la fecha base embebida en el nombre de lote histórico.
+    """
+    if not file_name:
+        return None
+
+    match = BASE_DATE_METADATA_RE.search(str(file_name))
+    if not match:
+        return None
+
+    try:
+        return datetime.strptime(match.group(1), '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _resolve_base_cutoff_date(inventory_name, base_cutoff_date=None):
+    """
+    Resuelve fecha base del inventario desde:
+    1) archivo base actual,
+    2) metadata histórica de lotes,
+    3) primera fecha de movimientos existente (fallback).
+    """
+    if base_cutoff_date is not None:
+        return base_cutoff_date, 'archivo_base'
+
+    marker_batch_name = (
+        ImportBatch.objects.filter(
+            nombre_inventario=inventory_name,
+            archivo__contains='__FECHA_BASE__=',
+        )
+        .order_by('-id')
+        .values_list('archivo', flat=True)
+        .first()
+    )
+    marker_date = _parse_base_cutoff_date_marker(marker_batch_name)
+    if marker_date is not None:
+        return marker_date, 'metadata_lote'
+
+    min_date = (
+        InventoryRecord.objects.filter(product__inventory_name=inventory_name)
+        .aggregate(min_date=Min('date'))
+        .get('min_date')
+    )
+    if min_date is not None:
+        return min_date, 'movimientos_existentes'
+
+    return None, 'desconocida'
+
+
+def _validate_update_files_chronology(prepared_update_files, inventory_name, base_cutoff_date=None):
+    """
+    Valida continuidad de fechas en actualizaciones.
+
+    Reglas:
+    - Debe existir al menos una fecha válida en updates.
+    - No se permiten fechas anteriores a la fecha base.
+    - No se permiten huecos de calendario entre fecha base y última fecha cargada.
+    """
+    has_valid_dates = False
+    incoming_dates = set()
+    file_ranges = []
+    valid_rows_total = 0
+
+    for prepared in prepared_update_files:
+        file_name = prepared['file_name']
+        valid_rows = int(prepared.get('rows_with_valid_date') or 0)
+        file_dates = set(prepared.get('date_set') or [])
+
+        if valid_rows == 0 or not file_dates:
+            logger.warning(
+                "'%s' no aportó filas válidas de fecha para validación cronológica.",
+                file_name,
+            )
+            continue
+
+        has_valid_dates = True
+        valid_rows_total += valid_rows
+
+        incoming_dates.update(file_dates)
+        file_ranges.append(
+            {
+                'file_name': file_name,
+                'rows_with_valid_date': valid_rows,
+                'min_date': min(file_dates).isoformat(),
+                'max_date': max(file_dates).isoformat(),
+                'unique_dates': len(file_dates),
+                'rows_input': int(prepared.get('rows_input') or 0),
+                'read_seconds': round(float(prepared.get('read_seconds') or 0), 4),
+                'memory_mb': round(float(prepared.get('memory_bytes') or 0) / (1024 * 1024), 2),
+            }
+        )
+
+    if not has_valid_dates or not incoming_dates:
+        return (
+            False,
+            'No se detectaron fechas válidas en los archivos de actualización. '
+            'Verifique la columna FECHA y el formato del archivo.',
+            {},
+        )
+
+    base_anchor_date, base_anchor_source = _resolve_base_cutoff_date(
+        inventory_name=inventory_name,
+        base_cutoff_date=base_cutoff_date,
+    )
+    if base_anchor_date is None:
+        return (
+            False,
+            'No se pudo determinar la fecha base del inventario. '
+            'Recargue el archivo base para establecer el ancla de fechas.',
+            {},
+        )
+
+    min_incoming = min(incoming_dates)
+    max_incoming = max(incoming_dates)
+    expected_start_date = base_anchor_date + timedelta(days=1)
+    initial_gap_days = max((min_incoming - expected_start_date).days, 0)
+    if min_incoming < expected_start_date:
+        return (
+            False,
+            (
+                f'Se detectó una fecha de actualización ({min_incoming.isoformat()}) '
+                f'anterior a la fecha esperada ({expected_start_date.isoformat()}) '
+                f'a partir de la base ({base_anchor_date.isoformat()}). '
+                'La actualización debe iniciar desde el día siguiente al archivo base.'
+            ),
+            {
+                'base_anchor_date': base_anchor_date.isoformat(),
+                'base_anchor_source': base_anchor_source,
+                'expected_start_date': expected_start_date.isoformat(),
+                'incoming_min_date': min_incoming.isoformat(),
+                'incoming_max_date': max_incoming.isoformat(),
+                'files': file_ranges,
+            },
+        )
+
+    existing_max_date = (
+        InventoryRecord.objects.filter(product__inventory_name=inventory_name)
+        .aggregate(max_date=Max('date'))
+        .get('max_date')
+    )
+    potential_gap_days = 0
+    validation_notes = []
+    gap_tolerance_days = MAX_RANGE_GAP_DAYS
+
+    if existing_max_date is not None:
+        if max_incoming < existing_max_date:
+            return (
+                False,
+                (
+                    f'El rango del archivo ({min_incoming.isoformat()} a {max_incoming.isoformat()}) '
+                    f'es anterior a la última fecha ya cargada ({existing_max_date.isoformat()}). '
+                    'Cargue archivos con fechas más recientes o recargue el rango correcto.'
+                ),
+                {
+                    'base_anchor_date': base_anchor_date.isoformat(),
+                    'base_anchor_source': base_anchor_source,
+                    'expected_start_date': expected_start_date.isoformat(),
+                    'existing_max_date': existing_max_date.isoformat(),
+                    'incoming_min_date': min_incoming.isoformat(),
+                    'incoming_max_date': max_incoming.isoformat(),
+                    'files': file_ranges,
+                },
+            )
+
+        potential_gap_days = max((min_incoming - existing_max_date).days - 1, 0)
+        if potential_gap_days > 0:
+            if potential_gap_days > gap_tolerance_days:
+                return (
+                    False,
+                    (
+                        f'El rango del archivo ({min_incoming.isoformat()} a {max_incoming.isoformat()}) '
+                        f'deja un hueco de {potential_gap_days} día(s) desde la última fecha cargada '
+                        f'({existing_max_date.isoformat()}). '
+                        f'Supera la tolerancia máxima de {gap_tolerance_days} día(s).'
+                    ),
+                    {
+                        'base_anchor_date': base_anchor_date.isoformat(),
+                        'base_anchor_source': base_anchor_source,
+                        'expected_start_date': expected_start_date.isoformat(),
+                        'existing_max_date': existing_max_date.isoformat(),
+                        'incoming_min_date': min_incoming.isoformat(),
+                        'incoming_max_date': max_incoming.isoformat(),
+                        'range_gap_days': potential_gap_days,
+                        'allowed_gap_days': gap_tolerance_days,
+                        'files': file_ranges,
+                    },
+                )
+            note = (
+                f'Posible hueco de {potential_gap_days} día(s) entre '
+                f'{existing_max_date.isoformat()} y {min_incoming.isoformat()} '
+                f'(permitido por tolerancia de {gap_tolerance_days} día(s), '
+                'puede deberse a días sin movimientos como domingos).'
+            )
+            validation_notes.append(note)
+            logger.warning(note)
+    elif initial_gap_days > 0:
+        if initial_gap_days > gap_tolerance_days:
+            return (
+                False,
+                (
+                    f'El archivo inicia en {min_incoming.isoformat()}, pero la fecha esperada '
+                    f'es {expected_start_date.isoformat()}. El salto de {initial_gap_days} día(s) '
+                    f'supera la tolerancia máxima de {gap_tolerance_days} día(s).'
+                ),
+                {
+                    'base_anchor_date': base_anchor_date.isoformat(),
+                    'base_anchor_source': base_anchor_source,
+                    'expected_start_date': expected_start_date.isoformat(),
+                    'incoming_min_date': min_incoming.isoformat(),
+                    'incoming_max_date': max_incoming.isoformat(),
+                    'range_gap_days': initial_gap_days,
+                    'allowed_gap_days': gap_tolerance_days,
+                    'files': file_ranges,
+                },
+            )
+        note = (
+            f'Salto inicial de {initial_gap_days} día(s) respecto a la fecha esperada '
+            f'({expected_start_date.isoformat()}) dentro de tolerancia '
+            f'({gap_tolerance_days} día(s)).'
+        )
+        validation_notes.append(note)
+        logger.warning(note)
+
+    report = {
+        'base_anchor_date': base_anchor_date.isoformat(),
+        'base_anchor_source': base_anchor_source,
+        'expected_start_date': expected_start_date.isoformat(),
+        'existing_max_date': existing_max_date.isoformat() if existing_max_date else None,
+        'incoming_unique_dates': len(incoming_dates),
+        'incoming_min_date': min_incoming.isoformat(),
+        'incoming_max_date': max_incoming.isoformat(),
+        'initial_range_gap_days': initial_gap_days,
+        'potential_gap_days': potential_gap_days,
+        'allowed_gap_days': gap_tolerance_days,
+        'validation_notes': validation_notes,
+        'valid_rows_total': valid_rows_total,
+        'files': file_ranges,
+    }
+
+    logger.info(
+        "Validación de fechas inventario=%s base=%s(%s) esperado_desde=%s "
+        "existente_hasta=%s incoming=[%s..%s] posible_hueco=%s",
+        inventory_name,
+        report['base_anchor_date'],
+        base_anchor_source,
+        report['expected_start_date'],
+        report['existing_max_date'],
+        report['incoming_min_date'],
+        report['incoming_max_date'],
+        report['potential_gap_days'],
+    )
+
+    return True, '', report
+
+
+def _build_interface_logs(
+    *,
+    inventory_name,
+    base_cutoff_date,
+    chronology_report,
+    base_records_count,
+    base_duplicates_count,
+    update_records_count,
+    total_duplicates,
+    update_files_summary,
+):
+    """
+    Construye trazas legibles para mostrar en la interfaz de carga.
+    """
+    logs = []
+    logs.append(f"Inventario objetivo: {inventory_name}")
+
+    if base_cutoff_date is not None:
+        logs.append(f"Fecha base detectada: {base_cutoff_date.isoformat()}")
+
+    if chronology_report:
+        expected_start = chronology_report.get('expected_start_date')
+        existing_max = chronology_report.get('existing_max_date')
+        incoming_min = chronology_report.get('incoming_min_date')
+        incoming_max = chronology_report.get('incoming_max_date')
+        incoming_unique = chronology_report.get('incoming_unique_dates')
+
+        logs.append(
+            "Rango de actualización recibido: "
+            f"{incoming_min} -> {incoming_max} ({incoming_unique} fecha(s) con movimientos)"
+        )
+        if expected_start:
+            logs.append(f"Fecha mínima esperada según base: {expected_start}")
+        if existing_max:
+            logs.append(f"Última fecha ya cargada previamente: {existing_max}")
+
+        for note in chronology_report.get('validation_notes') or []:
+            logs.append(f"Aviso: {note}")
+
+    logs.append(
+        f"Base procesada: {base_records_count} registro(s), "
+        f"{base_duplicates_count} duplicado(s)."
+    )
+    logs.append(
+        f"Updates procesados: {update_records_count} registro(s), "
+        f"{total_duplicates} duplicado(s)."
+    )
+
+    for entry in update_files_summary:
+        logs.append(
+            f"Archivo {entry.get('file_name')}: "
+            f"entrada={entry.get('rows_input', 0)}, "
+            f"registrados={entry.get('rows_registered', 0)}, "
+            f"repetidos={entry.get('rows_repeated', 0)}, "
+            f"omitidos={entry.get('rows_skipped', 0)}, "
+            f"tiempo={entry.get('process_seconds', 0)}s"
+        )
+
+    return logs
+
+
 def procesar_importacion_inventario(request, inventory_name='default'):
     """
     Procesa una importación completa de inventario.
@@ -1022,6 +1472,8 @@ def procesar_importacion_inventario(request, inventory_name='default'):
     temp_csv_files = []
     try:
         inventory_name = str(inventory_name).strip().lower() or 'default'
+        base_cutoff_date = None
+        request_started_at = time.perf_counter()
 
         # Validación inicial: base para primera carga, updates para cargas posteriores.
         base_file = request.FILES.get('base_file')
@@ -1087,6 +1539,15 @@ def procesar_importacion_inventario(request, inventory_name='default'):
 
             # datamanejamos los datos para que no sean nulos
             if base_df is not None:
+                base_cutoff_date, base_date_error = _extract_base_cutoff_date_from_dataframe(base_df)
+                if base_date_error:
+                    return JsonResponse({'ok': False, 'error': base_date_error}, status=400)
+
+                logger.info(
+                    f"Fecha base detectada para inventario '{inventory_name}': "
+                    f"{base_cutoff_date.isoformat()}"
+                )
+
                 base_df = base_df.dropna(subset=['codigo']).copy()
                 base_df.loc[:, 'codigo'] = _strip_object_series(base_df['codigo']).apply(
                     _normalize_product_code_cached
@@ -1132,6 +1593,17 @@ def procesar_importacion_inventario(request, inventory_name='default'):
             batch_file_names.append(base_file.name)
         if update_files:
             batch_file_names.extend([f.name for f in update_files])
+        batch_descriptor = ' + '.join(batch_file_names) if batch_file_names else 'no-files'
+        if base_cutoff_date is not None:
+            # Persistimos ancla de fecha base sin cambiar esquema de BD.
+            marker = f" | __FECHA_BASE__={base_cutoff_date.isoformat()}"
+            max_len = ImportBatch._meta.get_field('archivo').max_length or 255
+            allowed_name_len = max(max_len - len(marker), 0)
+            batch_descriptor = f"{batch_descriptor[:allowed_name_len]}{marker}"
+        else:
+            max_len = ImportBatch._meta.get_field('archivo').max_length or 255
+            if len(batch_descriptor) > max_len:
+                batch_descriptor = batch_descriptor[:max_len]
 
         # Si ya existe un lote con el mismo checksum, todos los movimientos de ese
         # archivo ya fueron registrados (o el archivo es idéntico byte a byte).
@@ -1176,6 +1648,13 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                     'update_registered_records': 0,
                     'update_repeated_records': already_imported,
                     'update_files': [],
+                    'interface_logs': [
+                        f"Inventario objetivo: {inventory_name}",
+                        (
+                            f"Carga omitida: checksum duplicado contra lote #{existing_batch.id}. "
+                            f"Registros previamente importados: {already_imported}."
+                        ),
+                    ],
                 },
                 'message': (
                     f'Este archivo ya fue importado previamente '
@@ -1203,7 +1682,7 @@ def procesar_importacion_inventario(request, inventory_name='default'):
             logger.info(f"Reset completo de inventario '{inventory_name}' antes de cargar base.")
 
         batch = ImportBatch.objects.create(
-            file_name=' + '.join(batch_file_names) if batch_file_names else 'no-files',
+            file_name=batch_descriptor,
             inventory_name=inventory_name,
             checksum=checksum
         )
@@ -1212,46 +1691,73 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         base_duplicates_count = 0
         if base_csv_path is not None:
             # procesamos el archivo base
+            base_stage_start = time.perf_counter()
             base_records_count, base_duplicates_count = _process_base_csv(
                 base_csv_path,
                 inventory_name
             )
+            logger.info(
+                "Base procesada inventario=%s productos=%s duplicados=%s tiempo=%.2fs",
+                inventory_name,
+                base_records_count,
+                base_duplicates_count,
+                time.perf_counter() - base_stage_start,
+            )
 
-        # ── Validación de fechas ──────────────────────────────────────────────
-        # El sistema acepta archivos con cualquier rango de fechas, incluyendo
-        # rangos que ya existen en BD (fechas repetidas).
-        # La detección de duplicados (por row_signature y unique_key) se encarga
-        # de ignorar los movimientos que ya fueron importados previamente.
-        # Solo se rechaza si no se detectan fechas válidas en el archivo.
+        prepared_update_files = []
         if update_files_data:
-            from ..models import InventoryRecord as _IR
-            from django.db.models import Max as _Max
-            import datetime as _dt
-
-            has_valid_dates = False
-            for _fname, _fcontent in update_files_data:
-                try:
-                    _df_tmp = _read_update_dataframe(_fcontent, _fname)
-                    _df_tmp = _normalize_update_dataframe(_df_tmp)
-                    _dates = _df_tmp['fecha'].apply(_parse_date_fast).dropna()
-                    if not _dates.empty:
-                        has_valid_dates = True
-                    del _df_tmp
-                except Exception as _exc:
-                    logger.warning(f"No se pudo leer fecha mínima de '{_fname}': {_exc}")
-
-            if not has_valid_dates:
+            prep_start = time.perf_counter()
+            try:
+                prepared_update_files = _prepare_update_files_for_processing(
+                    update_files_data=update_files_data,
+                    temp_csv_files=temp_csv_files,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"Error preparando archivos de actualización para procesamiento: {exc}",
+                    exc_info=True,
+                )
                 return JsonResponse(
                     {
                         'ok': False,
                         'error': (
-                            'No se detectaron fechas válidas en los archivos de actualización. '
-                            'Verifique la columna FECHA y el formato del archivo.'
+                            'No fue posible preparar los archivos de actualización. '
+                            'Verifique formato y estructura del archivo.'
                         ),
                     },
                     status=400,
                 )
-        # ── Fin validación de fechas ───────────────────────────────────────────
+            logger.info(
+                "Preparación de updates completada: archivos=%s filas=%s tiempo=%.2fs",
+                len(prepared_update_files),
+                sum(p['rows_input'] for p in prepared_update_files),
+                time.perf_counter() - prep_start,
+            )
+
+        # ── Validación de fechas/cronología ───────────────────────────────────
+        chronology_report = {}
+        if prepared_update_files:
+            chronology_ok, chronology_error, chronology_report = _validate_update_files_chronology(
+                prepared_update_files=prepared_update_files,
+                inventory_name=inventory_name,
+                base_cutoff_date=base_cutoff_date,
+            )
+            if not chronology_ok:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': chronology_error,
+                        'date_validation': chronology_report,
+                        'summary': {
+                            'interface_logs': [
+                                f"Inventario objetivo: {inventory_name}",
+                                f"Validación de fechas fallida: {chronology_error}",
+                            ],
+                        },
+                    },
+                    status=400,
+                )
+        # ── Fin validación de fechas/cronología ───────────────────────────────
 
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0
@@ -1262,28 +1768,38 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         update_files_summary = []
         seen_update_unique_keys = set()
         seen_update_row_signatures = set()
-        if update_files_data:
-            for file_name, update_content in update_files_data:
-                try:
-                    update_df = _read_update_dataframe(update_content, file_name)
-                    update_df = _normalize_update_dataframe(update_df)
-                    file_rows = len(update_df)
-                    update_rows += file_rows
-                except Exception as exc:
-                    logger.error(f"Error reading update file '{file_name}': {exc}", exc_info=True)
-                    return JsonResponse(
-                        {'ok': False, 'error': f"El archivo de actualización '{file_name}' no se pudo leer. Verifique que sea un archivo Excel válido con la estructura esperada."},
-                        status=400
-                    )
+        if prepared_update_files:
+            update_stage_start = time.perf_counter()
+            for prepared in prepared_update_files:
+                file_name = prepared['file_name']
+                file_rows = int(prepared['rows_input'])
+                csv_path = prepared['csv_path']
+                update_rows += file_rows
 
-                records_count, duplicates_count, dupes_file, dupes_db = _process_update_dataframe(
+                if file_rows == 0:
+                    update_files_summary.append({
+                        'file_name': file_name,
+                        'rows_input': 0,
+                        'rows_registered': 0,
+                        'rows_repeated': 0,
+                        'rows_repeated_in_file': 0,
+                        'rows_repeated_in_db': 0,
+                        'rows_skipped': 0,
+                        'process_seconds': 0.0,
+                        'rows_per_second': None,
+                    })
+                    continue
+
+                file_start = time.perf_counter()
+                records_count, duplicates_count, dupes_file, dupes_db = _process_update_csv(
                     batch,
-                    update_df,
+                    csv_path,
                     inventory_name,
                     seen_unique_keys=seen_update_unique_keys,
                     seen_row_signatures=seen_update_row_signatures,
                 )
-                del update_df
+                file_seconds = time.perf_counter() - file_start
+
                 update_records_count += records_count
                 total_duplicates      += duplicates_count
                 total_dupes_update_file += dupes_file
@@ -1297,10 +1813,44 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                     'rows_repeated_in_file': dupes_file,
                     'rows_repeated_in_db':   dupes_db,
                     'rows_skipped': skipped_count,
+                    'process_seconds': round(file_seconds, 4),
+                    'rows_per_second': round((file_rows / file_seconds), 2) if file_seconds > 0 else None,
                 })
+                logger.info(
+                    "Update procesado: %s | filas=%s registradas=%s duplicados=%s "
+                    "(archivo=%s bd=%s) omitidas=%s tiempo=%.2fs",
+                    file_name,
+                    file_rows,
+                    records_count,
+                    duplicates_count,
+                    dupes_file,
+                    dupes_db,
+                    skipped_count,
+                    file_seconds,
+                )
+            logger.info(
+                "Updates procesados inventario=%s archivos=%s filas=%s registradas=%s "
+                "duplicados=%s tiempo=%.2fs",
+                inventory_name,
+                len(prepared_update_files),
+                update_rows,
+                update_records_count,
+                total_duplicates,
+                time.perf_counter() - update_stage_start,
+            )
 
         total_imported = base_records_count + update_records_count
         total_dupes_all = base_duplicates_count + total_duplicates
+        interface_logs = _build_interface_logs(
+            inventory_name=inventory_name,
+            base_cutoff_date=base_cutoff_date,
+            chronology_report=chronology_report,
+            base_records_count=base_records_count,
+            base_duplicates_count=base_duplicates_count,
+            update_records_count=update_records_count,
+            total_duplicates=total_duplicates,
+            update_files_summary=update_files_summary,
+        )
 
         if total_imported == 0:
             # Guardamos el lote para mantener historial del intento
@@ -1311,11 +1861,20 @@ def procesar_importacion_inventario(request, inventory_name='default'):
 
             if total_dupes_all > 0:
                 # Todos los movimientos ya existían — respuesta exitosa con aviso
+                logger.info(
+                    "Importación sin altas nuevas (solo duplicados). inventario=%s lote=%s "
+                    "duplicados_totales=%s tiempo_total=%.2fs",
+                    inventory_name,
+                    batch.id,
+                    total_dupes_all,
+                    time.perf_counter() - request_started_at,
+                )
                 return JsonResponse({
                     'ok': True,
                     'all_duplicates': True,
                     'inventory_name': inventory_name,
                     'batch_id': batch.id,
+                    'date_validation': chronology_report,
                     'summary': {
                         'base_records': 0,
                         'update_records': 0,
@@ -1329,6 +1888,7 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                         'update_registered_records': 0,
                         'update_repeated_records': total_duplicates,
                         'update_files': update_files_summary,
+                        'interface_logs': interface_logs,
                     },
                     'message': (
                         f'Todos los movimientos del archivo ya estaban registrados '
@@ -1338,11 +1898,18 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 })
             else:
                 # El archivo no tenía filas válidas (columnas vacías, producto desconocido, etc.)
+                logger.info(
+                    "Importación sin filas válidas. inventario=%s lote=%s tiempo_total=%.2fs",
+                    inventory_name,
+                    batch.id,
+                    time.perf_counter() - request_started_at,
+                )
                 return JsonResponse({
                     'ok': True,
                     'all_duplicates': False,
                     'inventory_name': inventory_name,
                     'batch_id': batch.id,
+                    'date_validation': chronology_report,
                     'summary': {
                         'base_records': 0,
                         'update_records': 0,
@@ -1354,6 +1921,7 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                         'update_registered_records': 0,
                         'update_repeated_records': 0,
                         'update_files': update_files_summary,
+                        'interface_logs': interface_logs,
                     },
                     'message': (
                         'El archivo no contenía movimientos válidos para importar. '
@@ -1367,13 +1935,25 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         batch.processed_at = timezone.now()
         batch.save()
 
-        logger.info(f"Importación exitosa. Lote: {batch.id}, Registros: {total_imported}")
+        elapsed_total = time.perf_counter() - request_started_at
+        logger.info(
+            "Importación exitosa inventario=%s lote=%s procesados=%s "
+            "base=%s update=%s duplicados=%s tiempo_total=%.2fs",
+            inventory_name,
+            batch.id,
+            total_imported,
+            base_records_count,
+            update_records_count,
+            base_duplicates_count + total_duplicates,
+            elapsed_total,
+        )
 
         return JsonResponse({
             'ok': True,
             'all_duplicates': False,
             'inventory_name': inventory_name,
             'batch_id': batch.id,
+            'date_validation': chronology_report,
             'summary': {
                 'base_records': base_records_count,
                 'update_records': update_records_count,
@@ -1387,6 +1967,7 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 'update_registered_records': update_records_count,
                 'update_repeated_records': total_duplicates,
                 'update_files': update_files_summary,
+                'interface_logs': interface_logs,
             },
         })
 
@@ -1632,6 +2213,9 @@ def _process_update_csv(
     if seen_row_signatures is None:
         seen_row_signatures = set()
 
+    # Reconciliación por archivo: evita contar por cada chunk (alto costo).
+    batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
+
     for chunk_df in _iter_csv_chunks(csv_path):
         if chunk_df.empty:
             continue
@@ -1642,11 +2226,27 @@ def _process_update_csv(
             inventory_name,
             seen_unique_keys=seen_unique_keys,
             seen_row_signatures=seen_row_signatures,
+            reconcile_with_batch_counts=False,
         )
         total_processed += records_count
         total_duplicates += duplicates_count
         total_dupes_file += dupes_file
         total_dupes_db   += dupes_db
+
+    batch_count_after = InventoryRecord.objects.filter(batch=batch).count()
+    actually_inserted = batch_count_after - batch_count_before
+    if actually_inserted < total_processed:
+        silent_drops = total_processed - actually_inserted
+        logger.warning(
+            "Reconciliación por archivo CSV: %s fila(s) descartadas por constraint "
+            "(esperadas=%s, reales=%s)",
+            silent_drops,
+            total_processed,
+            actually_inserted,
+        )
+        total_duplicates += silent_drops
+        total_dupes_db += silent_drops
+        total_processed = actually_inserted
 
     return total_processed, total_duplicates, total_dupes_file, total_dupes_db
 
@@ -1670,6 +2270,9 @@ def _process_update_dataframe(
     if seen_row_signatures is None:
         seen_row_signatures = set()
 
+    # Reconciliación por dataframe: evita contar por cada chunk.
+    batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
+
     for chunk_df in _iter_dataframe_chunks(update_df):
         if chunk_df.empty:
             continue
@@ -1680,11 +2283,27 @@ def _process_update_dataframe(
             inventory_name,
             seen_unique_keys=seen_unique_keys,
             seen_row_signatures=seen_row_signatures,
+            reconcile_with_batch_counts=False,
         )
         total_processed += records_count
         total_duplicates += duplicates_count
         total_dupes_file += dupes_file
         total_dupes_db   += dupes_db
+
+    batch_count_after = InventoryRecord.objects.filter(batch=batch).count()
+    actually_inserted = batch_count_after - batch_count_before
+    if actually_inserted < total_processed:
+        silent_drops = total_processed - actually_inserted
+        logger.warning(
+            "Reconciliación por dataframe: %s fila(s) descartadas por constraint "
+            "(esperadas=%s, reales=%s)",
+            silent_drops,
+            total_processed,
+            actually_inserted,
+        )
+        total_duplicates += silent_drops
+        total_dupes_db += silent_drops
+        total_processed = actually_inserted
 
     return total_processed, total_duplicates, total_dupes_file, total_dupes_db
 
@@ -1695,6 +2314,7 @@ def _process_update_file(
     inventory_name,
     seen_unique_keys=None,
     seen_row_signatures=None,
+    reconcile_with_batch_counts=True,
 ):
     """
     Procesa un bloque de actualización y crea movimientos de inventario.
@@ -1796,10 +2416,10 @@ def _process_update_file(
     candidate_product_ids = set()
     candidate_dates = []
 
-    # Medimos cuántos registros hay en este batch ANTES de insertar NADA.
-    # CRÍTICO: debe estar aquí, ANTES del bucle principal y de cualquier
-    # bulk_create intermedio, para que el delta final sea correcto.
-    batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
+    batch_count_before = None
+    if reconcile_with_batch_counts:
+        # Medición defensiva para detectar drops silenciosos por unique constraint.
+        batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
 
     for idx, row in enumerate(df.itertuples(index=False), start=1):
         try:
@@ -2026,6 +2646,9 @@ def _process_update_file(
             )
         }
 
+    # Orden canónico: evita diferencias de resultado por orden de filas en el Excel.
+    prepared_rows.sort(key=_prepared_row_sort_key)
+
     # Procesamos filas preparadas y evitamos duplicados en BD y dentro del mismo archivo
     seen_new_keys = set()
     seen_new_hashes = set()
@@ -2122,22 +2745,22 @@ def _process_update_file(
                     logger.error(f"Error saving final individual record: {str(e2)}")
                     continue
 
-    # ─── Reconciliación post-inserción ──────────────────────────────────────────
-    # bulk_create(ignore_conflicts=True) descarta silenciosamente registros que
-    # violan el constraint UNIQUE (ya existían de una carga anterior).
-    # Medimos el delta real en este batch para detectar esos drops.
-    batch_count_after = InventoryRecord.objects.filter(batch=batch).count()
-    actually_inserted = batch_count_after - batch_count_before
-    if actually_inserted < records_processed:
-        silent_drops = records_processed - actually_inserted
-        logger.warning(
-            f"Reconciliación: {silent_drops} fila(s) descartadas por constraint de BD "
-            f"— ya existían de una carga anterior "
-            f"(esperadas={records_processed}, reales={actually_inserted})"
-        )
-        duplicates_count += silent_drops
-        dupes_in_db      += silent_drops
-        records_processed = actually_inserted
+    if reconcile_with_batch_counts:
+        # ─── Reconciliación post-inserción ──────────────────────────────────────
+        # bulk_create(ignore_conflicts=True) descarta silenciosamente registros que
+        # violan el constraint UNIQUE (ya existían de una carga anterior).
+        batch_count_after = InventoryRecord.objects.filter(batch=batch).count()
+        actually_inserted = batch_count_after - batch_count_before
+        if actually_inserted < records_processed:
+            silent_drops = records_processed - actually_inserted
+            logger.warning(
+                f"Reconciliación: {silent_drops} fila(s) descartadas por constraint de BD "
+                f"— ya existían de una carga anterior "
+                f"(esperadas={records_processed}, reales={actually_inserted})"
+            )
+            duplicates_count += silent_drops
+            dupes_in_db      += silent_drops
+            records_processed = actually_inserted
 
     logger.info(
         f"Procesados {records_processed} registros de movimientos "

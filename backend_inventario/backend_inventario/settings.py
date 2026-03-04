@@ -81,7 +81,8 @@ WSGI_APPLICATION = 'backend_inventario.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('DB_NAME', 'manage_inventary'),
+        # Si no se define DB_NAME por entorno, usa la base local existente.
+        'NAME': os.environ.get('DB_NAME', 'manage_inventory'),
         'USER': os.environ.get('DB_USER', 'root'),
         'PASSWORD': os.environ.get('DB_PASSWORD', '12345'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
@@ -101,9 +102,9 @@ CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'inventory-low-resource-cache',
-        'TIMEOUT': int(os.environ.get('DJANGO_CACHE_TIMEOUT', '300')),   # 5 min (era 60s)
+        'TIMEOUT': int(os.environ.get('DJANGO_CACHE_TIMEOUT', '300')),   # 5 min
         'OPTIONS': {
-            'MAX_ENTRIES': int(os.environ.get('DJANGO_CACHE_MAX_ENTRIES', '5000')),  # (era 2000)
+            'MAX_ENTRIES': int(os.environ.get('DJANGO_CACHE_MAX_ENTRIES', '5000')),
             'CULL_FREQUENCY': int(os.environ.get('DJANGO_CACHE_CULL_FREQUENCY', '4')),
         },
         'KEY_PREFIX': os.environ.get('DJANGO_CACHE_KEY_PREFIX', 'geo_inv'),
@@ -166,3 +167,35 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s %(levelname)s [%(name)s] %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+    },
+    'loggers': {
+        # Nivel global configurable (por defecto WARNING para no saturar).
+        '': {
+            'handlers': ['console'],
+            'level': os.environ.get('DJANGO_LOG_LEVEL', 'WARNING'),
+            'propagate': False,
+        },
+        # Importación de inventario: detalle operativo por defecto.
+        'inventory.services.import_service': {
+            'handlers': ['console'],
+            'level': os.environ.get('INVENTORY_IMPORT_LOG_LEVEL', 'INFO'),
+            'propagate': False,
+        },
+    },
+}

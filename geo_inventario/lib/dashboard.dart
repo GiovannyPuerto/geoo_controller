@@ -121,6 +121,14 @@ class _DashboardPageState extends State<DashboardPage>
       } else {
         context
             .showErrorSnackBar(result.error ?? 'Error al cargar el archivo.');
+        final hasInterfaceLogs = result.summary?['interface_logs'] is List &&
+            (result.summary?['interface_logs'] as List).isNotEmpty;
+        if (hasInterfaceLogs) {
+          _showUploadResultDialog(
+            title: 'Detalle de validación',
+            result: result,
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -157,6 +165,15 @@ class _DashboardPageState extends State<DashboardPage>
       } else {
         context.showErrorSnackBar(
             uploadResult.error ?? 'Error al procesar los archivos.');
+        final hasInterfaceLogs =
+            uploadResult.summary?['interface_logs'] is List &&
+                (uploadResult.summary?['interface_logs'] as List).isNotEmpty;
+        if (hasInterfaceLogs) {
+          _showUploadResultDialog(
+            title: 'Detalle de validación',
+            result: uploadResult,
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -299,152 +316,150 @@ class _DashboardPageState extends State<DashboardPage>
               boxShadow: AppShadows.elevated,
             ),
             child: AppBar(
-                backgroundColor: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
-                scrolledUnderElevation: 0,
-                elevation: 0,
-                leading: IconButton(
-                  icon:
-                      const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                  tooltip: 'Volver al inicio',
-                  onPressed: () => Navigator.pop(context),
-                ),
-                title: Row(
-                  children: [
-                    // Ícono en círculo traslúcido blanco sobre fondo navy
-                    Container(
-                      width: isMobile ? 34 : 40,
-                      height: isMobile ? 34 : 40,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.4),
-                            width: 1.5),
-                      ),
-                      padding: const EdgeInsets.all(4),
-                      child: Image.asset('statics/images/logo.png',
-                          height: isMobile ? 24 : 30),
+              backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              scrolledUnderElevation: 0,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                tooltip: 'Volver al inicio',
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: Row(
+                children: [
+                  // Ícono en círculo traslúcido blanco sobre fondo navy
+                  Container(
+                    width: isMobile ? 34 : 40,
+                    height: isMobile ? 34 : 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.4),
+                          width: 1.5),
                     ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Dashboard de Inventario',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              letterSpacing: 0.1,
-                            ),
-                          ),
-                          if (_lastUpdateTime != null)
-                            Text(
-                              'Actualizado el $_lastUpdateTime',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xCCFFFFFF),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                actions: [
-                  // Indicador del servidor + botón de configuración
-                  ServerIndicatorChip(
-                    host: ConfigService.instance.host,
-                    port: ConfigService.instance.port,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Tooltip(
-                    message: 'Configurar servidor',
-                    child: IconButton(
-                      icon: const Icon(Icons.settings_ethernet_rounded,
-                          color: Color(0xCCFFFFFF), size: 22),
-                      onPressed: () async {
-                        final changed =
-                            await ServerSettingsDialog.show(context);
-                        if (changed && mounted) {
-                          setState(() {}); // refresca indicador en AppBar
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  _UploadMenu(
-                    hasBaseData: _hasBaseData,
-                    onUploadBase: _pickAndUploadBaseFile,
-                    onUploadUpdate: _pickAndUploadUpdateFiles,
-                    onRollbackUpdate: _rollbackLastUpdate,
+                    padding: const EdgeInsets.all(4),
+                    child: Image.asset('statics/images/logo.png',
+                        height: isMobile ? 24 : 30),
                   ),
                   const SizedBox(width: AppSpacing.md),
-                ],
-                bottom: TabBar(
-                  controller: _tabController,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: const Color(0x88FFFFFF),
-                  labelStyle: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w700),
-                  unselectedLabelStyle: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w400),
-                  indicator: BoxDecoration(
-                    color: AppColors.brandPink,
-                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Dashboard de Inventario',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                        if (_lastUpdateTime != null)
+                          Text(
+                            'Actualizado el $_lastUpdateTime',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xCCFFFFFF),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  indicatorPadding:
-                      const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  tabs: const [
-                    Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.analytics_rounded, size: 16),
-                          SizedBox(width: 6),
-                          Text('Análisis'),
-                        ],
-                      ),
-                    ),
-                    Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.leaderboard_rounded, size: 16),
-                          SizedBox(width: 6),
-                          Text('Tops'),
-                        ],
-                      ),
-                    ),
-                    Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.swap_horiz_rounded, size: 16),
-                          SizedBox(width: 6),
-                          Text('Movimientos'),
-                        ],
-                      ),
-                    ),
-                    Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.calendar_month_rounded, size: 16),
-                          SizedBox(width: 6),
-                          Text('Cortes Mensuales'),
-                        ],
-                      ),
-                    ),
-                  ],
+                ],
+              ),
+              actions: [
+                // Indicador del servidor + botón de configuración
+                ServerIndicatorChip(
+                  host: ConfigService.instance.host,
+                  port: ConfigService.instance.port,
                 ),
+                const SizedBox(width: AppSpacing.sm),
+                Tooltip(
+                  message: 'Configurar servidor',
+                  child: IconButton(
+                    icon: const Icon(Icons.settings_ethernet_rounded,
+                        color: Color(0xCCFFFFFF), size: 22),
+                    onPressed: () async {
+                      final changed = await ServerSettingsDialog.show(context);
+                      if (changed && mounted) {
+                        setState(() {}); // refresca indicador en AppBar
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                _UploadMenu(
+                  hasBaseData: _hasBaseData,
+                  onUploadBase: _pickAndUploadBaseFile,
+                  onUploadUpdate: _pickAndUploadUpdateFiles,
+                  onRollbackUpdate: _rollbackLastUpdate,
+                ),
+                const SizedBox(width: AppSpacing.md),
+              ],
+              bottom: TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                labelColor: Colors.white,
+                unselectedLabelColor: const Color(0x88FFFFFF),
+                labelStyle:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                unselectedLabelStyle:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+                indicator: BoxDecoration(
+                  color: AppColors.brandPink,
+                  borderRadius: BorderRadius.circular(AppRadius.full),
+                ),
+                indicatorPadding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                indicatorSize: TabBarIndicatorSize.tab,
+                tabs: const [
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.analytics_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Análisis'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.leaderboard_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Tops'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.swap_horiz_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Movimientos'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.calendar_month_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Cortes Mensuales'),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
+          ),
           const Positioned(
             left: 0,
             right: 0,
@@ -602,6 +617,12 @@ class _UploadResultDialog extends StatelessWidget {
     final updateFiles = summary['update_files'] is List
         ? (summary['update_files'] as List).whereType<Map>().toList()
         : const <Map>[];
+    final interfaceLogs = summary['interface_logs'] is List
+        ? (summary['interface_logs'] as List)
+            .map((e) => e.toString())
+            .where((line) => line.trim().isNotEmpty)
+            .toList()
+        : const <String>[];
 
     final hasMetrics = baseRegistered != null ||
         baseRepeated != null ||
@@ -810,6 +831,64 @@ class _UploadResultDialog extends StatelessWidget {
                                 entry['rows_repeated_in_file'] as int?,
                             repeatedInDb: entry['rows_repeated_in_db'] as int?,
                           )),
+                    ],
+
+                    // Bitácora operativa enviada por backend
+                    if (interfaceLogs.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      const Divider(),
+                      const SizedBox(height: AppSpacing.sm),
+                      const Text(
+                        'Bitácora de carga',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceVariant,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (int i = 0; i < interfaceLogs.length; i++) ...[
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Padding(
+                                    padding: EdgeInsets.only(top: 4),
+                                    child: Icon(
+                                      Icons.fiber_manual_record,
+                                      size: 8,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
+                                  const SizedBox(width: AppSpacing.xs),
+                                  Expanded(
+                                    child: Text(
+                                      interfaceLogs[i],
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (i < interfaceLogs.length - 1)
+                                const SizedBox(height: AppSpacing.xs),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
 
                     // Mensaje fallback cuando no hay métricas estructuradas
