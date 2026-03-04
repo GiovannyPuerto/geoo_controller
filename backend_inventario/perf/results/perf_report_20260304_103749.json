@@ -1,0 +1,388 @@
+{
+  "meta": {
+    "generated_at": "2026-03-04T10:54:16.325305",
+    "base_url": "http://127.0.0.1:8000/api/inventory",
+    "inventory_name": "perf_20260304_103749",
+    "base_file": "perf\\data\\base_perf.xlsx",
+    "update_files": [
+      {
+        "csv": "perf\\data\\update_perf_01.csv",
+        "xlsx": "perf\\data\\update_perf_01.xlsx"
+      },
+      {
+        "csv": "perf\\data\\update_perf_02.csv",
+        "xlsx": "perf\\data\\update_perf_02.xlsx"
+      },
+      {
+        "csv": "perf\\data\\update_perf_03.csv",
+        "xlsx": "perf\\data\\update_perf_03.xlsx"
+      }
+    ],
+    "configuration": {
+      "read_workers": 10,
+      "read_repeats": 8,
+      "export_workers": 3,
+      "export_repeats": 3,
+      "upload_workers": 3,
+      "upload_repeats": 2
+    }
+  },
+  "process": {
+    "enabled": true,
+    "samples": 356,
+    "cpu_avg_pct": 105.36,
+    "cpu_peak_pct": 487.5,
+    "rss_avg_mb": 429.262,
+    "rss_peak_mb": 542.969,
+    "vms_avg_mb": 896.014,
+    "vms_peak_mb": 1009.895
+  },
+  "upload": {
+    "base_upload": {
+      "single_request": {
+        "endpoint": "actualizar/perf_20260304_103749/",
+        "method": "POST",
+        "status_code": 200,
+        "duration_ms": 10025.057899998501,
+        "response_bytes": 647,
+        "ok": true,
+        "error": null
+      },
+      "summary": {
+        "requests": 1,
+        "ok_requests": 1,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 10025.058,
+        "median_ms": 10025.058,
+        "p95_ms": 10025.058,
+        "p99_ms": 10025.058,
+        "min_ms": 10025.058,
+        "max_ms": 10025.058,
+        "total_response_bytes": 647
+      }
+    },
+    "update_uploads": {
+      "files": [
+        "perf\\data\\update_perf_01.csv",
+        "perf\\data\\update_perf_02.csv",
+        "perf\\data\\update_perf_03.csv"
+      ],
+      "summary": {
+        "requests": 6,
+        "ok_requests": 0,
+        "error_requests": 6,
+        "error_rate_pct": 100.0,
+        "avg_ms": 3645.581,
+        "median_ms": 3647.36,
+        "p95_ms": 3934.129,
+        "p99_ms": 3936.625,
+        "min_ms": 3346.328,
+        "max_ms": 3937.249,
+        "total_response_bytes": 5952
+      }
+    }
+  },
+  "read": {
+    "resumen/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 303.152,
+        "median_ms": 14.695,
+        "p95_ms": 2261.655,
+        "p99_ms": 2269.128,
+        "min_ms": 6.842,
+        "max_ms": 2271.348,
+        "total_response_bytes": 15840
+      }
+    },
+    "analisis-producto/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "limit": "5000"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 1015.095,
+        "median_ms": 146.349,
+        "p95_ms": 7156.775,
+        "p99_ms": 7209.237,
+        "min_ms": 88.493,
+        "max_ms": 7216.223,
+        "total_response_bytes": 259503920
+      }
+    },
+    "registros/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 72.466,
+        "median_ms": 17.32,
+        "p95_ms": 465.074,
+        "p99_ms": 478.603,
+        "min_ms": 4.428,
+        "max_ms": 479.485,
+        "total_response_bytes": 160
+      }
+    },
+    "movimientos-mensuales/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 2267.558,
+        "median_ms": 11.304,
+        "p95_ms": 17853.789,
+        "p99_ms": 18461.381,
+        "min_ms": 1.82,
+        "max_ms": 18592.024,
+        "total_response_bytes": 95040
+      }
+    },
+    "cortes-mensuales/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "months": "12"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 2190.443,
+        "median_ms": 14.796,
+        "p95_ms": 17207.252,
+        "p99_ms": 17466.48,
+        "min_ms": 1.761,
+        "max_ms": 17608.87,
+        "total_response_bytes": 282800
+      }
+    },
+    "cortes-mensuales-productos/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "month": "2026-03",
+        "limit": "5000"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 2094.903,
+        "median_ms": 125.882,
+        "p95_ms": 15651.438,
+        "p99_ms": 16107.78,
+        "min_ms": 50.805,
+        "max_ms": 16272.586,
+        "total_response_bytes": 134539200
+      }
+    },
+    "inventario-a-fecha/": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "date": "2026-03-04"
+      },
+      "summary": {
+        "requests": 80,
+        "ok_requests": 80,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 1927.36,
+        "median_ms": 175.608,
+        "p95_ms": 14149.374,
+        "p99_ms": 14480.522,
+        "min_ms": 90.254,
+        "max_ms": 14485.387,
+        "total_response_bytes": 255500480
+      }
+    }
+  },
+  "export": {
+    "exportar-analisis/?format=excel": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "excel"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 0,
+        "error_requests": 9,
+        "error_rate_pct": 100.0,
+        "avg_ms": 29166.502,
+        "median_ms": 2039.392,
+        "p95_ms": 83425.111,
+        "p99_ms": 83425.305,
+        "min_ms": 2035.56,
+        "max_ms": 83425.353,
+        "total_response_bytes": 0
+      }
+    },
+    "exportar-analisis/?format=pdf": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "pdf"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 0,
+        "error_requests": 9,
+        "error_rate_pct": 100.0,
+        "avg_ms": 121367.33,
+        "median_ms": 180010.459,
+        "p95_ms": 182047.847,
+        "p99_ms": 182047.946,
+        "min_ms": 2043.456,
+        "max_ms": 182047.971,
+        "total_response_bytes": 0
+      }
+    },
+    "exportar-movimientos/?format=excel": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "excel"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 9,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 35984.441,
+        "median_ms": 410.558,
+        "p95_ms": 107153.242,
+        "p99_ms": 107153.429,
+        "min_ms": 386.188,
+        "max_ms": 107153.475,
+        "total_response_bytes": 51543
+      }
+    },
+    "exportar-movimientos/?format=pdf": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "pdf"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 9,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 292.714,
+        "median_ms": 287.921,
+        "p95_ms": 306.845,
+        "p99_ms": 307.149,
+        "min_ms": 281.545,
+        "max_ms": 307.225,
+        "total_response_bytes": 20178
+      }
+    },
+    "exportar-cortes-mensuales/?format=excel": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "excel"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 9,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 32300.416,
+        "median_ms": 31890.769,
+        "p95_ms": 43757.311,
+        "p99_ms": 43915.854,
+        "min_ms": 20822.186,
+        "max_ms": 43955.49,
+        "total_response_bytes": 2657317
+      }
+    },
+    "exportar-cortes-mensuales/?format=pdf": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "pdf"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 9,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 61510.306,
+        "median_ms": 62875.488,
+        "p95_ms": 70412.946,
+        "p99_ms": 71055.667,
+        "min_ms": 53469.192,
+        "max_ms": 71216.347,
+        "total_response_bytes": 4731216
+      }
+    },
+    "exportar-tops/?format=excel": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "excel"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 9,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 11737.47,
+        "median_ms": 6917.986,
+        "p95_ms": 22731.767,
+        "p99_ms": 22875.188,
+        "min_ms": 5384.467,
+        "max_ms": 22911.043,
+        "total_response_bytes": 99415
+      }
+    },
+    "exportar-tops/?format=pdf": {
+      "method": "GET",
+      "params": {
+        "inventory_name": "perf_20260304_103749",
+        "format": "pdf"
+      },
+      "summary": {
+        "requests": 9,
+        "ok_requests": 9,
+        "error_requests": 0,
+        "error_rate_pct": 0.0,
+        "avg_ms": 1829.949,
+        "median_ms": 1700.642,
+        "p95_ms": 2386.082,
+        "p99_ms": 2477.742,
+        "min_ms": 1416.778,
+        "max_ms": 2500.657,
+        "total_response_bytes": 89631
+      }
+    }
+  }
+}

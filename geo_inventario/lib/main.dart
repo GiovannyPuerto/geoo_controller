@@ -922,7 +922,7 @@ class _WelcomePageState extends State<WelcomePage>
           const Divider(color: Colors.white12, thickness: 1),
           const SizedBox(height: AppSpacing.md),
           const Text(
-            'Diseñado por Geoflora  ·  © 2025 Geoflora SAS  ·  Todos los derechos reservados',
+            'Diseñado por Geoflora  ·  © 2026 Geoflora SAS  ·  Todos los derechos reservados',
             style: TextStyle(color: Colors.white54, fontSize: 12),
             textAlign: TextAlign.center,
           ),

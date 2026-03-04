@@ -61,10 +61,10 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 ; ─────────────────────────────────────────────────────────────────────────────
 [Messages]
-WelcomeLabel1=Bienvenido al asistente de instalaci%ón de [name]
-WelcomeLabel2=Este asistente le guiar%á a través de la instalaci%ón de [name/ver].%n%nSe recomienda cerrar todas las dem%ás aplicaciones antes de continuar.%n%nHaga clic en Siguiente para continuar.
-FinishedHeadingLabel=Instalaci%ón de [name] completada
-FinishedLabel=La instalaci%ón de [name] ha finalizado correctamente. La aplicaci%ón se puede iniciar desde los accesos directos creados.
+WelcomeLabel1=Bienvenido al asistente de instalación de [name]
+WelcomeLabel2=Este asistente le guiará a través de la instalación de [name/ver].%n%nSe recomienda cerrar todas las demás aplicaciones antes de continuar.%n%nHaga clic en Siguiente para continuar.
+FinishedHeadingLabel=Instalación de [name] completada
+FinishedLabel=La instalación de [name] ha finalizado correctamente. La aplicación se puede iniciar desde los accesos directos creados.
 ClickFinish=Haga clic en Finalizar para cerrar el asistente.
 
 ; ─────────────────────────────────────────────────────────────────────────────

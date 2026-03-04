@@ -62,6 +62,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_backend_win_low.ps1 -EnvF
 - `DB_CONN_MAX_AGE=120`.
 - `DJANGO_LOG_LEVEL=WARNING`.
 - Mantener `INVENTORY_HISTORIC_CACHE_TTL_SECONDS` alto (ej. 7 días) porque los datos son históricos.
+- Activar cache de exportaciones: `INVENTORY_EXPORT_RESPONSE_CACHE_TTL_SECONDS=900`
+  para reutilizar archivos Excel/PDF iguales y reducir picos de CPU/RAM.
 
 ## 9. Buenas prácticas operativas
 - No usar `runserver` en producción.

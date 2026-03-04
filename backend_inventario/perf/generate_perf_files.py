@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import random
 
 import pandas as pd
@@ -29,8 +29,16 @@ def _build_base_df(rows: int) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def _build_update_df(base_rows: int, rows: int, day_offset: int) -> pd.DataFrame:
-    start = date.today() - timedelta(days=30)
+def _build_update_df(
+    base_rows: int,
+    rows: int,
+    day_offset: int,
+    *,
+    base_cut_date: date,
+) -> pd.DataFrame:
+    # Mantener actualizaciones en rango válido respecto a la base:
+    # base_cut_date + 1 día en adelante.
+    start = base_cut_date + timedelta(days=1)
     records = []
     for idx in range(rows):
         product_idx = (idx % base_rows) + 1
@@ -68,11 +76,21 @@ def generate_files(output_dir: Path, base_rows: int, update_rows: int, update_fi
     output_dir.mkdir(parents=True, exist_ok=True)
 
     base_path = output_dir / 'base_perf.xlsx'
-    _build_base_df(base_rows).to_excel(base_path, index=False)
+    base_df = _build_base_df(base_rows)
+    base_df.to_excel(base_path, index=False)
+    base_cut_date = datetime.strptime(
+        str(base_df.iloc[0]['fecha_corte']),
+        "%Y-%m-%d",
+    ).date()
 
     update_paths = []
     for idx in range(update_files):
-        update_df = _build_update_df(base_rows, update_rows, idx)
+        update_df = _build_update_df(
+            base_rows,
+            update_rows,
+            idx,
+            base_cut_date=base_cut_date,
+        )
         csv_path = output_dir / f'update_perf_{idx + 1:02d}.csv'
         xlsx_path = output_dir / f'update_perf_{idx + 1:02d}.xlsx'
         update_df.to_csv(csv_path, index=False)

@@ -1740,8 +1740,10 @@ def get_product_analysis_data(
             entries_value=Sum(
                 Case(
                     When(
-                        quantity__gt=0,
-                        then=ExpressionWrapper(F("quantity") * F("unit_cost"), output_field=value_output),
+                        # `total` ya viene valorizado por el ERP y conserva
+                        # la regla real de costeo del movimiento.
+                        total__gt=0,
+                        then=F("total"),
                     ),
                     default=Value(Decimal("0"), output_field=value_output),
                     output_field=value_output,
@@ -1750,8 +1752,10 @@ def get_product_analysis_data(
             exits_value=Sum(
                 Case(
                     When(
-                        quantity__lt=0,
-                        then=ExpressionWrapper(-1 * F("quantity") * F("unit_cost"), output_field=value_output),
+                        # En salidas `total` es negativo; se reporta en valor
+                        # absoluto para mantener formato Entradas/Salidas.
+                        total__lt=0,
+                        then=ExpressionWrapper(-1 * F("total"), output_field=value_output),
                     ),
                     default=Value(Decimal("0"), output_field=value_output),
                     output_field=value_output,

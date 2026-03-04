@@ -1,0 +1,76 @@
+{
+  "inventory_name": "perf_valid_1772640295",
+  "base_url": "http://127.0.0.1:8000/api/inventory",
+  "base_date": "2026-03-01",
+  "total_requests": 11,
+  "ok_requests": 11,
+  "error_requests": 0,
+  "results": [
+    {
+      "step": "base",
+      "status": 200,
+      "ms": 1562.27,
+      "body": "{\"ok\": true, \"all_duplicates\": false, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 15, \"date_validation\": {}, \"summary\": {\"base_records\": 4000, \"update_records\": 0, \"total_processed\": 4000, \"duplicates_base\": 0, \"duplicates_update\": 0, \"duplicates_update_in_file\": 0, \"d"
+    },
+    {
+      "step": "update_r1_update_valid_01.csv",
+      "status": 200,
+      "ms": 18244.26,
+      "body": "{\"ok\": true, \"all_duplicates\": false, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 16, \"date_validation\": {\"base_anchor_date\": \"2026-03-01\", \"base_anchor_source\": \"metadata_lote\", \"expected_start_date\": \"2026-03-02\", \"existing_max_date\": null, \"incoming_unique_dates\": 5"
+    },
+    {
+      "step": "update_r1_update_valid_02.csv",
+      "status": 200,
+      "ms": 18988.06,
+      "body": "{\"ok\": true, \"all_duplicates\": false, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 17, \"date_validation\": {\"base_anchor_date\": \"2026-03-01\", \"base_anchor_source\": \"metadata_lote\", \"expected_start_date\": \"2026-03-02\", \"existing_max_date\": null, \"incoming_unique_dates\": 8"
+    },
+    {
+      "step": "update_r2_update_valid_01.csv",
+      "status": 200,
+      "ms": 34.29,
+      "body": "{\"ok\": true, \"all_duplicates\": true, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 16, \"summary\": {\"base_records\": 0, \"update_records\": 0, \"total_processed\": 0, \"duplicates_base\": 0, \"duplicates_update\": 8000, \"duplicates_update_in_file\": 0, \"duplicates_update_in_db\": 80"
+    },
+    {
+      "step": "update_r2_update_valid_02.csv",
+      "status": 200,
+      "ms": 37.75,
+      "body": "{\"ok\": true, \"all_duplicates\": true, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 17, \"summary\": {\"base_records\": 0, \"update_records\": 0, \"total_processed\": 0, \"duplicates_base\": 0, \"duplicates_update\": 8000, \"duplicates_update_in_file\": 0, \"duplicates_update_in_db\": 80"
+    },
+    {
+      "step": "update_r3_update_valid_01.csv",
+      "status": 200,
+      "ms": 38.14,
+      "body": "{\"ok\": true, \"all_duplicates\": true, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 16, \"summary\": {\"base_records\": 0, \"update_records\": 0, \"total_processed\": 0, \"duplicates_base\": 0, \"duplicates_update\": 8000, \"duplicates_update_in_file\": 0, \"duplicates_update_in_db\": 80"
+    },
+    {
+      "step": "update_r3_update_valid_02.csv",
+      "status": 200,
+      "ms": 37.84,
+      "body": "{\"ok\": true, \"all_duplicates\": true, \"inventory_name\": \"perf_valid_1772640295\", \"batch_id\": 17, \"summary\": {\"base_records\": 0, \"update_records\": 0, \"total_processed\": 0, \"duplicates_base\": 0, \"duplicates_update\": 8000, \"duplicates_update_in_file\": 0, \"duplicates_update_in_db\": 80"
+    },
+    {
+      "step": "check_resumen",
+      "status": 200,
+      "ms": 799.84,
+      "body": ""
+    },
+    {
+      "step": "check_registros",
+      "status": 200,
+      "ms": 478.82,
+      "body": ""
+    },
+    {
+      "step": "check_analisis",
+      "status": 200,
+      "ms": 263.19,
+      "body": ""
+    },
+    {
+      "step": "check_cortes",
+      "status": 200,
+      "ms": 3214.29,
+      "body": ""
+    }
+  ]
+}
