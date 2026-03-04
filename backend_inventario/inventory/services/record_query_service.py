@@ -1,4 +1,4 @@
-import re
+﻿import re
 from dataclasses import dataclass
 
 from django.db.models import Q, QuerySet
@@ -62,9 +62,9 @@ def apply_record_filters(queryset: QuerySet, filters: RecordFilterParams) -> Que
     filtered = queryset.filter(product__inventory_name=filters.inventory_name)
 
     if filters.warehouse_filter:
-        filtered = filtered.filter(warehouse__icontains=filters.warehouse_filter)
+        filtered = filtered.filter(warehouse__iexact=filters.warehouse_filter)
     if filters.category_filter:
-        filtered = filtered.filter(category__icontains=filters.category_filter)
+        filtered = filtered.filter(category__iexact=filters.category_filter)
 
     if filters.exact_date:
         filtered = filtered.filter(date=filters.exact_date)

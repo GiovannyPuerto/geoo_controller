@@ -24,8 +24,12 @@ class MovementsTabPage extends StatefulWidget {
   State<MovementsTabPage> createState() => _MovementsTabPageState();
 }
 
-class _MovementsTabPageState extends State<MovementsTabPage> {
+class _MovementsTabPageState extends State<MovementsTabPage>
+    with AutomaticKeepAliveClientMixin {
   final ApiService _apiService = ApiService();
+
+  @override
+  bool get wantKeepAlive => true;
 
   // estado
   List<Map<String, dynamic>> allMovements = [];
@@ -153,6 +157,7 @@ class _MovementsTabPageState extends State<MovementsTabPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (isLoading) {
       return const Center(
         child: Column(

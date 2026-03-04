@@ -1,19 +1,28 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:geo_inventario/models/monthly_cut.dart';
 import 'package:geo_inventario/models/monthly_product_cut.dart';
 import 'package:geo_inventario/models/monthly_movement.dart';
 import 'package:geo_inventario/services/config_service.dart';
 
+/// Funciones top-level para usar con compute() (deben estar fuera de la clase)
+List<dynamic> _jsonDecodeList(String body) => jsonDecode(body) as List<dynamic>;
+Map<String, dynamic> _jsonDecodeMap(String body) =>
+    jsonDecode(body) as Map<String, dynamic>;
+
 class ApiService {
   /// URL base dinámica: se obtiene de ConfigService en cada llamada.
   static String get baseUrl => ConfigService.instance.baseUrl;
-  static const Duration _analysisCacheTtl = Duration(seconds: 20);
+  static const Duration _analysisCacheTtl = Duration(seconds: 30);
+  static const Duration _genericCacheTtl =
+      Duration(seconds: 120); // 2 min — evita recargas frecuentes
   static const int _analysisCacheMaxEntries = 64;
   static final http.Client _httpClient = http.Client();
   static final Map<String, _AnalysisCacheEntry> _analysisCache = {};
   static final Map<String, Future<List<Map<String, dynamic>>>>
       _analysisInFlight = {};
+  static final Map<String, _GenericCacheEntry> _genericCache = {};
 
   String _toIsoDate(DateTime date) => date.toIso8601String().split('T')[0];
 
@@ -46,6 +55,14 @@ class ApiService {
   void _invalidateLocalCaches() {
     _analysisCache.clear();
     _analysisInFlight.clear();
+    _genericCache.clear();
+  }
+
+  String _buildGenericCacheKey(String endpoint, Map<String, String> params) {
+    final ordered = params.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final qp = ordered.map((e) => '${e.key}=${e.value}').join('&');
+    return '$endpoint?$qp';
   }
 
   // Suamtoria endpoints
@@ -132,7 +149,9 @@ class ApiService {
         ).timeout(const Duration(seconds: 30));
 
         if (response.statusCode == 200) {
-          final List<dynamic> data = json.decode(response.body);
+          final List<dynamic> data = kIsWeb
+              ? _jsonDecodeList(response.body)
+              : await compute(_jsonDecodeList, response.body);
           final parsed = List<Map<String, dynamic>>.from(data);
           _analysisCache[cacheKey] = _AnalysisCacheEntry(
             data: parsed,
@@ -190,7 +209,9 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 45));
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
+        final decoded = kIsWeb
+            ? _jsonDecodeMap(response.body)
+            : await compute(_jsonDecodeMap, response.body);
         if (decoded is Map<String, dynamic>) return decoded;
         return {};
       }
@@ -250,7 +271,9 @@ class ApiService {
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+        final List<dynamic> data = kIsWeb
+            ? _jsonDecodeList(response.body)
+            : await compute(_jsonDecodeList, response.body);
         return List<Map<String, dynamic>>.from(data);
       }
       return [];
@@ -324,20 +347,29 @@ class ApiService {
         params['search'] = search;
       }
 
+      final cacheKey = _buildGenericCacheKey('cortes-mensuales', params);
+      final cachedEntry = _genericCache[cacheKey];
+      if (cachedEntry != null &&
+          cachedEntry.expiresAt.isAfter(DateTime.now())) {
+        return cachedEntry.data as Map<String, dynamic>;
+      }
+
       final uri = Uri.parse('$baseUrl/cortes-mensuales/')
           .replace(queryParameters: params);
       final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 90));
 
       if (response.statusCode == 200) {
-        final raw = json.decode(response.body) as Map<String, dynamic>;
+        final raw = kIsWeb
+            ? _jsonDecodeMap(response.body)
+            : await compute(_jsonDecodeMap, response.body);
         final rows = (raw['months'] as List? ?? const [])
             .whereType<Map<String, dynamic>>()
             .map(MonthlyCut.fromJson)
             .toList();
-        return {
+        final result = {
           'months': rows,
           'period_average_general':
               ((raw['period_average_general'] as num?) ?? 0).toDouble(),
@@ -346,6 +378,11 @@ class ApiService {
           'products_count': (raw['products_count'] as int?) ?? 0,
           'months_count': (raw['months_count'] as int?) ?? rows.length,
         };
+        _genericCache[cacheKey] = _GenericCacheEntry(
+          data: result,
+          expiresAt: DateTime.now().add(_genericCacheTtl),
+        );
+        return result;
       }
 
       return {
@@ -383,15 +420,25 @@ class ApiService {
         params['month'] = month;
       }
 
+      final cacheKey =
+          _buildGenericCacheKey('cortes-mensuales-productos', params);
+      final cachedEntry = _genericCache[cacheKey];
+      if (cachedEntry != null &&
+          cachedEntry.expiresAt.isAfter(DateTime.now())) {
+        return cachedEntry.data as Map<String, dynamic>;
+      }
+
       final uri = Uri.parse('$baseUrl/cortes-mensuales-productos/')
           .replace(queryParameters: params);
       final response = await _httpClient.get(
         uri,
         headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 90));
 
       if (response.statusCode == 200) {
-        final raw = json.decode(response.body) as Map<String, dynamic>;
+        final raw = kIsWeb
+            ? _jsonDecodeMap(response.body)
+            : await compute(_jsonDecodeMap, response.body);
         final products = (raw['products'] as List? ?? const [])
             .whereType<Map<String, dynamic>>()
             .map(MonthlyProductCut.fromJson)
@@ -399,7 +446,7 @@ class ApiService {
         final rawTotals = (raw['totals'] as Map?)?.cast<String, dynamic>() ??
             const <String, dynamic>{};
 
-        return {
+        final result = <String, dynamic>{
           'month': (raw['month'] ?? '').toString(),
           'month_start': (raw['month_start'] ?? '').toString(),
           'month_end': (raw['month_end'] ?? '').toString(),
@@ -423,6 +470,11 @@ class ApiService {
           'truncated': raw['truncated'] == true,
           'limit': ((raw['limit'] as num?) ?? limit).toInt(),
         };
+        _genericCache[cacheKey] = _GenericCacheEntry(
+          data: result,
+          expiresAt: DateTime.now().add(_genericCacheTtl),
+        );
+        return result;
       }
 
       return {
@@ -938,5 +990,12 @@ class _AnalysisCacheEntry {
 
   final List<Map<String, dynamic>> data;
   final DateTime createdAt;
+  final DateTime expiresAt;
+}
+
+class _GenericCacheEntry {
+  _GenericCacheEntry({required this.data, required this.expiresAt});
+
+  final dynamic data;
   final DateTime expiresAt;
 }

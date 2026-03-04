@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'django.middleware.gzip.GZipMiddleware',           # Comprime respuestas JSON ~70%
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -51,7 +52,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # XFrameOptionsMiddleware eliminado (solo API + admin protegido por SecurityMiddleware)
 ]
 
 ROOT_URLCONF = 'backend_inventario.urls'
@@ -85,8 +86,13 @@ DATABASES = {
         'PASSWORD': os.environ.get('DB_PASSWORD', '12345'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '3306'),
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '120')),
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '300')),  # Mantiene conexiones MySQL 5 min
         'CONN_HEALTH_CHECKS': True,
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            'charset': 'utf8mb4',
+            'connect_timeout': 10,
+        },
     }
 }
 
@@ -95,10 +101,10 @@ CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'inventory-low-resource-cache',
-        'TIMEOUT': int(os.environ.get('DJANGO_CACHE_TIMEOUT', '60')),
+        'TIMEOUT': int(os.environ.get('DJANGO_CACHE_TIMEOUT', '300')),   # 5 min (era 60s)
         'OPTIONS': {
-            'MAX_ENTRIES': int(os.environ.get('DJANGO_CACHE_MAX_ENTRIES', '2000')),
-            'CULL_FREQUENCY': int(os.environ.get('DJANGO_CACHE_CULL_FREQUENCY', '5')),
+            'MAX_ENTRIES': int(os.environ.get('DJANGO_CACHE_MAX_ENTRIES', '5000')),  # (era 2000)
+            'CULL_FREQUENCY': int(os.environ.get('DJANGO_CACHE_CULL_FREQUENCY', '4')),
         },
         'KEY_PREFIX': os.environ.get('DJANGO_CACHE_KEY_PREFIX', 'geo_inv'),
     }
@@ -106,14 +112,13 @@ CACHES = {
 
 
 REST_FRAMEWORK = {
-    'DEFAULT_RENDERER_CLASSES': (
-        ['rest_framework.renderers.JSONRenderer']
-        if not DEBUG
-        else [
-            'rest_framework.renderers.JSONRenderer',
-            'rest_framework.renderers.BrowsableAPIRenderer',
-        ]
-    )
+    # Solo JSONRenderer siempre: elimina overhead del renderer HTML en cualquier entorno
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+    ],
 }
 
 
@@ -143,7 +148,7 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
 
-USE_I18N = True
+USE_I18N = False  # API pura: elimina overhead de traducción de strings
 
 USE_TZ = True
 

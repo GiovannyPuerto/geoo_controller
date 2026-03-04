@@ -16,8 +16,11 @@ class SummaryTabPage extends StatefulWidget {
 }
 
 class _SummaryTabPageState extends State<SummaryTabPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   final ApiService _apiService = ApiService();
+
+  @override
+  bool get wantKeepAlive => true;
 
   Map<String, dynamic>? _summary;
   List<Map<String, dynamic>> _analysis = [];
@@ -117,6 +120,7 @@ class _SummaryTabPageState extends State<SummaryTabPage>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (_isLoading) {
       return const Center(
         child: Column(

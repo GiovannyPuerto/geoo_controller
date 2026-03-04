@@ -57,6 +57,8 @@ BASE_REQUIRED_COLUMNS = ['codigo', 'descripcion', 'cantidad', 'costo_unitario', 
 CSV_CHUNK_SIZE = 15000
 MOVEMENT_BULK_SIZE = 2000
 SIMPLE_NUMERIC_RE = re.compile(r'^-?\d+(?:\.\d+)?$')
+INTEGER_FLOAT_TEXT_RE = re.compile(r'^-?\d+\.0+$')
+ZERO_NUMERIC_TEXT_RE = re.compile(r'^0+(?:\.0+)?$')
 NON_ALNUM_RE = re.compile(r'[^a-z0-9]+')
 
 BASE_COLUMN_SYNONYMS = {
@@ -269,6 +271,80 @@ def _build_row_hash(product_id, date_value, doc_type, doc_number,
     return hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:32]
 
 
+def _normalize_text_token(
+    value,
+    *,
+    uppercase=False,
+    collapse_integer_float=False,
+    zero_as_empty=False,
+    remove_inner_spaces=False,
+):
+    """
+    Normaliza tokens textuales de identificadores para comparación estable.
+    """
+    if value is None:
+        return ''
+
+    text = str(value).strip()
+    if not text or text.lower() in ('nan', 'none', 'nat'):
+        return ''
+
+    if remove_inner_spaces:
+        text = re.sub(r'\s+', '', text)
+
+    if collapse_integer_float and INTEGER_FLOAT_TEXT_RE.fullmatch(text):
+        text = text.split('.', 1)[0]
+
+    if zero_as_empty and ZERO_NUMERIC_TEXT_RE.fullmatch(text):
+        return ''
+
+    return text.upper() if uppercase else text
+
+
+def _normalize_match_token(value, *, zero_as_empty=False):
+    """
+    Token para comparar movimientos equivalentes aunque cambie el formato.
+    """
+    normalized = _normalize_signature_value(value)
+    text = _normalize_text_token(
+        normalized,
+        collapse_integer_float=True,
+        zero_as_empty=zero_as_empty,
+    )
+    return text.casefold()
+
+
+def _build_row_match_hash(
+    product_id,
+    date_value,
+    doc_type,
+    doc_number,
+    source_document,
+    quantity,
+    unit_cost,
+    warehouse,
+    cost_center,
+    lote='',
+):
+    """
+    Hash canónico para comparar equivalencia lógica de movimientos.
+    No se persiste en BD: se usa solo para deduplicación defensiva en runtime.
+    """
+    parts = [
+        str(product_id),
+        str(date_value),
+        _normalize_match_token(doc_type),
+        _normalize_match_token(doc_number),
+        _normalize_match_token(source_document),
+        _normalize_signature_value(quantity),
+        _normalize_signature_value(unit_cost),
+        _normalize_match_token(warehouse),
+        _normalize_match_token(cost_center),
+        _normalize_match_token(lote, zero_as_empty=True),
+    ]
+    return hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:32]
+
+
 @lru_cache(maxsize=512)
 def _map_localizacion_cached(raw_value):
     """
@@ -442,7 +518,7 @@ def _coalesce_series(primary, secondary):
     if primary is None:
         return secondary
 
-    primary_str = primary.fillna('').astype(str).str.strip()
+    primary_str = _strip_object_series(primary)
     empty_mask = primary_str.eq('') | primary_str.str.lower().isin(['nan', 'none', 'nat'])
     return primary.where(~empty_mask, secondary)
 
@@ -482,7 +558,7 @@ def _normalize_columns_by_synonyms(
         col
         for col in required_columns
         if col not in normalized_df.columns
-        or normalized_df[col].fillna('').astype(str).str.strip().eq('').all()
+        or _strip_object_series(normalized_df[col]).eq('').all()
     ]
     return normalized_df, missing_columns
 
@@ -495,9 +571,7 @@ def _drop_embedded_header_rows(df, primary_col, header_tokens):
         return df
 
     canonical_primary = (
-        df[primary_col]
-        .fillna('')
-        .astype(str)
+        _strip_object_series(df[primary_col])
         .map(_canonical_column_name)
     )
     header_mask = canonical_primary.isin(header_tokens)
@@ -642,21 +716,52 @@ def _normalize_document_cached(raw):
     """
     Cache para normalizar documentos repetidos.
     """
-    if not raw or raw.lower() in ('nan', 'none'):
+    normalized = _normalize_text_token(
+        raw,
+        uppercase=True,
+        collapse_integer_float=True,
+        remove_inner_spaces=True,
+    )
+    if not normalized:
         return None
 
-    doc_type, doc_number = parse_document(raw)
+    doc_type, doc_number = parse_document(normalized)
     if doc_type and doc_number:
         return f'{doc_type}{doc_number}'
 
-    return re.sub(r'\s+', '', raw.upper())
+    return normalized
+
+
+@lru_cache(maxsize=100000)
+def _normalize_registro_cached(raw):
+    return _normalize_text_token(raw, collapse_integer_float=True)
+
+
+@lru_cache(maxsize=100000)
+def _normalize_cp_cached(raw):
+    return _normalize_text_token(
+        raw,
+        uppercase=True,
+        collapse_integer_float=True,
+        remove_inner_spaces=True,
+    )
+
+
+@lru_cache(maxsize=100000)
+def _normalize_cost_center_cached(raw):
+    return _normalize_text_token(raw, uppercase=True, collapse_integer_float=True)
+
+
+@lru_cache(maxsize=100000)
+def _normalize_lote_cached(raw):
+    return _normalize_text_token(raw, collapse_integer_float=True, zero_as_empty=True)
 
 
 def _strip_object_series(series):
     """
     Convierte una serie a string y remueve espacios en blanco.
     """
-    return series.fillna('').astype(str).str.strip()
+    return series.astype('string').fillna('').str.strip()
 
 
 @lru_cache(maxsize=100000)
@@ -689,6 +794,8 @@ def _normalize_update_dataframe(df):
     for col in UPDATE_FILE_COLUMNS:
         if col not in df.columns:
             df[col] = None
+        # Evita FutureWarning de pandas al asignar texto sobre columnas numéricas.
+        df[col] = df[col].astype('object')
 
     df.loc[:, 'item'] = _strip_object_series(df['item']).apply(_normalize_product_code_cached)
     df = df.loc[df['item'] != ''].copy()
@@ -703,17 +810,18 @@ def _normalize_update_dataframe(df):
     for col in UPDATE_NUMERIC_COLUMNS:
         df.loc[:, col] = _strip_object_series(df[col])
 
-    df.loc[:, 'registro'] = _strip_object_series(df['registro'])
-    df.loc[df['registro'].str.lower().isin(['', 'nan', 'none', 'nat']), 'registro'] = ''
+    df.loc[:, 'registro'] = _strip_object_series(df['registro']).apply(
+        _normalize_registro_cached
+    )
 
-    df.loc[:, 'cp'] = _strip_object_series(df['cp'])
-    df.loc[df['cp'].str.lower().isin(['', 'nan', 'none', 'nat']), 'cp'] = ''
+    df.loc[:, 'cp'] = _strip_object_series(df['cp']).apply(_normalize_cp_cached)
 
-    df.loc[:, 'cost_center'] = _strip_object_series(df['cost_center'])
-    df.loc[df['cost_center'].isin(['', 'nan', 'none', 'nat']), 'cost_center'] = None
+    df.loc[:, 'cost_center'] = _strip_object_series(df['cost_center']).apply(
+        _normalize_cost_center_cached
+    )
+    df.loc[df['cost_center'] == '', 'cost_center'] = None
 
-    df.loc[:, 'lote'] = _strip_object_series(df['lote'])
-    df.loc[df['lote'].str.lower().isin(['', 'nan', 'none', 'nat']), 'lote'] = ''
+    df.loc[:, 'lote'] = _strip_object_series(df['lote']).apply(_normalize_lote_cached)
 
     return df
 
@@ -980,12 +1088,8 @@ def procesar_importacion_inventario(request, inventory_name='default'):
             # datamanejamos los datos para que no sean nulos
             if base_df is not None:
                 base_df = base_df.dropna(subset=['codigo']).copy()
-                base_df.loc[:, 'codigo'] = (
-                    base_df['codigo']
-                    .fillna('')
-                    .astype(str)
-                    .str.strip()
-                    .apply(_normalize_product_code_cached)
+                base_df.loc[:, 'codigo'] = _strip_object_series(base_df['codigo']).apply(
+                    _normalize_product_code_cached
                 )
                 base_rows = len(base_df)
                 base_csv_path = _write_dataframe_to_temp_csv(base_df, prefix='inventory_base_')
@@ -1032,10 +1136,22 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         # Si ya existe un lote con el mismo checksum, todos los movimientos de ese
         # archivo ya fueron registrados (o el archivo es idéntico byte a byte).
         # En lugar de borrar y reinsertar, respondemos directamente como duplicados.
+        # GUARDIA: si el lote existe pero no tiene registros asociados (fue vaciado por
+        # un reset de base), ignoramos el checksum y continuamos con la importación normal.
         existing_batch = ImportBatch.objects.filter(
             checksum=checksum,
             inventory_name=inventory_name
         ).first()
+        if existing_batch:
+            has_records = InventoryRecord.objects.filter(batch=existing_batch).exists()
+            if not has_records:
+                logger.warning(
+                    f"Checksum duplicado encontrado (lote {existing_batch.id}) pero sin registros "
+                    f"asociados — lote huérfano de un reset anterior. Se elimina y se reimporta."
+                )
+                existing_batch.delete()
+                existing_batch = None
+
         if existing_batch:
             logger.info(
                 f"Checksum duplicado: lote {existing_batch.id} ya contiene estos archivos. "
@@ -1068,6 +1184,24 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 ),
             })
 
+        # ── Reset completo ANTES de crear el nuevo batch ─────────────────────
+        # Si se está cargando un archivo base, limpiamos TODO el inventario primero
+        # para que el batch que creamos a continuación sea el único existente.
+        # CRÍTICO: la limpieza debe ocurrir ANTES de crear el batch; de lo contrario
+        # el delete de ImportBatch borraría el batch recién creado y todos los
+        # .save() posteriores actualizarían 0 filas en silencio.
+        if base_csv_path is not None:
+            # 1. Registros via FK de producto (vía normal)
+            InventoryRecord.objects.filter(product__inventory_name=inventory_name).delete()
+            # 2. Registros huérfanos asociados a batches del mismo inventario
+            #    (cubre el caso de registros cuyo producto quedó en otro inventory_name)
+            InventoryRecord.objects.filter(batch__inventory_name=inventory_name).delete()
+            # 3. Productos
+            Product.objects.filter(inventory_name=inventory_name).delete()
+            # 4. Todos los ImportBatch anteriores (y sus checksums ya no son válidos)
+            ImportBatch.objects.filter(inventory_name=inventory_name).delete()
+            logger.info(f"Reset completo de inventario '{inventory_name}' antes de cargar base.")
+
         batch = ImportBatch.objects.create(
             file_name=' + '.join(batch_file_names) if batch_file_names else 'no-files',
             inventory_name=inventory_name,
@@ -1077,10 +1211,6 @@ def procesar_importacion_inventario(request, inventory_name='default'):
         base_records_count = 0
         base_duplicates_count = 0
         if base_csv_path is not None:
-            # Limpiamos productos existentes para este inventario solo si estamos cargando un nuevo base
-            # Primero eliminamos registros de inventario para evitar violación de llave foránea
-            InventoryRecord.objects.filter(product__inventory_name=inventory_name).delete()
-            Product.objects.filter(inventory_name=inventory_name).delete()
             # procesamos el archivo base
             base_records_count, base_duplicates_count = _process_base_csv(
                 base_csv_path,
@@ -1292,18 +1422,14 @@ def _process_base_csv(csv_path, inventory_name):
             return 0, 0
 
         chunk = chunk.dropna(subset=['codigo']).copy()
-        chunk.loc[:, 'codigo'] = (
-            chunk['codigo']
-            .fillna('')
-            .astype(str)
-            .str.strip()
-            .apply(_normalize_product_code_cached)
+        chunk.loc[:, 'codigo'] = _strip_object_series(chunk['codigo']).apply(
+            _normalize_product_code_cached
         )
         chunk = chunk.loc[
             (chunk['codigo'] != '') & (chunk['codigo'].str.lower() != 'nan')
         ].copy()
 
-        chunk.loc[:, 'descripcion'] = chunk['descripcion'].fillna('').astype(str).str.strip()
+        chunk.loc[:, 'descripcion'] = _strip_object_series(chunk['descripcion'])
         chunk = chunk.loc[chunk['descripcion'] != ''].copy()
 
         if chunk.empty:
@@ -1599,13 +1725,7 @@ def _process_update_file(
 
     # Limpiamos y validamos los datos del dataframe
     df = df.dropna(subset=['item', 'fecha', 'documento']).copy()
-    df.loc[:, 'item'] = (
-        df['item']
-        .fillna('')
-        .astype(str)
-        .str.strip()
-        .apply(_normalize_product_code_cached)
-    )
+    df.loc[:, 'item'] = _strip_object_series(df['item']).apply(_normalize_product_code_cached)
     df = df.loc[(df['item'] != '') & (df['item'].str.lower() != 'nan')].copy()
 
     # Recorte temprano de duplicados exactos para reducir costo de CPU.
@@ -1676,6 +1796,11 @@ def _process_update_file(
     candidate_product_ids = set()
     candidate_dates = []
 
+    # Medimos cuántos registros hay en este batch ANTES de insertar NADA.
+    # CRÍTICO: debe estar aquí, ANTES del bucle principal y de cualquier
+    # bulk_create intermedio, para que el delta final sea correcto.
+    batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
+
     for idx, row in enumerate(df.itertuples(index=False), start=1):
         try:
             codigo = getattr(row, 'item', None)
@@ -1688,7 +1813,7 @@ def _process_update_file(
                 errors += 1
                 continue
 
-            doc_info = str(getattr(row, 'documento', '') or '').strip().upper()
+            doc_info = _normalize_document_cached(str(getattr(row, 'documento', '') or '')) or ''
             if doc_info and len(doc_info) >= 2:
                 doc_type = doc_info[:2]
                 doc_number = doc_info[2:]
@@ -1733,15 +1858,12 @@ def _process_update_file(
             category = _map_categoria_cached(
                 str(getattr(row, 'categoria', '')).strip()
             )
-            row_cost_center = getattr(row, 'cost_center', None)
-            cost_center = str(row_cost_center).strip() if pd.notna(row_cost_center) else None
-            if cost_center == '':
-                cost_center = None
-            row_lote = str(getattr(row, 'lote', '') or '').strip()
-            row_cp = str(getattr(row, 'cp', '') or '').strip()
-            row_registro = str(getattr(row, 'registro', '') or '').strip()
-            if row_registro.lower() in ('nan', 'none', 'nat'):
-                row_registro = ''
+            row_cost_center = getattr(row, 'cost_center', '')
+            cost_center = _normalize_cost_center_cached(str(row_cost_center or '')) or None
+            row_lote = _normalize_lote_cached(str(getattr(row, 'lote', '') or ''))
+            row_cp = _normalize_cp_cached(str(getattr(row, 'cp', '') or ''))
+            row_registro = _normalize_registro_cached(str(getattr(row, 'registro', '') or ''))
+            has_explicit_record = bool(row_registro)
 
             source_record = row_registro or _build_source_record_fallback(
                 source_document,
@@ -1754,11 +1876,18 @@ def _process_update_file(
                 final_quantity,
                 cost_center,
                 category,
-                row_cp,
-                row_lote,
+                # NOTA: row_cp y row_lote NO se incluyen aquí para mantener
+                # compatibilidad exacta con el algoritmo de la migración 0015
+                # que pobló los source_record existentes en BD.
+                # Cambiar este orden/parámetros requeriría re-migrar todos los registros.
             )
 
             row_hash = _build_row_hash(
+                product.id, date_value, doc_type, doc_number,
+                source_document, quantity, unit_cost,
+                warehouse, cost_center, lote=row_lote,
+            )
+            row_match_hash = _build_row_match_hash(
                 product.id, date_value, doc_type, doc_number,
                 source_document, quantity, unit_cost,
                 warehouse, cost_center, lote=row_lote,
@@ -1798,11 +1927,14 @@ def _process_update_file(
                 cost_center,
                 date_value,
                 warehouse,
+                row_lote,
             )
 
             prepared_rows.append({
                 'key': unique_key,
+                'has_explicit_record': has_explicit_record,
                 'row_hash': row_hash,
+                'row_match_hash': row_match_hash,
                 'product': product,
                 'warehouse': warehouse,
                 'date': date_value,
@@ -1829,6 +1961,7 @@ def _process_update_file(
     # Cargamos duplicados existentes en una sola consulta acotada
     existing_keys = set()
     existing_row_hashes = set()
+    existing_row_match_hashes = set()
     if candidate_product_ids and candidate_dates:
         min_date = min(candidate_dates)
         max_date = max(candidate_dates)
@@ -1844,7 +1977,8 @@ def _process_update_file(
                 'product_id',
                 'cost_center',
                 'date',
-                'warehouse'
+                'warehouse',
+                'lote',
             )
         )
         # Row-hash de registros existentes: 3ª capa de dedup por contenido
@@ -1853,29 +1987,84 @@ def _process_update_file(
               .exclude(row_hash='')
               .values_list('row_hash', flat=True)
         )
+        # Hash canónico en runtime para absorber variaciones de formato
+        existing_row_match_hashes = {
+            _build_row_match_hash(
+                product_id,
+                existing_date,
+                existing_doc_type,
+                existing_doc_number,
+                existing_source_document,
+                existing_quantity,
+                existing_unit_cost,
+                existing_warehouse,
+                existing_cost_center,
+                lote=existing_lote,
+            )
+            for (
+                product_id,
+                existing_date,
+                existing_doc_type,
+                existing_doc_number,
+                existing_source_document,
+                existing_quantity,
+                existing_unit_cost,
+                existing_warehouse,
+                existing_cost_center,
+                existing_lote,
+            ) in qs.values_list(
+                'product_id',
+                'date',
+                'document_type',
+                'document_number',
+                'source_document',
+                'quantity',
+                'unit_cost',
+                'warehouse',
+                'cost_center',
+                'lote',
+            )
+        }
 
     # Procesamos filas preparadas y evitamos duplicados en BD y dentro del mismo archivo
     seen_new_keys = set()
     seen_new_hashes = set()
+    seen_new_match_hashes = set()
     for prepared in prepared_rows:
         unique_key = prepared['key']
+        has_explicit_record = prepared.get('has_explicit_record', False)
         row_hash   = prepared['row_hash']
+        row_match_hash = prepared['row_match_hash']
 
-        if unique_key in seen_new_keys or unique_key in seen_unique_keys or row_hash in seen_new_hashes:
+        key_seen_in_request = has_explicit_record and (
+            unique_key in seen_new_keys or unique_key in seen_unique_keys
+        )
+        if (
+            key_seen_in_request
+            or row_hash in seen_new_hashes
+            or row_match_hash in seen_new_match_hashes
+        ):
             # Duplicado dentro del mismo lote de importación (anterior en este archivo/sesión)
             duplicates_count += 1
             dupes_in_file += 1
             continue
 
-        if unique_key in existing_keys or row_hash in existing_row_hashes:
+        key_exists_in_db = has_explicit_record and (unique_key in existing_keys)
+        if (
+            key_exists_in_db
+            or row_hash in existing_row_hashes
+            or row_match_hash in existing_row_match_hashes
+        ):
             # Capa 2/3: movimiento ya importado en una carga anterior (está en BD)
             duplicates_count += 1
             dupes_in_db += 1
             continue
 
-        seen_new_keys.add(unique_key)
-        seen_unique_keys.add(unique_key)
+        if has_explicit_record:
+            seen_new_keys.add(unique_key)
+            seen_unique_keys.add(unique_key)
         seen_new_hashes.add(row_hash)
+        seen_new_match_hashes.add(row_match_hash)
         records_to_create.append(InventoryRecord(
             batch=batch,
             product=prepared['product'],
@@ -1914,10 +2103,6 @@ def _process_update_file(
                         logger.error(f"Error saving individual record: {str(e2)}")
                         continue
                 records_to_create = []
-
-    # Medimos cuántos registros hay en este batch ANTES de insertar.
-    # El delta después del bulk_create nos dice cuántos se insertaron realmente.
-    batch_count_before = InventoryRecord.objects.filter(batch=batch).count()
 
     # INSERTAMOS LOS REGISTROS RESTANTES
     if records_to_create:

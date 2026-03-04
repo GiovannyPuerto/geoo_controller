@@ -23,7 +23,8 @@ class AnalysisTabPage extends StatefulWidget {
   State<AnalysisTabPage> createState() => _AnalysisTabPageState();
 }
 
-class _AnalysisTabPageState extends State<AnalysisTabPage> {
+class _AnalysisTabPageState extends State<AnalysisTabPage>
+    with AutomaticKeepAliveClientMixin {
   final ApiService _apiService = ApiService();
   List<Map<String, dynamic>> analysis = [];
   List<Map<String, dynamic>> filteredAnalysis = [];
@@ -31,6 +32,16 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   bool _isRefreshing = false;
   int _analysisRequestEpoch = 0;
   Map<String, double> _idealValues = {};
+
+  // Datos precalculados para gráficas (evita recomputar en cada build)
+  Map<String, double> _chartGroupData = {};
+  Map<String, int> _chartRotationData = {};
+  List<MapEntry<String, double>> _chartSortedGroupData = [];
+  double _chartTotalValue = 0;
+  int _chartTotalProducts = 0;
+
+  @override
+  bool get wantKeepAlive => true;
 
   bool _isRangeMode = false;
 
@@ -149,6 +160,7 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
           isLoading = false;
           _isRefreshing = false;
         });
+        _computeChartData();
       }
     } catch (e) {
       if (mounted && requestEpoch == _analysisRequestEpoch) {
@@ -163,8 +175,42 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
     }
   }
 
+  /// Precalcula los datos de gráficas a partir de filteredAnalysis.
+  /// Se llama una sola vez después de cargar/filtrar datos.
+  void _computeChartData() {
+    final groupData = <String, double>{};
+    final rotationData = <String, int>{};
+    double totalValue = 0;
+
+    for (var item in filteredAnalysis) {
+      final rawGroup = item['grupo'];
+      final group = (rawGroup != null && rawGroup.toString().isNotEmpty)
+          ? _getGroupName(rawGroup.toString())
+          : 'SIN CATEGORÍA';
+      final rawValue = item['valor_saldo_actual'];
+      final value = (rawValue is num) ? rawValue.toDouble() : 0;
+      groupData[group] = (groupData[group] ?? 0) + value;
+      totalValue += value;
+
+      final rotation = item['rotacion']?.toString() ?? 'Activo';
+      rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
+    }
+
+    final sorted = groupData.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    setState(() {
+      _chartGroupData = groupData;
+      _chartRotationData = rotationData;
+      _chartSortedGroupData = sorted;
+      _chartTotalValue = totalValue;
+      _chartTotalProducts = filteredAnalysis.length;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (isLoading) {
       return const Center(
         child: Column(
@@ -384,32 +430,17 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
   }
 
   Widget _buildAnalysisCharts() {
-    // Prepare data for charts
-    final groupData = <String, double>{};
-    final rotationData = <String, int>{};
-    double totalValue = 0;
-    int totalProducts = filteredAnalysis.length;
-
-    for (var item in filteredAnalysis) {
-      final rawGroup = item['grupo'];
-      final group = (rawGroup != null && rawGroup.toString().isNotEmpty)
-          ? _getGroupName(rawGroup.toString())
-          : 'SIN CATEGORÍA';
-      final rawValue = item['valor_saldo_actual'];
-      final value = (rawValue is num) ? rawValue.toDouble() : 0;
-      groupData[group] = (groupData[group] ?? 0) + value;
-      totalValue += value;
-
-      final rotation = item['rotacion']?.toString() ?? 'Activo';
-      rotationData[rotation] = (rotationData[rotation] ?? 0) + 1;
-    }
+    // Usa datos precalculados por _computeChartData() — no recomputa en cada build
+    final groupData = _chartGroupData;
+    final rotationData = _chartRotationData;
+    final double totalValue = _chartTotalValue;
+    final int totalProducts = _chartTotalProducts;
 
     // Paleta corporativa de gráficas
     const List<Color> groupColors = AppColors.chartPalette;
 
-    // Create sorted group data
-    final sortedGroupData = groupData.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    // Datos ordenados ya precalculados
+    final sortedGroupData = _chartSortedGroupData;
 
     return LayoutBuilder(builder: (context, constraints) {
       final isMobile = constraints.maxWidth < 600;
@@ -612,16 +643,20 @@ class _AnalysisTabPageState extends State<AnalysisTabPage> {
       );
 
       // En mobile: apilados; en desktop: lado a lado
+      // RepaintBoundary aísla los repaints de las gráficas del resto del árbol
       Widget chartsRow = isMobile
-          ? Column(
-              children: [groupCard, const SizedBox(height: 16), rotationCard])
+          ? Column(children: [
+              RepaintBoundary(child: groupCard),
+              const SizedBox(height: 16),
+              RepaintBoundary(child: rotationCard)
+            ])
           : IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: groupCard),
+                  Expanded(child: RepaintBoundary(child: groupCard)),
                   const SizedBox(width: 16),
-                  Expanded(child: rotationCard),
+                  Expanded(child: RepaintBoundary(child: rotationCard)),
                 ],
               ),
             );

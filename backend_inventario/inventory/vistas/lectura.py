@@ -25,8 +25,8 @@ from ..services.resumen_inventario_service import obtener_resumen_inventario
 
 logger = logging.getLogger(__name__)
 
-API_CACHE_RAPIDO_SEGUNDOS = 300   # 5 minutos
-API_CACHE_PESADO_SEGUNDOS = 600   # 10 minutos
+API_CACHE_RAPIDO_SEGUNDOS = 600    # 10 minutos (era 300)
+API_CACHE_PESADO_SEGUNDOS = 1800   # 30 minutos (era 600)
 
 
 def _ordenar_por_documento_desc(qs):

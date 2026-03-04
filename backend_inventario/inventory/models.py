@@ -111,12 +111,12 @@ class InventoryRecord(models.Model):
 
     # Huella SHA-256 del contenido del movimiento (32 hex chars).
     # Permite detectar duplicados cuando source_record no es fiable.
-    row_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    row_hash = models.CharField(max_length=64, null=True, blank=True, unique=True)
 
     class Meta:
         """
         Un registro se identifica por su línea de origen (`source_document` + `source_record`)
-        más el contexto de producto/fecha/almacén/centro de costo.
+        más el contexto de producto/fecha/almacén/centro de costo/lote.
 
         Esta estrategia permite:
         - re-subidas idempotentes sin duplicar líneas;
@@ -129,6 +129,7 @@ class InventoryRecord(models.Model):
             'cost_center',
             'date',
             'warehouse',
+            'lote',
         ]
 
         indexes = [

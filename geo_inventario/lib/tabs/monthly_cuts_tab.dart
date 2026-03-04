@@ -25,8 +25,12 @@ class MonthlyCutsTabPage extends StatefulWidget {
   State<MonthlyCutsTabPage> createState() => _MonthlyCutsTabPageState();
 }
 
-class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
+class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage>
+    with AutomaticKeepAliveClientMixin {
   final ApiService _apiService = ApiService();
+
+  @override
+  bool get wantKeepAlive => true;
 
   List<MonthlyCut> monthlyCuts = [];
   List<MonthlyProductCut> productCuts = [];
@@ -127,6 +131,75 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
     });
 
     try {
+      // Si ya tenemos un mes seleccionado, corremos ambas peticiones en
+      // paralelo para reducir el tiempo de respuesta percibido.  En primer
+      // acceso (selectedMonth == null) se carga cuts primero para elegir mes.
+      if (selectedMonth != null && selectedMonth!.isNotEmpty) {
+        final results = await Future.wait([
+          _apiService.getMonthlyCuts(
+            months: monthsWindow,
+            warehouse: selectedWarehouse,
+            category: selectedCategory,
+            search: searchQuery,
+          ),
+          _apiService.getMonthlyProductCuts(
+            warehouse: selectedWarehouse,
+            category: selectedCategory,
+            search: searchQuery,
+            month: selectedMonth,
+            limit: productLimit,
+          ),
+        ]);
+
+        final cutsResponse = results[0] as Map<String, dynamic>;
+        final productResponse = results[1] as Map<String, dynamic>;
+
+        final cuts = (cutsResponse['months'] as List)
+            .whereType<MonthlyCut>()
+            .toList();
+        final validMonths = cuts.map((e) => e.month).toSet();
+        String? resolvedMonth = selectedMonth;
+        if (cuts.isNotEmpty && (resolvedMonth == null || !validMonths.contains(resolvedMonth))) {
+          resolvedMonth = cuts
+              .lastWhere((c) => c.totalEntries > 0 || c.totalExits > 0,
+                  orElse: () => cuts.last)
+              .month;
+        }
+
+        final rows = (productResponse['products'] as List)
+            .whereType<MonthlyProductCut>()
+            .toList();
+        final totals =
+            (productResponse['totals'] as Map?)?.cast<String, dynamic>() ??
+                const <String, dynamic>{};
+
+        if (!mounted) return;
+        setState(() {
+          monthlyCuts = cuts;
+          periodAverageGeneral =
+              ((cutsResponse['period_average_general'] as num?) ?? 0)
+                  .toDouble();
+          productsCount = (cutsResponse['products_count'] as int?) ?? 0;
+          selectedMonth = resolvedMonth;
+          productCuts = rows;
+          _productDataSource?.dispose();
+          _productDataSource = MonthlyProductCutDataSource(rows);
+          monthProductsCount =
+              (productResponse['products_count'] as int?) ?? rows.length;
+          productCutsTruncated = productResponse['truncated'] == true;
+          productTotals = {
+            'average_quantity':
+                ((totals['average_quantity'] as num?) ?? 0).toDouble(),
+            'average_value':
+                ((totals['average_value'] as num?) ?? 0).toDouble(),
+          };
+          isLoading = false;
+          isProductLoading = false;
+        });
+        return;
+      }
+
+      // Primer acceso: carga secuencial para determinar mes activo
       final cutsResponse = await _apiService.getMonthlyCuts(
         months: monthsWindow,
         warehouse: selectedWarehouse,
@@ -141,9 +214,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
       } else {
         final validMonths = cuts.map((e) => e.month).toSet();
         if (month == null || !validMonths.contains(month)) {
-          // Seleccionar el último mes que tenga movimientos reales (entradas o
-          // salidas > 0). Así se evita mostrar el mes actual vacío cuando los
-          // datos importados cubren períodos anteriores.
           final lastWithMovements = cuts.lastWhere(
             (c) => c.totalEntries > 0 || c.totalExits > 0,
             orElse: () => cuts.last,
@@ -161,8 +231,6 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
         selectedMonth = month;
         isLoading = false;
       });
-
-      _loadSelectableFilterOptions();
 
       await _loadProductCuts(month: month);
     } catch (e) {
@@ -229,6 +297,7 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (isLoading) {
       return const Center(
         child: Column(

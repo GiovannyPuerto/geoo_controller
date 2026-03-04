@@ -20,8 +20,12 @@ class TopsTabPage extends StatefulWidget {
   State<TopsTabPage> createState() => _TopsTabPageState();
 }
 
-class _TopsTabPageState extends State<TopsTabPage> {
+class _TopsTabPageState extends State<TopsTabPage>
+    with AutomaticKeepAliveClientMixin {
   final ApiService _apiService = ApiService();
+
+  @override
+  bool get wantKeepAlive => true;
 
   bool isLoading = true;
   List<Map<String, dynamic>> analysisCutoff = [];
@@ -424,6 +428,7 @@ class _TopsTabPageState extends State<TopsTabPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (isLoading) {
       return const Center(
         child: Column(
