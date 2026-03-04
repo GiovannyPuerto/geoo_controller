@@ -14,9 +14,9 @@ Map<String, dynamic> _jsonDecodeMap(String body) =>
 class ApiService {
   /// URL base dinámica: se obtiene de ConfigService en cada llamada.
   static String get baseUrl => ConfigService.instance.baseUrl;
-  static const Duration _analysisCacheTtl = Duration(seconds: 30);
-  static const Duration _genericCacheTtl =
-      Duration(seconds: 120); // 2 min — evita recargas frecuentes
+  static const Duration _analysisCacheTtl = Duration(minutes: 10);
+  static const Duration _genericCacheTtl = Duration(
+      minutes: 20); // histórico: evita recargas frecuentes innecesarias
   static const int _analysisCacheMaxEntries = 64;
   static final http.Client _httpClient = http.Client();
   static final Map<String, _AnalysisCacheEntry> _analysisCache = {};
@@ -212,8 +212,7 @@ class ApiService {
         final decoded = kIsWeb
             ? _jsonDecodeMap(response.body)
             : await compute(_jsonDecodeMap, response.body);
-        if (decoded is Map<String, dynamic>) return decoded;
-        return {};
+        return decoded;
       }
       return {};
     } catch (e) {

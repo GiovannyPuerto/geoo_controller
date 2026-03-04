@@ -1,9 +1,25 @@
-from decimal import Decimal
+import os
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.cache import cache
 from django.db.models import Max, Sum
 
 from ..models import Product, InventoryRecord, ImportBatch, WarehouseDetail
+
+
+_MONEY_QUANT = Decimal("0.01")
+_QTY_QUANT = Decimal("0.001")
+HISTORIC_CACHE_TTL_SECONDS = int(
+    os.environ.get("INVENTORY_HISTORIC_CACHE_TTL_SECONDS", "604800")
+)
+
+
+def _money_float(value) -> float:
+    return float(Decimal(value or 0).quantize(_MONEY_QUANT, rounding=ROUND_HALF_UP))
+
+
+def _qty_float(value) -> float:
+    return float(Decimal(value or 0).quantize(_QTY_QUANT, rounding=ROUND_HALF_UP))
 
 
 def get_inventory_summary_data(inventory_name="default"):
@@ -33,7 +49,7 @@ def get_inventory_summary_data(inventory_name="default"):
             "total_value": 0.0,
             "negative_stock_alerts": [],
         }
-        cache.set(cache_key, payload, timeout=300)
+        cache.set(cache_key, payload, timeout=HISTORIC_CACHE_TTL_SECONDS)
         return payload
 
     product_meta = {
@@ -130,7 +146,7 @@ def get_inventory_summary_data(inventory_name="default"):
                 {
                     "codigo": meta.get("code", ""),
                     "nombre_producto": meta.get("description", ""),
-                    "cantidad_saldo_actual": float(current_stock),
+                    "cantidad_saldo_actual": _qty_float(current_stock),
                     "justification": f"Stock actual negativo: {current_stock} unidades.",
                 }
             )
@@ -140,9 +156,9 @@ def get_inventory_summary_data(inventory_name="default"):
         "total_products": total_products,
         "total_records": total_records,
         "total_batches": total_batches,
-        "total_quantity": float(total_quantity),
-        "total_value": float(total_value),
+        "total_quantity": _qty_float(total_quantity),
+        "total_value": _money_float(total_value),
         "negative_stock_alerts": negative_stock_alerts,
     }
-    cache.set(cache_key, payload, timeout=300)
+    cache.set(cache_key, payload, timeout=HISTORIC_CACHE_TTL_SECONDS)
     return payload

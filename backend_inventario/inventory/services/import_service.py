@@ -1663,6 +1663,62 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 ),
             })
 
+        prepared_update_files = []
+        if update_files_data:
+            prep_start = time.perf_counter()
+            try:
+                prepared_update_files = _prepare_update_files_for_processing(
+                    update_files_data=update_files_data,
+                    temp_csv_files=temp_csv_files,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"Error preparando archivos de actualización para procesamiento: {exc}",
+                    exc_info=True,
+                )
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': (
+                            'No fue posible preparar los archivos de actualización. '
+                            'Verifique formato y estructura del archivo.'
+                        ),
+                    },
+                    status=400,
+                )
+            logger.info(
+                "Preparación de updates completada: archivos=%s filas=%s tiempo=%.2fs",
+                len(prepared_update_files),
+                sum(p['rows_input'] for p in prepared_update_files),
+                time.perf_counter() - prep_start,
+            )
+
+        # ── Validación de fechas/cronología ───────────────────────────────────
+        # Debe ejecutarse antes de escribir en BD para no dejar estados parciales.
+        chronology_report = {}
+        if prepared_update_files:
+            chronology_ok, chronology_error, chronology_report = _validate_update_files_chronology(
+                prepared_update_files=prepared_update_files,
+                inventory_name=inventory_name,
+                base_cutoff_date=base_cutoff_date,
+            )
+            if not chronology_ok:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': chronology_error,
+                        'date_validation': chronology_report,
+                        'summary': {
+                            'interface_logs': [
+                                f"Inventario objetivo: {inventory_name}",
+                                f"Validación de fechas fallida: {chronology_error}",
+                            ],
+                        },
+                    },
+                    status=400,
+                )
+        # ── Fin validación de fechas/cronología ───────────────────────────────
+
         # ── Reset completo ANTES de crear el nuevo batch ─────────────────────
         # Si se está cargando un archivo base, limpiamos TODO el inventario primero
         # para que el batch que creamos a continuación sea el único existente.
@@ -1703,61 +1759,6 @@ def procesar_importacion_inventario(request, inventory_name='default'):
                 base_duplicates_count,
                 time.perf_counter() - base_stage_start,
             )
-
-        prepared_update_files = []
-        if update_files_data:
-            prep_start = time.perf_counter()
-            try:
-                prepared_update_files = _prepare_update_files_for_processing(
-                    update_files_data=update_files_data,
-                    temp_csv_files=temp_csv_files,
-                )
-            except Exception as exc:
-                logger.error(
-                    f"Error preparando archivos de actualización para procesamiento: {exc}",
-                    exc_info=True,
-                )
-                return JsonResponse(
-                    {
-                        'ok': False,
-                        'error': (
-                            'No fue posible preparar los archivos de actualización. '
-                            'Verifique formato y estructura del archivo.'
-                        ),
-                    },
-                    status=400,
-                )
-            logger.info(
-                "Preparación de updates completada: archivos=%s filas=%s tiempo=%.2fs",
-                len(prepared_update_files),
-                sum(p['rows_input'] for p in prepared_update_files),
-                time.perf_counter() - prep_start,
-            )
-
-        # ── Validación de fechas/cronología ───────────────────────────────────
-        chronology_report = {}
-        if prepared_update_files:
-            chronology_ok, chronology_error, chronology_report = _validate_update_files_chronology(
-                prepared_update_files=prepared_update_files,
-                inventory_name=inventory_name,
-                base_cutoff_date=base_cutoff_date,
-            )
-            if not chronology_ok:
-                return JsonResponse(
-                    {
-                        'ok': False,
-                        'error': chronology_error,
-                        'date_validation': chronology_report,
-                        'summary': {
-                            'interface_logs': [
-                                f"Inventario objetivo: {inventory_name}",
-                                f"Validación de fechas fallida: {chronology_error}",
-                            ],
-                        },
-                    },
-                    status=400,
-                )
-        # ── Fin validación de fechas/cronología ───────────────────────────────
 
         # Procesamos los archivos de actualizacion (solo si hay archivos de actualizacion)
         update_records_count = 0

@@ -29,15 +29,23 @@ logger = logging.getLogger(__name__)
 def export_analysis(request, inventory_name='default'):
     try:
         format_type = request.GET.get('format', 'excel')
-        inventory_name_param, analysis_list = construir_datos_analisis_exportacion(
+        inventory_name_param, analysis_list, filters_txt = construir_datos_analisis_exportacion(
             request,
             inventory_name_default=inventory_name,
         )
 
         if format_type == 'excel':
-            return construir_respuesta_analisis_excel(analysis_list, inventory_name_param)
+            return construir_respuesta_analisis_excel(
+                analysis_list,
+                inventory_name_param,
+                filters_txt=filters_txt,
+            )
         if format_type == 'pdf':
-            return construir_respuesta_analisis_pdf(analysis_list, inventory_name_param)
+            return construir_respuesta_analisis_pdf(
+                analysis_list,
+                inventory_name_param,
+                filters_txt=filters_txt,
+            )
         return JsonResponse({'error': 'Formato no soportado'}, status=400)
     except Exception as exc:
         logger.error(f"Error exporting analysis: {str(exc)}", exc_info=True)
@@ -48,15 +56,23 @@ def export_analysis(request, inventory_name='default'):
 def export_movements(request, inventory_name='default'):
     try:
         format_type = request.GET.get('format', 'excel')
-        inventory_name_param, movements_data = construir_datos_movimientos_exportacion(
+        inventory_name_param, movements_data, filters_txt = construir_datos_movimientos_exportacion(
             request,
             inventory_name_default=inventory_name,
         )
 
         if format_type == 'excel':
-            return construir_respuesta_movimientos_excel(movements_data, inventory_name_param)
+            return construir_respuesta_movimientos_excel(
+                movements_data,
+                inventory_name_param,
+                filters_txt=filters_txt,
+            )
         if format_type == 'pdf':
-            return construir_respuesta_movimientos_pdf(movements_data, inventory_name_param)
+            return construir_respuesta_movimientos_pdf(
+                movements_data,
+                inventory_name_param,
+                filters_txt=filters_txt,
+            )
         return JsonResponse({'error': 'Formato no soportado'}, status=400)
     except Exception as exc:
         logger.error(f"Error exporting movements: {str(exc)}", exc_info=True)

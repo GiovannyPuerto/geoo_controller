@@ -10,9 +10,10 @@ Este módulo centraliza cálculos de:
 import logging
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from dateutil.relativedelta import relativedelta
 from django.core.cache import cache
@@ -35,6 +36,41 @@ from django.utils.timezone import now
 from ..models import InventoryRecord, Product, WarehouseDetail
 
 logger = logging.getLogger(__name__)
+
+
+_MONEY_QUANT = Decimal("0.01")
+_QTY_QUANT = Decimal("0.001")
+HISTORIC_CACHE_TTL_SECONDS = int(
+    os.environ.get("INVENTORY_HISTORIC_CACHE_TTL_SECONDS", "604800")
+)
+
+
+def _to_decimal(value, default="0"):
+    if value is None:
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal(default)
+
+
+def _money_float(value) -> float:
+    return float(_to_decimal(value).quantize(_MONEY_QUANT, rounding=ROUND_HALF_UP))
+
+
+def _qty_float(value) -> float:
+    return float(_to_decimal(value).quantize(_QTY_QUANT, rounding=ROUND_HALF_UP))
+
+
+def _parse_iso_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except Exception:
+        return None
 
 
 def _search_q(search_filter: str, code_field: str = 'code', desc_field: str = 'description') -> Q:
@@ -200,6 +236,9 @@ def get_monthly_movements_data(
     warehouse_filter="",
     category_filter="",
     search_filter="",
+    date_from="",
+    date_to="",
+    months=12,
 ):
     """
     Calcula entradas, salidas y saldo mensual para una ventana de 12 meses.
@@ -209,6 +248,28 @@ def get_monthly_movements_data(
     "Valor Cierre" de Cortes Mensuales, ambos se derivan de la misma
     metodología de valuación (get_monthly_qty_value_series).
     """
+    date_from_value = _parse_iso_date(date_from)
+    date_to_value = _parse_iso_date(date_to)
+    if date_from_value and date_to_value and date_from_value > date_to_value:
+        date_from_value, date_to_value = date_to_value, date_from_value
+
+    try:
+        requested_months = int(months or 12)
+    except (TypeError, ValueError):
+        requested_months = 12
+    requested_months = max(1, min(requested_months, 36))
+
+    # Si se filtra por rango de fechas, ampliamos la ventana para cubrirlo.
+    # Luego se recorta por mes para devolver exactamente el rango solicitado.
+    window_months = requested_months
+    if date_from_value and date_to_value:
+        range_months = (
+            (date_to_value.year - date_from_value.year) * 12
+            + (date_to_value.month - date_from_value.month)
+            + 1
+        )
+        window_months = max(1, min(max(requested_months, range_months), 36))
+
     (
         _start_month_date,
         _months_count,
@@ -220,17 +281,43 @@ def get_monthly_movements_data(
         warehouse_filter=warehouse_filter,
         category_filter=category_filter,
         search_filter=search_filter,
-        months=12,
+        months=window_months,
     )
+
+    from_month = (
+        date_from_value.replace(day=1)
+        if date_from_value
+        else None
+    )
+    to_month = (
+        date_to_value.replace(day=1)
+        if date_to_value
+        else None
+    )
+
+    filtered_rows = []
+    for row in rows:
+        month_text = row.get("month")
+        if not month_text:
+            continue
+        try:
+            month_date = datetime.strptime(f"{month_text}-01", "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if from_month and month_date < from_month:
+            continue
+        if to_month and month_date > to_month:
+            continue
+        filtered_rows.append(row)
 
     return [
         {
             "month": row.get("month"),
-            "total_entries": float(row.get("total_entries", 0) or 0),
-            "total_exits": float(row.get("total_exits", 0) or 0),
-            "closing_balance": float(row.get("closing_balance", 0) or 0),
+            "total_entries": _money_float(row.get("total_entries", 0)),
+            "total_exits": _money_float(row.get("total_exits", 0)),
+            "closing_balance": _money_float(row.get("closing_balance", 0)),
         }
-        for row in rows
+        for row in filtered_rows
     ]
 
 
@@ -593,13 +680,13 @@ def _get_monthly_qty_value_series(
         rows.append(
             {
                 "month": month_key,
-                "opening_balance": float(opening_val),
-                "total_entries": float(entries_val),
-                "total_exits": float(exits_val),
-                "closing_balance": float(closing_val),
-                "average_balance": float(average_val),
-                "average_balance_general": float(average_val),
-                "average_balance_per_product": float(avg_per_product),
+                "opening_balance": _money_float(opening_val),
+                "total_entries": _money_float(entries_val),
+                "total_exits": _money_float(exits_val),
+                "closing_balance": _money_float(closing_val),
+                "average_balance": _money_float(average_val),
+                "average_balance_general": _money_float(average_val),
+                "average_balance_per_product": _money_float(avg_per_product),
                 "products_count": products_count,
             }
         )
@@ -653,13 +740,13 @@ def get_monthly_cuts_data(
 
     result = {
         "months": rows,
-        "period_average_cut": float(period_average_per_product),
-        "period_average_general": float(period_avg_general),
-        "period_average_per_product": float(period_average_per_product),
+        "period_average_cut": _money_float(period_average_per_product),
+        "period_average_general": _money_float(period_avg_general),
+        "period_average_per_product": _money_float(period_average_per_product),
         "products_count": products_count,
         "months_count": months_count,
     }
-    cache.set(_svc_cache_key, result, 1800)
+    cache.set(_svc_cache_key, result, HISTORIC_CACHE_TTL_SECONDS)
     return result
 
 
@@ -995,16 +1082,16 @@ def get_monthly_product_cuts_data(
                 "codigo": product["code"],
                 "nombre_producto": product["description"],
                 "grupo": product["group"],
-                "cantidad_apertura": float(opening_qty),
-                "cantidad_cierre": float(closing_qty),
-                "cantidad_promedio": float(average_qty),
-                "costo_unitario": float(unit_cost),
-                "valor_apertura": float(opening_value),
-                "valor_cierre": float(closing_value),
-                "valor_promedio": float(average_value),
+                "cantidad_apertura": _qty_float(opening_qty),
+                "cantidad_cierre": _qty_float(closing_qty),
+                "cantidad_promedio": _qty_float(average_qty),
+                "costo_unitario": _money_float(unit_cost),
+                "valor_apertura": _money_float(opening_value),
+                "valor_cierre": _money_float(closing_value),
+                "valor_promedio": _money_float(average_value),
                 # Alias de compatibilidad con formato de inventario actual.
-                "cantidad": float(average_qty),
-                "valor": float(average_value),
+                "cantidad": _qty_float(average_qty),
+                "valor": _money_float(average_value),
             }
         )
 
@@ -1031,23 +1118,23 @@ def get_monthly_product_cuts_data(
         "products_count": total_count,
         "products_count_unbounded": total_count_unbounded,
         "totals": {
-            "opening_quantity": float(total_opening_qty),
-            "closing_quantity": float(total_closing_qty),
-            "average_quantity": float(total_average_qty),
-            "opening_value": float(total_opening_value),
-            "closing_value": float(total_closing_value),
-            "average_value": float(total_average_value),
+            "opening_quantity": _qty_float(total_opening_qty),
+            "closing_quantity": _qty_float(total_closing_qty),
+            "average_quantity": _qty_float(total_average_qty),
+            "opening_value": _money_float(total_opening_value),
+            "closing_value": _money_float(total_closing_value),
+            "average_value": _money_float(total_average_value),
         },
         # Alias de compatibilidad para cliente tipo inventario actual.
-        "total_quantity": float(total_average_qty),
-        "total_value": float(total_average_value),
+        "total_quantity": _qty_float(total_average_qty),
+        "total_value": _money_float(total_average_value),
         "truncated": bool(limit_value and total_count_unbounded > total_count),
         "limit": limit_value,
         "offset": start,
         "page_size": page_size_value,
         "has_next_page": end < total_count,
     }
-    cache.set(_svc_cache_key, result, 1800)
+    cache.set(_svc_cache_key, result, HISTORIC_CACHE_TTL_SECONDS)
     return result
 
 
@@ -1352,13 +1439,13 @@ def get_range_product_cuts_data(
             "codigo": product["code"],
             "nombre_producto": product["description"],
             "grupo": product["group"],
-            "cantidad_apertura": float(opening_qty),
-            "cantidad_cierre": float(closing_qty),
-            "cantidad_promedio": float(average_qty),
-            "costo_unitario": float(unit_cost),
-            "valor_apertura": float(opening_value),
-            "valor_cierre": float(closing_value),
-            "valor_promedio": float(average_value),
+            "cantidad_apertura": _qty_float(opening_qty),
+            "cantidad_cierre": _qty_float(closing_qty),
+            "cantidad_promedio": _qty_float(average_qty),
+            "costo_unitario": _money_float(unit_cost),
+            "valor_apertura": _money_float(opening_value),
+            "valor_cierre": _money_float(closing_value),
+            "valor_promedio": _money_float(average_value),
         })
 
     rows.sort(key=lambda item: item["valor_promedio"], reverse=True)
@@ -1372,12 +1459,12 @@ def get_range_product_cuts_data(
         "products": rows,
         "products_count": len(rows),
         "totals": {
-            "opening_quantity": float(total_opening_qty),
-            "closing_quantity": float(total_closing_qty),
-            "average_quantity": float(total_average_qty),
-            "opening_value": float(total_opening_value),
-            "closing_value": float(total_closing_value),
-            "average_value": float(total_average_value),
+            "opening_quantity": _qty_float(total_opening_qty),
+            "closing_quantity": _qty_float(total_closing_qty),
+            "average_quantity": _qty_float(total_average_qty),
+            "opening_value": _money_float(total_opening_value),
+            "closing_value": _money_float(total_closing_value),
+            "average_value": _money_float(total_average_value),
         },
     }
 
@@ -1451,7 +1538,7 @@ def get_product_analysis_data(
 
     products_list = list(products_qs)
     if not products_list:
-        cache.set(cache_key, [], timeout=300)
+        cache.set(cache_key, [], timeout=HISTORIC_CACHE_TTL_SECONDS)
         return []
 
     product_ids = [p["id"] for p in products_list]
@@ -1899,7 +1986,7 @@ def get_product_analysis_data(
             )
             continue
 
-    cache.set(cache_key, analysis_data, timeout=300)
+    cache.set(cache_key, analysis_data, timeout=HISTORIC_CACHE_TTL_SECONDS)
     return analysis_data
 
 
@@ -2024,15 +2111,15 @@ def get_inventory_at_date_data(
                 "codigo": product.code,
                 "nombre_producto": product.description,
                 "grupo": product.group,
-                "cantidad": float(product_quantity),
-                "valor": float(product_value),
-                "costo_unitario": float(unit_cost),
+                "cantidad": _qty_float(product_quantity),
+                "valor": _money_float(product_value),
+                "costo_unitario": _money_float(unit_cost),
             }
         )
 
     return {
         "date": date_str,
-        "total_quantity": float(total_quantity),
-        "total_value": float(total_value),
+        "total_quantity": _qty_float(total_quantity),
+        "total_value": _money_float(total_value),
         "products": products_data,
     }

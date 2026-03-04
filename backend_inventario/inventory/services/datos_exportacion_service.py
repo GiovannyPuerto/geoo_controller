@@ -13,6 +13,19 @@ from .consulta_registros_service import (
 )
 
 
+def _texto_filtro(value, default='Todos'):
+    text = str(value or '').strip()
+    return text if text else default
+
+
+def _texto_periodo(exact_date='', date_from='', date_to=''):
+    if exact_date:
+        return exact_date
+    if date_from or date_to:
+        return f"{date_from or 'inicio'} - {date_to or 'fin'}"
+    return 'Histórico completo'
+
+
 def construir_datos_analisis_exportacion(request, inventory_name_default='default'):
     inventory_name = request.GET.get('inventory_name', inventory_name_default)
     category_filter = request.GET.get('category', '')
@@ -41,7 +54,17 @@ def construir_datos_analisis_exportacion(request, inventory_name_default='defaul
         search_filter=search_filter,
         limit=limit,
     )
-    return inventory_name, analysis_list
+    filters_txt = (
+        f"Almacén: {_texto_filtro(warehouse_filter)} | "
+        f"Categoría: {_texto_filtro(category_filter)} | "
+        f"Rotación: {_texto_filtro(rotation_filter)} | "
+        f"Estancado: {_texto_filtro(stagnant_filter)} | "
+        f"Alta rot.: {_texto_filtro(high_rotation_filter)} | "
+        f"Fecha: {_texto_periodo(exact_date, date_from, date_to)} | "
+        f"Búsqueda: {_texto_filtro(search_filter)} | "
+        f"Límite: {_texto_filtro(limit, 'sin límite')}"
+    )
+    return inventory_name, analysis_list, filters_txt
 
 
 def construir_datos_movimientos_exportacion(request, inventory_name_default='default'):
@@ -58,17 +81,17 @@ def construir_datos_movimientos_exportacion(request, inventory_name_default='def
     # Ordenar por fecha DESC e id DESC para que el corte por límite recoja todos
     # los tipos de documento proporcionalmente (evita que el orden alfabético de
     # número de documento excluya tipos como EN/EA cuando SA domina la cabeza).
-    records = records_query.order_by('-date', '-id').values(
-        fecha=F('date'),
-        codigo=F('product__code'),
-        nombre_producto=F('product__description'),
-        almacen=F('warehouse'),
-        tipo_documento=F('document_type'),
-        documento=F('document_number'),
-        cantidad=F('quantity'),
-        costo_unitario=F('unit_cost'),
-        costo_total=F('total'),
-        categoria=F('category'),
+    records = records_query.order_by('-fecha', '-id').values(
+        'fecha',
+        'almacen',
+        'tipo_documento',
+        'cantidad',
+        'costo_unitario',
+        'categoria',
+        codigo=F('producto__codigo'),
+        nombre_producto=F('producto__descripcion'),
+        documento=F('numero_documento'),
+        costo_total=F('valor_total'),
     )[export_slice.offset:export_slice.offset + export_slice.limit]
 
     movements_data = [
@@ -87,7 +110,17 @@ def construir_datos_movimientos_exportacion(request, inventory_name_default='def
         for row in records
     ]
 
-    return filters.inventory_name, movements_data
+    filters_txt = (
+        f"Almacén: {_texto_filtro(filters.warehouse_filter)} | "
+        f"Categoría: {_texto_filtro(filters.category_filter)} | "
+        f"Tipo doc.: {_texto_filtro(filters.document_type_filter)} | "
+        f"Núm. doc.: {_texto_filtro(filters.document_number_filter)} | "
+        f"Fecha: {_texto_periodo(filters.exact_date, filters.date_from, filters.date_to)} | "
+        f"Búsqueda: {_texto_filtro(filters.search_filter)} | "
+        f"Límite: {export_slice.limit} | Offset: {export_slice.offset}"
+    )
+
+    return filters.inventory_name, movements_data, filters_txt
 
 
 def construir_datos_cortes_mensuales_exportacion(request, inventory_name_default='default'):
@@ -132,12 +165,27 @@ def construir_datos_cortes_mensuales_exportacion(request, inventory_name_default
             }
         )
 
+    target_month = (
+        product_cuts_payload.get('month')
+        or month
+        or 'último mes con datos'
+    )
+    filters_txt = (
+        f"Meses: {months} | "
+        f"Mes objetivo: {target_month} | "
+        f"Almacén: {_texto_filtro(warehouse_filter)} | "
+        f"Categoría: {_texto_filtro(category_filter)} | "
+        f"Búsqueda: {_texto_filtro(search_filter)} | "
+        f"Límite productos: {product_limit}"
+    )
+
     return {
         'inventory_name': inventory_name,
         'period_average_general': period_average_general,
         'export_rows': export_rows,
         'product_rows': product_rows,
         'product_cuts_payload': product_cuts_payload,
+        'filters_txt': filters_txt,
     }
 
 

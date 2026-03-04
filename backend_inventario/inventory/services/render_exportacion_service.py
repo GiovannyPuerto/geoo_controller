@@ -263,7 +263,13 @@ def _alt_fill():
     return _CACHED_ALT_FILL
 
 
-def _agregar_encabezado_excel(ws, titulo: str, inventory_name: str, num_cols: int = 1):
+def _agregar_encabezado_excel(
+    ws,
+    titulo: str,
+    inventory_name: str,
+    num_cols: int = 1,
+    filters_txt: str = '',
+):
     """
     Encabezado visual de 4 filas con merge, color y tipografía:
       Fila 1 – título (fondo primario, texto blanco, merge de columnas)
@@ -300,12 +306,16 @@ def _agregar_encabezado_excel(ws, titulo: str, inventory_name: str, num_cols: in
     c3.alignment = _Alignment(horizontal='left', vertical='center', indent=1)
     ws.row_dimensions[3].height = 18
 
-    # ── Fila 4: fecha generación ─────────────────────────────────────────────
+    # ── Fila 4: fecha generación + filtros aplicados ────────────────────────
     ws.merge_cells(f'A4:{last_col}4')
     c4 = ws['A4']
-    c4.value     = f'Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}'
+    generated_txt = f'Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}'
+    if filters_txt:
+        c4.value = f'{generated_txt} | Filtros: {filters_txt}'
+    else:
+        c4.value = generated_txt
     c4.font      = _Font(name='Calibri', size=9, color='64748B')
-    c4.alignment = _Alignment(horizontal='left', vertical='center', indent=1)
+    c4.alignment = _Alignment(horizontal='left', vertical='center', indent=1, wrap_text=False)
     ws.row_dimensions[4].height = 14
 
     # ── Fila 5: separador con acento cian ────────────────────────────────────
@@ -349,7 +359,7 @@ def _aplicar_estilo_fila_datos(ws, row: int, n_cols: int, num_cols: set = None):
 # ANÁLISIS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def construir_respuesta_analisis_excel(analysis_list, inventory_name: str):
+def construir_respuesta_analisis_excel(analysis_list, inventory_name: str, filters_txt: str = ''):
     _cargar_dependencias_excel()
 
     workbook = _Workbook()
@@ -361,7 +371,13 @@ def construir_respuesta_analisis_excel(analysis_list, inventory_name: str):
     widths  = [15, 42, 22, 18, 18, 18, 13, 13, 15, 15, 26]
     n_cols  = len(headers)
 
-    _agregar_encabezado_excel(ws, 'Análisis de Inventario', inventory_name, num_cols=n_cols)
+    _agregar_encabezado_excel(
+        ws,
+        'Análisis de Inventario',
+        inventory_name,
+        num_cols=n_cols,
+        filters_txt=filters_txt,
+    )
     hrow = 7
     _aplicar_encabezado_tabla_excel(ws, hrow, headers, widths)
 
@@ -399,7 +415,7 @@ def construir_respuesta_analisis_excel(analysis_list, inventory_name: str):
     return resp
 
 
-def construir_respuesta_movimientos_excel(movements_data, inventory_name: str):
+def construir_respuesta_movimientos_excel(movements_data, inventory_name: str, filters_txt: str = ''):
     _cargar_dependencias_excel()
 
     workbook = _Workbook()
@@ -411,7 +427,13 @@ def construir_respuesta_movimientos_excel(movements_data, inventory_name: str):
     widths  = [13, 15, 40, 22, 15, 17, 14, 16, 16, 20]
     n_cols  = len(headers)
 
-    _agregar_encabezado_excel(ws, 'Movimientos de Inventario', inventory_name, num_cols=n_cols)
+    _agregar_encabezado_excel(
+        ws,
+        'Movimientos de Inventario',
+        inventory_name,
+        num_cols=n_cols,
+        filters_txt=filters_txt,
+    )
     hrow = 7
     _aplicar_encabezado_tabla_excel(ws, hrow, headers, widths)
 
@@ -448,14 +470,15 @@ def construir_respuesta_movimientos_excel(movements_data, inventory_name: str):
     return resp
 
 
-def construir_respuesta_analisis_pdf(analysis_list, inventory_name: str):
+def construir_respuesta_analisis_pdf(analysis_list, inventory_name: str, filters_txt: str = ''):
     _cargar_dependencias_pdf()
 
     buf      = BytesIO()
     document = _pdf_doc(buf, horizontal=True)
     _, _, _, cell_style = _pdf_styles()
 
-    elements = _pdf_header_elements('Análisis de Inventario', inventory_name)
+    extra_lines = [filters_txt] if filters_txt else None
+    elements = _pdf_header_elements('Análisis de Inventario', inventory_name, extra_lines)
 
     headers = ['Código', 'Producto', 'Grupo', 'Cantidad', 'Valor', 'Costo U.',
                'Estancado', 'Rotación', 'Alta Rot.', 'Almacén']
@@ -486,14 +509,15 @@ def construir_respuesta_analisis_pdf(analysis_list, inventory_name: str):
     return resp
 
 
-def construir_respuesta_movimientos_pdf(movements_data, inventory_name: str):
+def construir_respuesta_movimientos_pdf(movements_data, inventory_name: str, filters_txt: str = ''):
     _cargar_dependencias_pdf()
 
     buf      = BytesIO()
     document = _pdf_doc(buf, horizontal=True)
     _, _, _, cell_style = _pdf_styles()
 
-    elements = _pdf_header_elements('Movimientos de Inventario', inventory_name)
+    extra_lines = [filters_txt] if filters_txt else None
+    elements = _pdf_header_elements('Movimientos de Inventario', inventory_name, extra_lines)
 
     headers = ['Fecha', 'Código', 'Producto', 'Almacén', 'Tipo', 'Documento',
                'Cantidad', 'Costo U.', 'Total', 'Categoría']
@@ -532,6 +556,7 @@ def construir_respuesta_cortes_mensuales_excel(payload: dict):
     period_average_general = float(payload.get('period_average_general', 0) or 0)
     product_rows          = payload.get('product_rows', [])
     product_cuts_payload  = payload.get('product_cuts_payload', {})
+    filters_txt           = payload.get('filters_txt', '')
 
     workbook = _Workbook()
     ws       = workbook.active
@@ -541,7 +566,13 @@ def construir_respuesta_cortes_mensuales_excel(payload: dict):
     widths  = [16, 20, 18, 18, 20, 24]
     n_cols  = len(headers)
 
-    _agregar_encabezado_excel(ws, 'Cortes Mensuales de Inventario', inventory_name, num_cols=n_cols)
+    _agregar_encabezado_excel(
+        ws,
+        'Cortes Mensuales de Inventario',
+        inventory_name,
+        num_cols=n_cols,
+        filters_txt=filters_txt,
+    )
     hrow = 7
     _aplicar_encabezado_tabla_excel(ws, hrow, headers, widths)
 
@@ -582,7 +613,13 @@ def construir_respuesta_cortes_mensuales_excel(payload: dict):
         ]
         prod_n = len(prod_defs)
         prod_ws = workbook.create_sheet('CorteProductosMes')
-        _agregar_encabezado_excel(prod_ws, 'Corte de Productos por Mes', inventory_name, num_cols=prod_n)
+        _agregar_encabezado_excel(
+            prod_ws,
+            'Corte de Productos por Mes',
+            inventory_name,
+            num_cols=prod_n,
+            filters_txt=filters_txt,
+        )
         phrow = 7
         _aplicar_encabezado_tabla_excel(prod_ws, phrow, [d[1] for d in prod_defs], [d[2] for d in prod_defs])
 
@@ -633,14 +670,19 @@ def construir_respuesta_cortes_mensuales_pdf(payload: dict):
     export_rows           = payload.get('export_rows', [])
     period_average_general = float(payload.get('period_average_general', 0) or 0)
     product_rows          = payload.get('product_rows', [])
+    filters_txt           = payload.get('filters_txt', '')
 
     buf      = BytesIO()
     document = _pdf_doc(buf, horizontal=True)
     _, _, section_style, cell_style = _pdf_styles()
 
+    extra_lines = [f'Promedio del periodo: <b>${period_average_general:,.2f}</b>']
+    if filters_txt:
+        extra_lines.append(filters_txt)
     elements = _pdf_header_elements(
-        'Cortes Mensuales de Inventario', inventory_name,
-        [f'Promedio del periodo: <b>${period_average_general:,.2f}</b>'],
+        'Cortes Mensuales de Inventario',
+        inventory_name,
+        extra_lines,
     )
 
     rows = [['Mes', 'Corte Inicial', 'Entradas', 'Salidas', 'Corte Final', 'Prom. General']]
@@ -662,7 +704,7 @@ def construir_respuesta_cortes_mensuales_pdf(payload: dict):
         elements.append(_Spacer(1, 14))
         elements.append(_Paragraph('Corte por Producto', section_style))
         elements.append(_Spacer(1, 4))
-        prod_rows = [['Código', 'Producto', 'Grupo', 'Cant. Promedio', 'Valor Promedio']]
+        prod_rows = [['Código', 'Producto', 'Grupo', 'Cant. Promedio', 'Valor Promedio', 'Costo Unitario']]
         for p in product_rows:
             prod_rows.append([
                 str(p.get('codigo', '')),
@@ -670,8 +712,9 @@ def construir_respuesta_cortes_mensuales_pdf(payload: dict):
                 _w(p.get('grupo', ''), cell_style),
                 f"{float(p.get('cantidad_promedio', 0) or 0):,.2f}",
                 f"${float(p.get('valor_promedio', 0) or 0):,.2f}",
+                f"${float(p.get('costo_unitario', 0) or 0):,.2f}",
             ])
-        prod_tbl = _Table(prod_rows, colWidths=[70, 196, 92, 102, 118], repeatRows=1)
+        prod_tbl = _Table(prod_rows, colWidths=[62, 180, 86, 92, 102, 92], repeatRows=1)
         prod_tbl.setStyle(_estilo_tabla_pdf(len(prod_rows)))
         elements.append(prod_tbl)
 
@@ -687,6 +730,7 @@ def construir_respuesta_tops_excel(payload: dict):
 
     inventory_name = payload['inventory_name']
     sections       = payload.get('sections', [])
+    filters_txt    = payload.get('filters_txt', '')
 
     workbook = _Workbook()
     first    = workbook.active
@@ -700,7 +744,13 @@ def construir_respuesta_tops_excel(payload: dict):
         widths  = [12, 17, 44, 26, 17, 22]
         n_cols  = len(headers)
 
-        _agregar_encabezado_excel(ws, section['title'], inventory_name, num_cols=n_cols)
+        _agregar_encabezado_excel(
+            ws,
+            section['title'],
+            inventory_name,
+            num_cols=n_cols,
+            filters_txt=filters_txt,
+        )
         hrow = 7
         _aplicar_encabezado_tabla_excel(ws, hrow, headers, widths)
 

@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 
 from django.db.models import F, Value
@@ -25,8 +26,12 @@ from ..services.resumen_inventario_service import obtener_resumen_inventario
 
 logger = logging.getLogger(__name__)
 
-API_CACHE_RAPIDO_SEGUNDOS = 600    # 10 minutos (era 300)
-API_CACHE_PESADO_SEGUNDOS = 1800   # 30 minutos (era 600)
+API_CACHE_RAPIDO_SEGUNDOS = int(
+    os.environ.get("INVENTORY_API_CACHE_FAST_SECONDS", "1800")
+)
+API_CACHE_PESADO_SEGUNDOS = int(
+    os.environ.get("INVENTORY_API_CACHE_HEAVY_SECONDS", "7200")
+)
 
 
 def _ordenar_por_documento_desc(qs):
@@ -45,6 +50,9 @@ def get_monthly_movements(request):
     warehouse_filter = request.GET.get('warehouse', '')
     category_filter = request.GET.get('category', '')
     search_filter = request.GET.get('search', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    months = request.GET.get('months', '12')
 
     try:
         result_data = obtener_datos_movimientos_mensuales(
@@ -52,6 +60,9 @@ def get_monthly_movements(request):
             warehouse_filter=warehouse_filter,
             category_filter=category_filter,
             search_filter=search_filter,
+            date_from=date_from,
+            date_to=date_to,
+            months=months,
         )
         return JsonResponse(result_data, safe=False)
     except Exception as exc:
