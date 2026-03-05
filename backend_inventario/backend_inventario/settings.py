@@ -44,10 +44,25 @@ def _resolve_runtime_dir() -> Path:
 
 RUNTIME_DIR = _resolve_runtime_dir()
 CACHE_DIR = Path(os.environ.get("DJANGO_CACHE_DIR", str(RUNTIME_DIR / "cache")))
+EXPORT_CACHE_DIR = Path(
+    os.environ.get("DJANGO_EXPORT_CACHE_DIR", str(CACHE_DIR / "exports"))
+)
 LOG_DIR = Path(os.environ.get("DJANGO_LOG_DIR", str(RUNTIME_DIR / "logs")))
 
 os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(EXPORT_CACHE_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+
+
+def _default_cache_backend() -> str:
+    configured = os.environ.get("DJANGO_CACHE_BACKEND", "").strip()
+    if configured:
+        return configured
+
+    # En Windows low-resource preferimos cache en disco para evitar picos de RAM.
+    if os.name == "nt":
+        return "django.core.cache.backends.filebased.FileBasedCache"
+    return "django.core.cache.backends.locmem.LocMemCache"
 
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY",
@@ -62,12 +77,10 @@ ALLOWED_HOSTS = [
 ]
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # Django auth/contenttypes se mantienen por dependencias de migraciones existentes.
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
+    # Apps de usuario
     "rest_framework",
     "corsheaders",
     "inventory",
@@ -77,11 +90,7 @@ MIDDLEWARE = [
     "django.middleware.gzip.GZipMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
 ]
 
 ROOT_URLCONF = "backend_inventario.urls"
@@ -92,10 +101,9 @@ TEMPLATES = [
         "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
+            # Solo se necesita request; auth y messages ya no están instalados.
             "context_processors": [
                 "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
@@ -111,7 +119,9 @@ DATABASES = {
         "PASSWORD": os.environ.get("DB_PASSWORD", "12345"),
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "3306"),
-        "CONN_MAX_AGE": _env_int("DB_CONN_MAX_AGE", 120),
+        # En low-resource cerramos conexión al final de cada request para
+        # minimizar conexiones MySQL en estado SLEEP.
+        "CONN_MAX_AGE": _env_int("DB_CONN_MAX_AGE", 0),
         "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
             "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
@@ -123,10 +133,11 @@ DATABASES = {
     }
 }
 
-# File-based cache is preferred for low-resource Windows deployment.
+
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "BACKEND": _default_cache_backend(),
+        # Solo aplica cuando se usa FileBasedCache.
         "LOCATION": str(CACHE_DIR),
         "TIMEOUT": _env_int("DJANGO_CACHE_TIMEOUT", 3600),
         "OPTIONS": {
@@ -134,6 +145,18 @@ CACHES = {
             "CULL_FREQUENCY": _env_int("DJANGO_CACHE_CULL_FREQUENCY", 4),
         },
         "KEY_PREFIX": os.environ.get("DJANGO_CACHE_KEY_PREFIX", "geo_inv"),
+    },
+    # Alias dedicado a binarios de exportación (Excel/PDF): evita llevar blobs
+    # grandes al cache in-memory cuando el backend está en Windows low-resource.
+    "exports": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": str(EXPORT_CACHE_DIR),
+        "TIMEOUT": _env_int("INVENTORY_EXPORT_RESPONSE_CACHE_TTL_SECONDS", 900),
+        "OPTIONS": {
+            "MAX_ENTRIES": _env_int("DJANGO_EXPORT_CACHE_MAX_ENTRIES", 256),
+            "CULL_FREQUENCY": _env_int("DJANGO_EXPORT_CACHE_CULL_FREQUENCY", 2),
+        },
+        "KEY_PREFIX": os.environ.get("DJANGO_EXPORT_CACHE_KEY_PREFIX", "geo_inv_exp"),
     }
 }
 

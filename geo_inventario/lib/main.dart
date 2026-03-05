@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dashboard.dart';
 import 'package:geo_inventario/services/api_service.dart';
 import 'package:geo_inventario/services/excel_upload_service.dart';
@@ -16,6 +20,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('es_CO', null);
   await ConfigService.instance.load(); // carga IP/puerto persistidos
+  await ApiService.flushCachesOnAppClose();
   runApp(const GeoInventarioApp());
 }
 
@@ -44,7 +49,8 @@ class _GeoInventarioAppState extends State<GeoInventarioApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.detached) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       unawaited(ApiService.flushCachesOnAppClose());
     }
   }
@@ -231,6 +237,28 @@ class _WelcomePageState extends State<WelcomePage>
       _mensaje = null;
       _selectedKind = _hasBaseData ? _UploadKind.update : _UploadKind.base;
     });
+  }
+
+  /// Extrae el PDF de licencia del bundle y lo abre con el visor predeterminado.
+  Future<void> _openLicensePdf() async {
+    try {
+      final data =
+          await rootBundle.load('statics/docs/GeoInventarioLicencia.pdf');
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/GeoInventarioLicencia.pdf');
+      await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
+      final uri = Uri.file(file.path);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No se pudo abrir el archivo de licencia.')),
+        );
+      }
+    }
   }
 
   /// Navega al dashboard con una transición de deslizamiento.
@@ -949,9 +977,26 @@ class _WelcomePageState extends State<WelcomePage>
           const Divider(color: Colors.white12, thickness: 1),
           const SizedBox(height: AppSpacing.md),
           const Text(
-            'Diseñado por Geoflora  ·  © 2026 Geoflora SAS  ·  Todos los derechos reservados',
+            'Diseñado por departamento IT de Geoflora  ·  © 2026 Geoflora SAS  ·  Todos los derechos reservados',
             style: TextStyle(color: Colors.white54, fontSize: 12),
             textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          GestureDetector(
+            onTap: _openLicensePdf,
+            child: const MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Text(
+                'Leer licencia de uso →',
+                style: TextStyle(
+                  color: Colors.white60,
+                  fontSize: 12,
+                  decoration: TextDecoration.underline,
+                  decorationColor: Colors.white38,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
           ),
         ],
       ),

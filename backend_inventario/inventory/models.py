@@ -27,6 +27,10 @@ class ImportBatch(models.Model):
         db_table = 'inventario_lotes_importacion'
         # Evita subir el mismo archivo al mismo inventario más de una vez.
         unique_together = ['suma_verificacion', 'nombre_inventario']
+        indexes = [
+            models.Index(fields=['nombre_inventario', 'procesado_en'], name='inv_lote_inv_proc_idx'),
+            models.Index(fields=['nombre_inventario', 'iniciado_en'], name='inv_lote_inv_init_idx'),
+        ]
 
     def __str__(self):
         return f"{self.archivo} ({self.nombre_inventario})"
@@ -80,6 +84,10 @@ class Product(models.Model):
         db_table = 'inventario_productos'
         # Permite tener productos con el mismo código en diferentes inventarios
         unique_together = ['codigo', 'nombre_inventario']
+        indexes = [
+            models.Index(fields=['nombre_inventario', 'grupo'], name='inv_prod_inv_grp_idx'),
+            models.Index(fields=['nombre_inventario', 'codigo'], name='inv_prod_inv_cod_idx'),
+        ]
 
     def __str__(self):
         return f"{self.codigo} - {self.nombre_inventario}"
@@ -190,6 +198,8 @@ class InventoryRecord(models.Model):
             models.Index(fields=['producto', 'almacen'], name='inventario__product_75623a_idx'),
             models.Index(fields=['producto', 'almacen', 'fecha'], name='inventario__product_1a8882_idx'),
             models.Index(fields=['almacen', 'fecha'], name='inventario__almacen_065fc3_idx'),
+            models.Index(fields=['categoria', 'fecha'], name='inventario__cat_fec_idx'),
+            models.Index(fields=['producto', 'almacen', 'cantidad_final'], name='inventario__prod_wh_fi_idx'),
             models.Index(fields=['tipo_documento', 'numero_documento'], name='inventario__tipo_do_f42158_idx'),
             models.Index(fields=['documento_origen', 'registro_origen'], name='inventory_i_source_doc_rec_idx'),
             models.Index(fields=['fecha'], name='inventario__fecha_56f2eb_idx'),

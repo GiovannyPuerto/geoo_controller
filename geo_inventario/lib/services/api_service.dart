@@ -24,7 +24,6 @@ class ApiService {
   static final Map<String, Future<List<Map<String, dynamic>>>>
       _analysisInFlight = {};
   static final Map<String, _GenericCacheEntry> _genericCache = {};
-  static bool _closeCacheFlushed = false;
 
   String _toIsoDate(DateTime date) => date.toIso8601String().split('T')[0];
 
@@ -74,9 +73,6 @@ class ApiService {
   }
 
   static Future<void> flushCachesOnAppClose() async {
-    if (_closeCacheFlushed) return;
-    _closeCacheFlushed = true;
-
     _analysisCache.clear();
     _analysisInFlight.clear();
     _genericCache.clear();

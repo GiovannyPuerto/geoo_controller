@@ -4,6 +4,7 @@ import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/tabs/summary/resumen_analisis_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
+import 'package:geo_inventario/widgets/info_tooltip.dart';
 
 class SummaryTabPage extends StatefulWidget {
   /// Callback que abre el selector de archivo base desde el Dashboard.
@@ -310,6 +311,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
           icon: Icons.inventory_2_rounded,
           gradient: AppGradients.infoCard,
           subtitle: '${_analysis.length} productos únicos',
+          helpText:
+              'Cuántos códigos de producto diferentes hay registrados en el sistema.\nNo importa si tienen existencias o no; cada código cuenta una sola vez.\nEjemplo: si hay 500 referencias distintas, este número es 500 sin importar cuántas unidades tiene cada una.',
         ),
         _KpiCard(
           label: 'Valor del inventario',
@@ -317,6 +320,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
           icon: Icons.payments_rounded,
           gradient: AppGradients.successCard,
           subtitle: 'Saldo valorizado actual',
+          helpText:
+              'Cuánto vale en pesos todo el inventario hoy. Se calcula así:\n\nPara cada producto:\n  Existencias × Precio unitario\n\nDonde:\n• Existencias = saldo confirmado por Siesa para esa bodega. Si Siesa no lo reportó, se calcula como: saldo inicial + entradas - salidas.\n• Precio unitario = pesos del último movimiento ÷ unidades del último movimiento.\n\nEl total es la suma de todos los productos.',
         ),
         _KpiCard(
           label: 'Alta rotación',
@@ -324,6 +329,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
           icon: Icons.trending_up_rounded,
           gradient: AppGradients.warningCard,
           subtitle: 'Productos de alta demanda',
+          helpText:
+              'Productos que tuvieron movimientos en al menos 2 meses consecutivos del año analizado. Indican demanda continua y predecible.\n\nAño analizado: el último año calendario que tenga registro de movimientos en al menos 3 meses distintos. Si el año actual tiene menos de 3 meses con datos, se usa el año anterior completo.',
         ),
         _KpiCard(
           label: 'Estancados',
@@ -331,6 +338,8 @@ class _SummaryTabPageState extends State<SummaryTabPage>
           icon: Icons.hourglass_bottom_rounded,
           gradient: AppGradients.errorCard,
           subtitle: 'Requieren atención',
+          helpText:
+              'Productos con existencias en bodega cuyas cantidades no cambiaron en ningún mes del año analizado.\nFórmula: el saldo simulado mes a mes fue exactamente igual en todos los meses del año y diferente de cero.\nSon productos inmovilizados que pueden requerir revisión o acción comercial.',
         ),
       ];
 
@@ -377,6 +386,9 @@ class _SummaryTabPageState extends State<SummaryTabPage>
     return _SectionCard(
       title: 'Rotación',
       icon: Icons.pie_chart_rounded,
+      helpTitle: 'Rotación del inventario',
+      helpText:
+          'Cómo se clasifica cada producto según su actividad durante el año analizado:\n• Activo: el saldo varió al menos un día del año (entradas o salidas)\n• Estancado: sin ningún movimiento en los últimos 3 meses del año, pero con existencias\n• Obsoleto: sin ningún movimiento en todo el año y con existencias en bodega\n• Inactivo: existencias actuales en cero o negativas\n\nAño analizado: el último año con al menos 3 meses de datos. Si el año actual no alcanza ese mínimo, se usa el año anterior.',
       child: Column(
         children: [
           _RotationTile(
@@ -425,6 +437,9 @@ class _SummaryTabPageState extends State<SummaryTabPage>
     return _SectionCard(
       title: 'Top 5 productos por valor',
       icon: Icons.emoji_events_rounded,
+      helpTitle: 'Top 5 por valor de inventario',
+      helpText:
+          'Los 5 productos con mayor valor en el inventario.\nFórmula: Existencias × Precio unitario.\nPrecio unitario = pesos del último movimiento ÷ unidades del último movimiento.\nSe toma el catálogo completo sin importar los filtros de fecha del tablero.',
       child: Column(
         children: [
           // Encabezado de columnas
@@ -489,6 +504,9 @@ class _SummaryTabPageState extends State<SummaryTabPage>
       icon: Icons.report_problem_rounded,
       iconColor: AppColors.error,
       titleColor: AppColors.error,
+      helpTitle: 'Stock negativo',
+      helpText:
+          'Productos cuyas existencias resultaron en negativo (salidas > entradas registradas).\nFórmula del saldo: saldo confirmado por Siesa por bodega; si no existe, saldo inicial + entradas - salidas acumuladas.\nLas causas más comunes son: movimientos capturados en orden incorrecto, duplicados o ajustes pendientes.',
       child: Column(
         children: [
           Container(
@@ -587,6 +605,7 @@ class _KpiCard extends StatelessWidget {
     required this.icon,
     required this.gradient,
     required this.subtitle,
+    this.helpText,
   });
 
   final String label;
@@ -594,6 +613,7 @@ class _KpiCard extends StatelessWidget {
   final IconData icon;
   final LinearGradient gradient;
   final String subtitle;
+  final String? helpText;
 
   @override
   Widget build(BuildContext context) {
@@ -619,6 +639,12 @@ class _KpiCard extends StatelessWidget {
                 ),
                 child: Icon(icon, color: Colors.white, size: 20),
               ),
+              if (helpText != null)
+                InfoTooltip(
+                  title: label,
+                  message: helpText!,
+                  baseColor: Colors.white,
+                ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -666,6 +692,8 @@ class _SectionCard extends StatelessWidget {
     required this.child,
     this.iconColor = AppColors.primary,
     this.titleColor = AppColors.textPrimary,
+    this.helpTitle,
+    this.helpText,
   });
 
   final String title;
@@ -673,6 +701,8 @@ class _SectionCard extends StatelessWidget {
   final Widget child;
   final Color iconColor;
   final Color titleColor;
+  final String? helpTitle;
+  final String? helpText;
 
   @override
   Widget build(BuildContext context) {
@@ -692,14 +722,21 @@ class _SectionCard extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: iconColor),
               const SizedBox(width: AppSpacing.sm),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: titleColor,
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: titleColor,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (helpTitle != null && helpText != null) ...[
+                const SizedBox(width: 6),
+                InfoTooltip(title: helpTitle!, message: helpText!),
+              ],
             ],
           ),
           const SizedBox(height: AppSpacing.sm),

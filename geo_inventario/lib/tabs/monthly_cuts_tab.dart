@@ -17,6 +17,7 @@ import 'package:geo_inventario/tabs/monthly_cuts/monthly_cuts_filtros_service.da
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
+import 'package:geo_inventario/widgets/info_tooltip.dart';
 
 class MonthlyCutsTabPage extends StatefulWidget {
   const MonthlyCutsTabPage({super.key});
@@ -628,6 +629,11 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage>
                   color: AppColors.textPrimary,
                 ),
               ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Evolución de Cortes',
+                message: 'Cómo evolucionó el valor del inventario mes a mes en tres líneas.\nFórmula compartida: Existencias del día × Precio unitario del producto.\n• Apertura: existencias al primer día del mes × precio unitario\n• Promedio: (suma de existencias de cada día del mes ÷ días del mes) × precio unitario\n• Cierre: existencias al último día del mes × precio unitario\nPrecio unitario = pesos del último movimiento ÷ unidades del último movimiento.',
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -1052,6 +1058,11 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage>
                     ),
                   ),
                 ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Resumen Mensual',
+                message: 'Tabla del comportamiento del inventario mes a mes.\nFórmula compartida: Existencias del día × Precio unitario del producto.\n• Apertura: existencias al primer día del mes × precio unitario\n• Entradas: suma de los valores que registró Siesa en ese mes (movimientos positivos)\n• Salidas: suma de los valores que registró Siesa en ese mes (movimientos negativos, en valor absoluto)\n• Cierre: existencias al último día del mes × precio unitario\n• Prom. valor: (suma de existencias de cada día ÷ días del mes) × precio unitario',
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -1158,6 +1169,12 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage>
                     color: AppColors.textPrimary,
                   ),
                 ),
+              ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Inventario promedio del mes',
+                message: 'Cuántas unidades tuvo en promedio cada producto durante el mes y cuánto representó en pesos.\n• Cant. Promedio = suma de existencias de cada día del mes ÷ días del mes\n• Precio unitario = pesos del último movimiento ÷ unidades del último movimiento\n• Valor Promedio = Cant. Promedio × Precio unitario\nUsa los botones de mes para cambiar de período.',
+                baseColor: AppColors.warning,
               ),
             ],
           ),

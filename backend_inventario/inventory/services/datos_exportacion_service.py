@@ -103,7 +103,11 @@ def construir_datos_movimientos_exportacion(request, inventory_name_default='def
             'tipo_documento': row['tipo_documento'],
             'documento': row['documento'],
             'cantidad': float(row['cantidad']),
-            'costo_unitario': float(row['costo_unitario']),
+            'costo_unitario': (
+                abs(float(row['costo_total'])) / abs(float(row['cantidad']))
+                if float(row['cantidad']) != 0
+                else float(row['costo_unitario'])
+            ),
             'costo_total': float(row['costo_total']),
             'categoria': row['categoria'],
         }

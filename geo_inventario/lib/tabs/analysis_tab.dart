@@ -14,6 +14,7 @@ import 'package:geo_inventario/tabs/analysis/analisis_catalogo_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
+import 'package:geo_inventario/widgets/info_tooltip.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 
 class AnalysisTabPage extends StatefulWidget {
@@ -456,9 +457,21 @@ class _AnalysisTabPageState extends State<AnalysisTabPage>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Distribución por Grupo',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Distribución por Grupo',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(width: 6),
+                      InfoTooltip(
+                        title: 'Distribución por Grupo',
+                        message:
+                            'Cómo se distribuye el valor del inventario entre los grupos.\nFórmula por grupo: suma de (existencias × precio unitario) de todos sus productos.\nPorcentaje = valor del grupo ÷ valor total del inventario × 100.\nToca un segmento para ver los productos de ese grupo.',
+                      ),
+                    ],
                   ),
                   Image.asset('statics/images/logo_geoflora.png', height: 30),
                 ],
@@ -559,9 +572,21 @@ class _AnalysisTabPageState extends State<AnalysisTabPage>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Distribución por Rotación',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Distribución por Rotación',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(width: 6),
+                      InfoTooltip(
+                        title: 'Distribución por Rotación',
+                        message:
+                            'Cuántos productos hay en cada categoría según su actividad durante el año analizado:\n• Activo: el saldo varió al menos un día del año\n• Estancado: sin movimientos en los últimos 3 meses del año, con existencias\n• Obsoleto: sin ningún movimiento en todo el año y con existencias en bodega\n• Inactivo: existencias actuales en cero o negativas\n\nAño analizado: el último año con al menos 3 meses de datos. Si el año actual no alcanza ese mínimo, se usa el año anterior.',
+                      ),
+                    ],
                   ),
                   Image.asset('statics/images/logo_geoflora.png', height: 30),
                 ],
@@ -1238,13 +1263,22 @@ class _AnalysisTabPageState extends State<AnalysisTabPage>
               const Icon(Icons.report_problem_rounded,
                   size: 18, color: AppColors.error),
               const SizedBox(width: AppSpacing.sm),
-              Text(
-                'Alertas de stock negativo (${negativeStockItems.length})',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.error,
+              Expanded(
+                child: Text(
+                  'Alertas de stock negativo (${negativeStockItems.length})',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.error,
+                  ),
                 ),
+              ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Stock negativo',
+                message:
+                    'Productos con existencias en negativo (salidas > entradas registradas).\nFórmula del saldo: saldo confirmado por Siesa por bodega; si no existe, saldo inicial + entradas - salidas acumuladas.\nLas causas más comunes son movimientos capturados fuera de orden, duplicados o ajustes pendientes.',
+                baseColor: AppColors.error,
               ),
             ],
           ),
@@ -1492,6 +1526,12 @@ class _AnalysisTabPageState extends State<AnalysisTabPage>
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary,
                   ),
+                ),
+                const SizedBox(width: 6),
+                const InfoTooltip(
+                  title: 'Catálogo de Productos',
+                  message:
+                      'Tabla con la situación de cada producto.\n\nSin filtro de fecha (modo normal):\n• Existencias: saldo confirmado por Siesa por bodega; si no existe, saldo inicial + entradas - salidas.\n• Precio unitario = pesos del último movimiento ÷ unidades del último movimiento.\n• Valor = Existencias × Precio unitario.\n\nCon rango de fechas (modo promedio):\n• Existencias y Valor muestran el promedio diario dentro del rango: se suman las existencias de cada día del período y se divide entre el número de días. Se aplica la misma lógica que los cortes mensuales.\n\n• Rotación: categoría según la actividad del producto en el año analizado.',
                 ),
               ],
             ),

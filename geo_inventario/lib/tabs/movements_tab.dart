@@ -16,6 +16,7 @@ import 'package:geo_inventario/tabs/movements/movements_filter_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
 import 'package:geo_inventario/widgets/data_sources.dart';
+import 'package:geo_inventario/widgets/info_tooltip.dart';
 
 class MovementsTabPage extends StatefulWidget {
   const MovementsTabPage({super.key});
@@ -315,16 +316,21 @@ class _MovementsTabPageState extends State<MovementsTabPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.bar_chart_rounded, size: 18, color: AppColors.primary),
-              SizedBox(width: AppSpacing.sm),
-              Text(
+            children: [
+              const Icon(Icons.bar_chart_rounded, size: 18, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text(
                 'Movimientos por Mes',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textPrimary,
                 ),
+              ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Movimientos por Mes',
+                message: 'Cuánto dinero entró y salió del inventario cada mes.\nFórmula: el valor de cada movimiento lo registra Siesa directamente; el tablero solo los suma por mes.\n• Entradas: suma en pesos de todos los ingresos del mes\n• Salidas: suma en pesos de todos los egresos del mes\n• Saldo neto: Entradas − Salidas del mes',
               ),
             ],
           ),
@@ -545,16 +551,21 @@ class _MovementsTabPageState extends State<MovementsTabPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.calendar_month_rounded, size: 18, color: AppColors.primary),
-              SizedBox(width: AppSpacing.sm),
-              Text(
+            children: [
+              const Icon(Icons.calendar_month_rounded, size: 18, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text(
                 'Resumen mensual',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textPrimary,
                 ),
+              ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Resumen mensual',
+                message: 'Resumen mensual del valor de los movimientos.\nFórmula: el valor de cada movimiento lo registra Siesa; el tablero los agrupa por mes.\n• Entradas: suma en pesos de todos los ingresos del mes\n• Salidas: suma en pesos de todos los egresos del mes\n• Saldo Final: Entradas acumuladas − Salidas acumuladas hasta ese mes',
               ),
             ],
           ),
@@ -661,6 +672,11 @@ class _MovementsTabPageState extends State<MovementsTabPage>
                     color: AppColors.primaryDarker,
                   ),
                 ),
+              ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Todos los movimientos',
+                message: 'Cada fila es un movimiento individual tal como lo registró Siesa.\n• Cantidad: unidades movidas (positivo = entrada, negativo = salida)\n• Precio unitario: el que registró Siesa en ese movimiento (no se recalcula aquí)\n• Total: Cantidad × Precio unitario, calculado por Siesa\nUsa los filtros para buscar por fecha, producto o tipo de movimiento.',
               ),
             ],
           ),

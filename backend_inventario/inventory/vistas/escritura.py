@@ -1,7 +1,8 @@
 import json
 import logging
+import os
 
-from django.core.cache import cache
+from django.core.cache import caches
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -12,12 +13,28 @@ from ..services.importacion_inventario_service import procesar_importacion
 logger = logging.getLogger(__name__)
 
 
+def _invalidate_inventory_caches() -> None:
+    """
+    Limpia caches relevantes tras mutaciones de inventario.
+
+    Incluye cache por defecto (vistas/API) y cache de exportaciones
+    para evitar respuestas stale y blobs huérfanos en disco.
+    """
+    export_alias = os.environ.get("INVENTORY_EXPORT_CACHE_ALIAS", "exports").strip() or "exports"
+    aliases = {"default", export_alias}
+    for alias in aliases:
+        try:
+            caches[alias].clear()
+        except Exception:
+            logger.warning("No se pudo limpiar el cache alias '%s'.", alias, exc_info=True)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_inventory(request, inventory_name='default'):
     response = procesar_importacion(request, inventory_name)
     if response.status_code < 400:
-        cache.clear()
+        _invalidate_inventory_caches()
     return response
 
 
@@ -90,7 +107,7 @@ def rollback_batch(request):
         }
         batch.delete()
 
-        cache.clear()
+        _invalidate_inventory_caches()
         return JsonResponse(
             {
                 'ok': True,

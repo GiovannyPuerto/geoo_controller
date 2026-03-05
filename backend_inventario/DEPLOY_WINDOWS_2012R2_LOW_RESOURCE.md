@@ -36,6 +36,10 @@ Variables clave:
 python manage.py migrate
 ```
 
+Nota:
+- La migración más reciente agrega índices para lectura histórica.
+- En bases grandes, la primera ejecución puede tardar algunos minutos.
+
 ## 6. Ejecutar backend con Waitress
 ```powershell
 python run_waitress.py
@@ -59,11 +63,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run_backend_win_low.ps1 -EnvF
 
 ## 8. Ajustes de bajo consumo
 - `WSGI_THREADS=4` (subir a 6 si hay CPU disponible).
-- `DB_CONN_MAX_AGE=120`.
+- `DB_CONN_MAX_AGE=0` para evitar conexiones MySQL en `SLEEP` cuando el servidor
+  tiene pocos recursos.
 - `DJANGO_LOG_LEVEL=WARNING`.
 - Mantener `INVENTORY_HISTORIC_CACHE_TTL_SECONDS` alto (ej. 7 días) porque los datos son históricos.
+- `INVENTORY_CACHE_VERSION_TTL_SECONDS=30` para detectar cambios de BD y
+  rotar claves de caché automáticamente.
 - Activar cache de exportaciones: `INVENTORY_EXPORT_RESPONSE_CACHE_TTL_SECONDS=900`
   para reutilizar archivos Excel/PDF iguales y reducir picos de CPU/RAM.
+- Mantener exportaciones grandes fuera de RAM:
+  - `INVENTORY_EXPORT_CACHE_ALIAS=exports` (alias file-based),
+  - `INVENTORY_EXPORT_RESPONSE_CACHE_MAX_BYTES` para limitar blobs cacheados.
 
 ## 9. Buenas prácticas operativas
 - No usar `runserver` en producción.

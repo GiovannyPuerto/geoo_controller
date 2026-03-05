@@ -1,11 +1,9 @@
 import logging
-import os
 from datetime import datetime
 
 from django.db.models import F, Value
 from django.db.models.functions import Coalesce, Length
 from django.http import JsonResponse
-from django.views.decorators.cache import cache_page
 from django.views.decorators.http import require_http_methods
 
 from ..models import ImportBatch, InventoryRecord, Product
@@ -26,13 +24,6 @@ from ..services.resumen_inventario_service import obtener_resumen_inventario
 
 logger = logging.getLogger(__name__)
 
-API_CACHE_RAPIDO_SEGUNDOS = int(
-    os.environ.get("INVENTORY_API_CACHE_FAST_SECONDS", "1800")
-)
-API_CACHE_PESADO_SEGUNDOS = int(
-    os.environ.get("INVENTORY_API_CACHE_HEAVY_SECONDS", "7200")
-)
-
 
 def _ordenar_por_documento_desc(qs):
     """Ordena por última fecha primero y, dentro de la misma fecha, por número
@@ -43,7 +34,6 @@ def _ordenar_por_documento_desc(qs):
     ).order_by('-date', '-_doc_number_len', '-_doc_number_text', '-id')
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_monthly_movements(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -70,7 +60,6 @@ def get_monthly_movements(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_monthly_cuts(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -93,7 +82,6 @@ def get_monthly_cuts(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@cache_page(API_CACHE_PESADO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_monthly_product_cuts(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -122,7 +110,6 @@ def get_monthly_product_cuts(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@cache_page(API_CACHE_PESADO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_range_product_cuts(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -149,7 +136,6 @@ def get_range_product_cuts(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@cache_page(API_CACHE_PESADO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_product_analysis(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -186,7 +172,6 @@ def get_product_analysis(request):
         return JsonResponse([], safe=False)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_batches(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -207,7 +192,6 @@ def get_batches(request):
     return JsonResponse(batches_data, safe=False)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_products(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -224,7 +208,6 @@ def get_products(request):
     return JsonResponse(products_data, safe=False)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_records(request):
     filters = filtros_registros_desde_request(request)
@@ -278,7 +261,6 @@ def get_records(request):
         return JsonResponse([], safe=False)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_product_history(request, product_code, inventory_name='default'):
     try:
@@ -323,7 +305,6 @@ def get_product_history(request, product_code, inventory_name='default'):
         return JsonResponse([], safe=False)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_summary(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -335,7 +316,6 @@ def get_summary(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def list_inventories(request):
     try:
@@ -348,7 +328,6 @@ def list_inventories(request):
         return JsonResponse([], safe=False)
 
 
-@cache_page(API_CACHE_RAPIDO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_last_update_time(request):
     inventory_name = request.GET.get('inventory_name', 'default')
@@ -366,7 +345,6 @@ def get_last_update_time(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@cache_page(API_CACHE_PESADO_SEGUNDOS)
 @require_http_methods(["GET"])
 def get_inventory_at_date(request):
     inventory_name = request.GET.get('inventory_name', 'default')

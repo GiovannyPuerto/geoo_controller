@@ -8,6 +8,7 @@ import 'package:geo_inventario/services/refresh_notifier.dart';
 import 'package:geo_inventario/tabs/tops/tops_calculo_service.dart';
 import 'package:geo_inventario/theme/app_theme.dart';
 import 'package:geo_inventario/utils/currency_formatter.dart';
+import 'package:geo_inventario/widgets/info_tooltip.dart';
 import 'package:intl/intl.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:universal_html/html.dart' as html
@@ -649,6 +650,7 @@ class _TopsTabPageState extends State<TopsTabPage>
                     title: 'Top entradas — valor',
                     icon: Icons.arrow_downward_rounded,
                     accentColor: AppColors.success,
+                    helpText: 'Los productos con mayor dinero en entradas durante el período.\nFórmula: suma de los valores que registró Siesa en cada entrada del producto.\nLa barra de cada producto es proporcional al valor del primero del ranking.',
                     items: topByEntries,
                     valueSelector: (item) => _movementValueFor(
                         item, 'entradas_periodo', 'valor_entradas_periodo'),
@@ -660,6 +662,7 @@ class _TopsTabPageState extends State<TopsTabPage>
                     title: 'Top salidas — valor',
                     icon: Icons.arrow_upward_rounded,
                     accentColor: AppColors.brandPink,
+                    helpText: 'Los productos con mayor dinero en salidas durante el período.\nFórmula: suma de los valores que registró Siesa en cada salida del producto (se toma el valor absoluto porque las salidas son negativas).\nLos primeros son los de mayor consumo o demanda.',
                     items: topByExits,
                     valueSelector: (item) => _movementValueFor(
                         item, 'salidas_periodo', 'valor_salidas_periodo'),
@@ -1138,6 +1141,11 @@ class _TopsTabPageState extends State<TopsTabPage>
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 6),
+              const InfoTooltip(
+                title: 'Entradas vs Salidas',
+                message: 'Entradas y salidas por grupo o producto para comparar en una sola vista.\nFórmula: el valor de cada movimiento lo registra Siesa; el tablero los suma por producto o grupo.\n• Sin filtro de grupo: una barra por cada categoría\n• Con grupo seleccionado: una barra por cada producto del grupo\nToca una barra para ver el valor exacto.',
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -1457,6 +1465,7 @@ class _TopMetricCard extends StatelessWidget {
     required this.items,
     required this.valueSelector,
     required this.valueLabel,
+    this.helpText,
   });
 
   final String title;
@@ -1465,6 +1474,7 @@ class _TopMetricCard extends StatelessWidget {
   final List<Map<String, dynamic>> items;
   final double Function(Map<String, dynamic>) valueSelector;
   final String Function(Map<String, dynamic>) valueLabel;
+  final String? helpText;
 
   @override
   Widget build(BuildContext context) {
@@ -1540,6 +1550,14 @@ class _TopMetricCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (helpText != null) ...[  
+                  const SizedBox(width: 6),
+                  InfoTooltip(
+                    title: title,
+                    message: helpText!,
+                    baseColor: accentColor,
+                  ),
+                ],
               ],
             ),
           ),

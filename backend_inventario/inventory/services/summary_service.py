@@ -2,9 +2,10 @@ import os
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.cache import cache
-from django.db.models import Max, Sum
+from django.db.models import BigIntegerField, Case, F, Max, Sum, Value, When
 
 from ..models import Product, InventoryRecord, ImportBatch, WarehouseDetail
+from .cache_version_service import get_inventory_cache_version
 
 
 _MONEY_QUANT = Decimal("0.01")
@@ -27,7 +28,8 @@ def get_inventory_summary_data(inventory_name="default"):
     Construye el payload de resumen de inventario para la API.
     Usa queries SQL masivas para evitar loops lentos N+1.
     """
-    cache_key = f"inventory:summary:{inventory_name}"
+    data_version = get_inventory_cache_version(inventory_name)
+    cache_key = f"inventory:summary:{inventory_name}:v={data_version}"
     cached_value = cache.get(cache_key)
     if cached_value is not None:
         return cached_value
@@ -69,23 +71,41 @@ def get_inventory_summary_data(inventory_name="default"):
             row["initial_quantity"] or 0
         )
 
-    # Movimientos acumulados por (producto, almacén)
-    movement_map: dict[tuple, Decimal] = {
-        (row["product_id"], row["warehouse"]): row["qty"] or Decimal("0")
-        for row in InventoryRecord.objects.filter(product__inventory_name=inventory_name)
+    # ── Una sola query: qty acumulada + último id con final_quantity + último id global ──
+    # Antes eran 3 queries + 2 fetches = 5 round-trips. Ahora son 1 query agregada + 2 fetches = 3.
+    all_movements = list(
+        InventoryRecord.objects.filter(product__inventory_name=inventory_name)
         .values("product_id", "warehouse")
-        .annotate(qty=Sum("quantity"))
-    }
-    latest_final_record_ids = [
-        row["latest_id"]
-        for row in InventoryRecord.objects.filter(
-            product__inventory_name=inventory_name,
-            final_quantity__isnull=False,
+        .annotate(
+            qty=Sum("quantity"),
+            # MAX(id) solo sobre registros que tienen final_quantity registrado
+            latest_final_id=Max(
+                Case(
+                    When(final_quantity__isnull=False, then=F("id")),
+                    default=None,
+                    output_field=BigIntegerField(),
+                )
+            ),
+            # MAX(id) global por (producto, almacén) para determinar el costo más reciente
+            max_id=Max("id"),
         )
-        .values("product_id", "warehouse")
-        .annotate(latest_id=Max("id"))
-        if row["latest_id"]
-    ]
+    )
+
+    movement_map: dict[tuple, Decimal] = {}
+    latest_final_record_ids: list[int] = []
+    # Costo más reciente por producto = max(max_id) de todos sus almacenes
+    max_id_by_product: dict[int, int] = {}
+
+    for row in all_movements:
+        pid = row["product_id"]
+        wh = row["warehouse"]
+        movement_map[(pid, wh)] = row["qty"] or Decimal("0")
+        if row["latest_final_id"]:
+            latest_final_record_ids.append(row["latest_final_id"])
+        mid = row["max_id"]
+        if mid and mid > max_id_by_product.get(pid, 0):
+            max_id_by_product[pid] = mid
+
     latest_final_map: dict[tuple, Decimal] = {
         (row["product_id"], row["warehouse"]): Decimal(row["final_quantity"] or 0)
         for row in InventoryRecord.objects.filter(id__in=latest_final_record_ids).values(
@@ -100,19 +120,16 @@ def get_inventory_summary_data(inventory_name="default"):
     for pid, warehouse in movement_map.keys():
         warehouses_by_product.setdefault(pid, set()).add(warehouse)
 
-    #  Último unit_cost por producto (MAX id = registro más reciente) 
-    latest_ids = {
-        row["product_id"]: row["lid"]
-        for row in InventoryRecord.objects.filter(product__inventory_name=inventory_name)
-        .values("product_id")
-        .annotate(lid=Max("id"))
-    }
-    cost_map: dict[int, Decimal] = {
-        row["product_id"]: Decimal(row["unit_cost"] or 0)
-        for row in InventoryRecord.objects.filter(id__in=latest_ids.values()).values(
-            "product_id", "unit_cost"
+    #  Último costo unitario por producto calculado como abs(total) ÷ abs(quantity) 
+    cost_map: dict[int, Decimal] = {}
+    for _row in InventoryRecord.objects.filter(id__in=max_id_by_product.values()).values(
+        "product_id", "unit_cost", "quantity", "total"
+    ):
+        _qty = Decimal(_row["quantity"] or 0)
+        _total = Decimal(_row["total"] or 0)
+        cost_map[_row["product_id"]] = (
+            abs(_total) / abs(_qty) if _qty != 0 else Decimal(_row["unit_cost"] or 0)
         )
-    }
 
     #  Calcular totales en Python (una sola pasada) 
     total_quantity = Decimal("0")
