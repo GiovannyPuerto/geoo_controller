@@ -11,7 +11,7 @@ from .cache_version_service import get_inventory_cache_version
 _MONEY_QUANT = Decimal("0.01")
 _QTY_QUANT = Decimal("0.001")
 HISTORIC_CACHE_TTL_SECONDS = int(
-    os.environ.get("INVENTORY_HISTORIC_CACHE_TTL_SECONDS", "604800")
+    os.environ.get("INVENTORY_HISTORIC_CACHE_TTL_SECONDS", "86400")
 )
 
 

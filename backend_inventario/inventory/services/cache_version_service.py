@@ -72,4 +72,3 @@ def get_inventory_cache_version(inventory_name: str = "default") -> str:
 
     cache.set(cache_key, version, timeout=CACHE_VERSION_TTL_SECONDS)
     return version
-

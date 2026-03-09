@@ -45,6 +45,14 @@ HISTORIC_CACHE_TTL_SECONDS = int(
     os.environ.get("INVENTORY_HISTORIC_CACHE_TTL_SECONDS", "604800")
 )
 
+# Versión interna de la lógica de cálculo.
+# Incrementar cuando cambie el algoritmo (ej: nueva fórmula de costo por mes)
+# para invalidar automáticamente el caché en disco sin borrar archivos.
+# Historial:
+#   cv1 → costo global al final del período (incorrecto para meses históricos)
+#   cv2 → costo al cierre de cada mes específico (correcto, alineado con tabla)
+_ANALYTICS_CALC_VERSION = "cv2"
+
 
 def _to_decimal(value, default="0"):
     if value is None:
@@ -450,6 +458,58 @@ def _get_monthly_qty_value_series(
             pid, Decimal(products_map[pid]["initial_unit_cost"] or 0)
         )
 
+    # ── Historial de costos por (producto, mes-calendario) ────────────────────
+    # Permite usar el costo al cierre de cada mes específico en lugar del
+    # costo global al final del período, garantizando que average_balance_general
+    # de la gráfica coincida con average_value de la tabla de inventario
+    # promediado (ambos usan el mismo criterio: último costo hasta fin de mes).
+    _monthly_cost_ids_by_pid: dict[int, dict] = {}
+    for _crow in (
+        records_qs.filter(date__lte=period_end)
+        .annotate(rec_month=TruncMonth("date"))
+        .values("product_id", "rec_month")
+        .annotate(latest_id=Max("id"))
+    ):
+        _pid_r = _crow["product_id"]
+        _rec_month = _crow["rec_month"]
+        if hasattr(_rec_month, "date"):  # datetime → date
+            _rec_month = _rec_month.date()
+        _monthly_cost_ids_by_pid.setdefault(_pid_r, {})[_rec_month] = _crow["latest_id"]
+
+    _all_monthly_cost_record_ids = [
+        _rid
+        for _pid_months in _monthly_cost_ids_by_pid.values()
+        for _rid in _pid_months.values()
+    ]
+    _monthly_cost_detail: dict[int, dict] = {
+        _rec["id"]: _rec
+        for _rec in InventoryRecord.objects.filter(
+            id__in=_all_monthly_cost_record_ids
+        ).values("id", "unit_cost", "quantity", "total")
+    }
+
+    def get_cost_at_month_end(pid: int, month_end: date) -> Decimal:
+        """
+        Costo unitario de `pid` vigente al cierre del mes que termina en `month_end`.
+        Espeja la lógica de get_monthly_product_cuts_data: max(id) con date <= month_end,
+        calculado como abs(total) ÷ abs(quantity).
+        Fallback: initial_unit_cost del producto.
+        """
+        _pid_months = _monthly_cost_ids_by_pid.get(pid)
+        if _pid_months:
+            _month_start = month_end.replace(day=1)
+            _eligible = sorted(
+                (_m for _m in _pid_months if _m <= _month_start), reverse=True
+            )
+            if _eligible:
+                _record_id = _pid_months[_eligible[0]]
+                _rec = _monthly_cost_detail.get(_record_id)
+                if _rec:
+                    _qty = Decimal(_rec["quantity"] or 0)
+                    _total = Decimal(_rec["total"] or 0)
+                    return abs(_total) / abs(_qty) if _qty != 0 else Decimal(_rec["unit_cost"] or 0)
+        return Decimal(products_map[pid]["initial_unit_cost"] or 0)
+
     # ── Almacenes por producto (WarehouseDetail + registros) ─────────────────
     warehouses_by_product: dict[int, set] = {}
     for row in warehouse_query.values("product_id", "warehouse"):
@@ -616,29 +676,22 @@ def _get_monthly_qty_value_series(
                 )
 
     # ── Construir filas mensuales con promedio diario real ────────────────────
-    # Optimization: mantener total_value incremental e iterar solo días con
-    # eventos en lugar de todos los días × todos los productos × almacenes.
-
-    # Valor inicial del portafolio al comienzo del período
-    total_value = Decimal("0")
-    for pid in product_ids:
-        cost = get_cost(pid)
-        whs = warehouses_by_product.get(pid, set())
-        if whs:
-            for wh in whs:
-                total_value += running_wh.get((pid, wh), Decimal("0")) * cost
-        else:
-            total_value += running_prod.get(pid, Decimal("0")) * cost
+    # El valor monetario se recomputa al inicio de cada mes con el costo de
+    # ESE mes (get_cost_at_month_end), así opening_balance, closing_balance y
+    # average_balance_general coinciden con la tabla de inventario promediado.
 
     # Pre-calcular entradas y salidas valorizadas por mes (YYYY-MM)
+    # Usa el costo al cierre de cada mes para coherencia con la tabla.
     _entries_by_month: dict = {}
     for (pid, wh, day), pos_qty in daily_pos_wh.items():
         mk = day.strftime("%Y-%m")
-        _entries_by_month[mk] = _entries_by_month.get(mk, Decimal("0")) + pos_qty * get_cost(pid)
+        _dme = (day.replace(day=1) + relativedelta(months=1)) - relativedelta(days=1)
+        _entries_by_month[mk] = _entries_by_month.get(mk, Decimal("0")) + pos_qty * get_cost_at_month_end(pid, _dme)
     _exits_by_month: dict = {}
     for (pid, wh, day), neg_qty in daily_neg_wh.items():
         mk = day.strftime("%Y-%m")
-        _exits_by_month[mk] = _exits_by_month.get(mk, Decimal("0")) + neg_qty * get_cost(pid)
+        _dme = (day.replace(day=1) + relativedelta(months=1)) - relativedelta(days=1)
+        _exits_by_month[mk] = _exits_by_month.get(mk, Decimal("0")) + neg_qty * get_cost_at_month_end(pid, _dme)
 
     # Índice de días con eventos: day → list of (event_type, pid, wh_or_None)
     # final_quantity tiene precedencia sobre movimiento neto para el mismo (pid, wh, day).
@@ -673,6 +726,21 @@ def _get_monthly_qty_value_series(
         month_end_date = (current_month_date + relativedelta(months=1)) - relativedelta(days=1)
         days_count = (month_end_date - current_month_date).days + 1
 
+        # ── Valor del portafolio con el costo de ESTE mes ─────────────────────
+        # Recomputa desde las cantidades corrientes para que opening_balance,
+        # closing_balance y average_balance_general usen el mismo costo que
+        # la tabla de inventario (costo al cierre de cada mes consultado).
+        month_costs = {_p: get_cost_at_month_end(_p, month_end_date) for _p in product_ids}
+        total_value = Decimal("0")
+        for _p in product_ids:
+            _mc = month_costs[_p]
+            _whs = warehouses_by_product.get(_p, set())
+            if _whs:
+                for _wh in _whs:
+                    total_value += running_wh.get((_p, _wh), Decimal("0")) * _mc
+            else:
+                total_value += running_prod.get(_p, Decimal("0")) * _mc
+
         opening_val = total_value
         entries_val = _entries_by_month.get(month_key, Decimal("0"))
         exits_val = _exits_by_month.get(month_key, Decimal("0"))
@@ -693,7 +761,7 @@ def _get_monthly_qty_value_series(
 
             # Aplicar eventos del día y actualizar total_value incrementalmente
             for event_type, pid, wh in _event_days_in_period[event_day]:
-                cost = get_cost(pid)
+                cost = month_costs[pid]
                 if event_type == 'final_wh':
                     old_qty = running_wh.get((pid, wh), Decimal("0"))
                     new_qty = daily_final_by_wh[(pid, wh, event_day)]
@@ -765,8 +833,8 @@ def get_monthly_cuts_data(
     """
     data_version = get_inventory_cache_version(inventory_name)
     _svc_cache_key = (
-        f"svc:monthly_cuts:{inventory_name}|v={data_version}|{warehouse_filter}"
-        f"|{category_filter}|{search_filter}|{months}"
+        f"svc:monthly_cuts:{inventory_name}|v={data_version}|{_ANALYTICS_CALC_VERSION}"
+        f"|{warehouse_filter}|{category_filter}|{search_filter}|{months}"
     )
     _cached = cache.get(_svc_cache_key)
     if _cached is not None:
@@ -825,8 +893,8 @@ def get_monthly_product_cuts_data(
     """
     data_version = get_inventory_cache_version(inventory_name)
     _svc_cache_key = (
-        f"svc:monthly_prod_cuts:{inventory_name}|v={data_version}|{target_month}"
-        f"|{warehouse_filter}|{category_filter}|{search_filter}"
+        f"svc:monthly_prod_cuts:{inventory_name}|v={data_version}|{_ANALYTICS_CALC_VERSION}"
+        f"|{target_month}|{warehouse_filter}|{category_filter}|{search_filter}"
         f"|{limit}|{offset}|{page_size}"
     )
     _cached = cache.get(_svc_cache_key)
@@ -1270,6 +1338,7 @@ def get_range_product_cuts_data(
         "search_filter": search_filter,
         "limit": str(limit or ""),
     }
+    cache_payload["_calc_version"] = _ANALYTICS_CALC_VERSION
     cache_key_src = json.dumps(cache_payload, sort_keys=True, ensure_ascii=False)
     cache_key = (
         f"range_cuts:v1:{hashlib.sha256(cache_key_src.encode('utf-8')).hexdigest()}"
@@ -1622,6 +1691,7 @@ def get_product_analysis_data(
         "search_filter": search_filter,
         "limit": str(limit or ""),
     }
+    cache_payload["_calc_version"] = _ANALYTICS_CALC_VERSION
     cache_key_src = json.dumps(cache_payload, sort_keys=True, ensure_ascii=False)
     cache_key = f"analysis:v1:{hashlib.sha256(cache_key_src.encode('utf-8')).hexdigest()}"
     cached_value = cache.get(cache_key)
