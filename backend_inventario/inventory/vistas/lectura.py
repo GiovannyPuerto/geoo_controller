@@ -379,3 +379,17 @@ def get_inventory_at_date(request):
 def welcome(request):
     logger.info(f"Request received: {request.method} {request.path}")
     return JsonResponse({'message': 'Bienvenido a el sistema de analisis de inventarios'})
+
+
+@require_http_methods(["GET"])
+def get_ideal_inventory(request):
+    """Devuelve los valores ideales por grupo para el inventario indicado."""
+    inventory_name = (request.GET.get('inventory_name', 'default') or 'default').strip()
+    from ..models import IdealInventoryGroup
+    items = (
+        IdealInventoryGroup.objects
+        .filter(nombre_inventario=inventory_name)
+        .values('grupo', 'valor_ideal')
+    )
+    result = {item['grupo']: float(item['valor_ideal']) for item in items}
+    return JsonResponse(result)

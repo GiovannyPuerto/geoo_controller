@@ -93,6 +93,34 @@ class Product(models.Model):
         return f"{self.codigo} - {self.nombre_inventario}"
 
 
+class IdealInventoryGroup(models.Model):
+    """
+    Valor objetivo de inventario (en dinero) por grupo y nombre de inventario.
+    Definido desde la app de escritorio y consultado desde la app web.
+    """
+    nombre_inventario = models.CharField(
+        max_length=128,
+        default='Por defecto',
+        db_index=True,
+        db_column='nombre_inventario',
+    )
+    grupo = models.CharField(max_length=128, db_column='grupo')
+    valor_ideal = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        db_column='valor_ideal',
+    )
+    actualizado_en = models.DateTimeField(auto_now=True, db_column='actualizado_en')
+
+    class Meta:
+        db_table = 'inventario_ideal_grupos'
+        unique_together = ['nombre_inventario', 'grupo']
+
+    def __str__(self):
+        return f"{self.nombre_inventario} / {self.grupo} → {self.valor_ideal}"
+
+
 class WarehouseDetail(models.Model):
     """
     Detalles por almacén para productos del archivo base.

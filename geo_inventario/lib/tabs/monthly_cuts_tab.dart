@@ -84,6 +84,15 @@ class _MonthlyCutsTabPageState extends State<MonthlyCutsTabPage>
   void _onExternalRefresh() => _loadData();
 
   Future<void> _loadIdealValues() async {
+    // Cargar desde backend primero; caer en local si falla o está vacío.
+    try {
+      final remote = await _apiService.getIdealInventory();
+      if (remote.isNotEmpty) {
+        await IdealInventoryService.instance.save(remote);
+        if (mounted) setState(() => _idealValues = remote);
+        return;
+      }
+    } catch (_) {}
     await IdealInventoryService.instance.load();
     if (mounted) {
       setState(() => _idealValues = IdealInventoryService.instance.getAll());

@@ -126,3 +126,42 @@ def rollback_batch(request):
 @require_http_methods(["POST"])
 def upload_base_file(request, inventory_name='default'):
     return update_inventory(request, inventory_name)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def save_ideal_inventory(request, inventory_name='default'):
+    """Guarda (upsert) los valores ideales por grupo del inventario."""
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'error': 'JSON inválido'}, status=400)
+
+    inventory_name = str(body.get('inventory_name', inventory_name)).strip().lower() or 'default'
+    values = body.get('values', {})
+
+    if not isinstance(values, dict):
+        return JsonResponse({'ok': False, 'error': 'Se esperaba {grupo: valor}'}, status=400)
+
+    from ..models import IdealInventoryGroup
+    for grupo, valor in values.items():
+        try:
+            val = float(valor)
+        except (TypeError, ValueError):
+            continue
+        grupo = str(grupo).strip()
+        if not grupo:
+            continue
+        if val > 0:
+            IdealInventoryGroup.objects.update_or_create(
+                nombre_inventario=inventory_name,
+                grupo=grupo,
+                defaults={'valor_ideal': val},
+            )
+        else:
+            IdealInventoryGroup.objects.filter(
+                nombre_inventario=inventory_name,
+                grupo=grupo,
+            ).delete()
+
+    return JsonResponse({'ok': True})

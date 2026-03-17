@@ -2,6 +2,7 @@ from django.urls import path
 from .vistas.escritura import (
     create_inventory,
     rollback_batch,
+    save_ideal_inventory,
     update_inventory,
     upload_base_file,
 )
@@ -13,6 +14,7 @@ from .vistas.exportacion import (
 )
 from .vistas.lectura import (
     get_batches,
+    get_ideal_inventory,
     get_inventory_at_date,
     get_last_update_time,
     get_monthly_cuts,
@@ -86,4 +88,6 @@ urlpatterns = [
     path('subir-base/<str:inventory_name>/', subir_archivo_base, name='subir_archivo_base_con_inventario'),
     path('inventario-a-fecha/', obtener_inventario_a_fecha, name='obtener_inventario_a_fecha'),
     path('bienvenida/', bienvenida, name='bienvenida'),
+    path('inventario-ideal/', get_ideal_inventory, name='get_ideal_inventory'),
+    path('inventario-ideal/guardar/', save_ideal_inventory, name='save_ideal_inventory'),
 ]

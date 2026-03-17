@@ -1067,6 +1067,16 @@ class _AnalysisTabPageState extends State<AnalysisTabPage>
   // ── Valores ideales de inventario por grupo ─────────────────────────────
 
   Future<void> _loadIdealValues() async {
+    // Intentar cargar desde el backend primero (fuente de verdad compartida).
+    // Si falla o está vacío, cae al almacén local (SharedPreferences).
+    try {
+      final remote = await _apiService.getIdealInventory();
+      if (remote.isNotEmpty) {
+        await IdealInventoryService.instance.save(remote);
+        if (mounted) setState(() => _idealValues = remote);
+        return;
+      }
+    } catch (_) {}
     await IdealInventoryService.instance.load();
     if (mounted) {
       setState(() => _idealValues = IdealInventoryService.instance.getAll());
@@ -1220,7 +1230,10 @@ class _AnalysisTabPageState extends State<AnalysisTabPage>
                   final val = double.tryParse(raw) ?? 0;
                   if (val > 0) newValues[g] = val;
                 }
+                // Guardar localmente
                 await IdealInventoryService.instance.save(newValues);
+                // Sincronizar con el backend (compartido con la app web)
+                await _apiService.saveIdealInventory(newValues);
                 if (mounted) {
                   setState(() =>
                       _idealValues = IdealInventoryService.instance.getAll());

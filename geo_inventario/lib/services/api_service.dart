@@ -1002,6 +1002,46 @@ class ApiService {
           'Error al obtener inventario en una fecha específica: $e');
     }
   }
+
+  // Inventario ideal por grupo
+  Future<Map<String, double>> getIdealInventory(
+      {String inventoryName = 'default'}) async {
+    try {
+      final uri = Uri.parse('$baseUrl/inventario-ideal/')
+          .replace(queryParameters: {'inventory_name': inventoryName});
+      final response = await _httpClient.get(uri, headers: {
+        'Content-Type': 'application/json'
+      }).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body) as Map<String, dynamic>;
+        return decoded.map((k, v) => MapEntry(k, (v as num).toDouble()));
+      }
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<bool> saveIdealInventory(Map<String, double> values,
+      {String inventoryName = 'default'}) async {
+    try {
+      final payload = <String, dynamic>{
+        'inventory_name': inventoryName,
+        'values': values,
+      };
+      final response = await _httpClient
+          .post(
+            Uri.parse('$baseUrl/inventario-ideal/guardar/'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(payload),
+          )
+          .timeout(const Duration(seconds: 15));
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      return data['ok'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 class _AnalysisCacheEntry {
